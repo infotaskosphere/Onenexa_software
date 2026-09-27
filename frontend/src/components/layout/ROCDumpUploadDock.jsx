@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { CheckCircle2, ChevronDown, ChevronUp, FileArchive, Loader2, Maximize2, RotateCcw, X } from 'lucide-react';
+import { CheckCircle2, ChevronDown, ChevronUp, FileArchive, Loader2, Maximize2, RotateCcw, UploadCloud, ListChecks, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useROCDumpUploads } from '@/contexts/ROCDumpUploadContext.jsx';
 
@@ -12,7 +12,7 @@ function formatBytes(value) {
     n /= 1024;
     i += 1;
   }
-  return \`\${n.toFixed(n >= 10 || i === 0 ? 0 : 1)} \${units[i]}\`;
+  return `${n.toFixed(n >= 10 || i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
 export default function ROCDumpUploadDock() {
@@ -29,22 +29,50 @@ export default function ROCDumpUploadDock() {
   const openROC = () => navigate('/roc-sphere');
 
   return (
-    <div className="fixed right-4 bottom-4 z-[75] w-[min(390px,calc(100vw-2rem))]">
+    <div className="fixed bottom-5 right-5 z-40">
       {collapsed ? (
-        <button
-          type="button"
-          onClick={() => setCollapsed(false)}
-          className="ml-auto flex items-center gap-2 rounded-full border border-blue-200 bg-white px-3.5 py-2.5 shadow-xl"
-          title="Show ROC upload progress"
-        >
-          <span className="relative flex h-6 w-6 items-center justify-center rounded-full bg-blue-600 text-white text-[10px] font-bold">
-            {activeCount || visible.length}
-          </span>
-          <span className="text-xs font-semibold text-slate-700">
-            {activeCount ? \`ROC upload\${activeCount > 1 ? 's' : ''} running\` : 'ROC upload history'}
-          </span>
-          <ChevronUp size={14} className="text-slate-400" />
-        </button>
+        (() => {
+          const total = visible.length;
+          const done = visible.filter((job) => job.status === 'done').length;
+          const errored = visible.filter((job) => job.status === 'error').length;
+          const finished = done + errored;
+          const interrupted = visible.filter((job) => job.status === 'interrupted').length;
+          const pct = total ? Math.round((finished / total) * 100) : 0;
+          const allDone = finished === total;
+          const activeCompanies = new Set(
+            visible
+              .filter((job) => ['queued', 'uploading', 'processing'].includes(job.status))
+              .map((job) => job.companyName || 'Company')
+          );
+
+          return (
+            <button
+              type="button"
+              onClick={() => setCollapsed(false)}
+              className="ml-auto flex items-center gap-3 rounded-full shadow-xl pl-2 pr-4 py-2 hover:brightness-110 transition"
+              style={{ background: 'linear-gradient(135deg, #0D3B66 0%, #1F6FB2 100%)' }}
+              title="Expand ROC upload status"
+            >
+              <div className="w-9 h-9 rounded-full bg-white/15 flex items-center justify-center flex-shrink-0">
+                {allDone
+                  ? <ListChecks className="h-4 w-4 text-white" />
+                  : <UploadCloud className="h-4 w-4 text-white animate-pulse" />}
+              </div>
+              <div className="min-w-0 text-left">
+                <p className="text-xs font-semibold text-white leading-none">
+                  {allDone ? 'ROC uploads complete' : `ROC upload… ${pct}%`}
+                </p>
+                <p className="text-[10.5px] text-white/70 mt-1 whitespace-nowrap">
+                  {finished}/{total} done
+                  {activeCompanies.size > 1 && ` · ${activeCompanies.size} companies`}
+                  {interrupted > 0 && ` · ${interrupted} interrupted`}
+                  {allDone && ' · click to view'}
+                </p>
+              </div>
+              <Maximize2 className="h-3.5 w-3.5 text-white/70 flex-shrink-0" />
+            </button>
+          );
+        })()
       ) : (
         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
           <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-3.5 py-2.5">
@@ -76,7 +104,7 @@ export default function ROCDumpUploadDock() {
                         {job.status === 'processing'
                           ? 'Server is extracting, classifying and rebuilding the Company Summary…'
                           : job.status === 'uploading'
-                            ? \`Uploading to backend · \${job.progress}%\`
+                            ? `Uploading to backend · ${job.progress}%`
                             : job.status === 'queued'
                               ? 'Queued…'
                               : job.status === 'done'
@@ -108,7 +136,7 @@ export default function ROCDumpUploadDock() {
                     <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
                       <div
                         className="h-full bg-blue-600 transition-all duration-300"
-                        style={{ width: \`\${job.status === 'processing' ? 100 : job.progress}%\` }}
+                        style={{ width: `${job.status === 'processing' ? 100 : job.progress}%` }}
                       />
                     </div>
                   )}
