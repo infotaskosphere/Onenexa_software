@@ -38,7 +38,7 @@ function errorMessage(err) {
 }
 
 function createJobId() {
-  return \`roc-dump-\${Date.now()}-\${Math.random().toString(36).slice(2, 10)}\`;
+  return `roc-dump-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 export function ROCDumpUploadProvider({ children }) {
@@ -79,7 +79,7 @@ export function ROCDumpUploadProvider({ children }) {
       });
 
       const { data } = await api.post(
-        \`/roc-sphere/companies/\${job.companyId}/roc-dump/upload\`,
+        `/roc-sphere/companies/${job.companyId}/roc-dump/upload`,
         form,
         {
           headers: { 'Content-Type': 'multipart/form-data' },
@@ -116,7 +116,7 @@ export function ROCDumpUploadProvider({ children }) {
       while (true) {
         try {
           const statusResponse = await api.get(
-            \`/roc-sphere/companies/\${job.companyId}/roc-dump/jobs/\${serverJobId}\`,
+            `/roc-sphere/companies/${job.companyId}/roc-dump/jobs/${serverJobId}`,
             { _silent: true, _skipReadyGate: true },
           );
           const serverJob = statusResponse.data || {};
@@ -150,7 +150,7 @@ export function ROCDumpUploadProvider({ children }) {
             status: 'processing',
             progress,
             message: serverJob.message || (expanded
-              ? \`Backend processed \${expanded} ROC file(s); continuing…\`
+              ? `Backend processed ${expanded} ROC file(s); continuing…`
               : 'Backend is processing the ROC Forms Dump in the background…'),
           });
         } catch (pollError) {

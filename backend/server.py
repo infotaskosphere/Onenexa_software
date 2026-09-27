@@ -25,7 +25,7 @@ from backend.quickcompany_trademark_router import router as qc_trademark_router
 from backend.whatsapp_hub import router as whatsapp_hub_router
 from backend.compliance import router as compliance_router, create_compliance_indexes
 from backend.roc_sphere import router as roc_sphere_router  # ROC Sphere: Companies Act document automation
-from backend.roc_forms_dump import router as roc_forms_dump_router  # Historical ROC Forms Dump
+from backend.roc_forms_dump import router as roc_forms_dump_router, resume_pending_roc_dump_jobs  # Historical ROC Forms Dump
 from backend.salary_slip_router import router as salary_slip_router, create_salary_slip_indexes
 from backend.ai_document_reader import router as ai_document_reader_router
 from backend.ai.aiweave_router import router as aiweave_router, create_aiweave_indexes

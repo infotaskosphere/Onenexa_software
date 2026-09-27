@@ -168,6 +168,11 @@ async def startup_event():
         },
     )
 
+    # Resume any ROC Forms Dump jobs that were queued before a backend restart.
+    try:
+        await resume_pending_roc_dump_jobs()
+    except Exception as exc:
+        logger.warning("ROC Forms Dump job recovery skipped: %s", exc)
 
 
 # ====================== HEALTH ======================
@@ -175,7 +180,7 @@ async def startup_event():
 # If a request to /health ever shows a DIFFERENT marker than the one you
 # just committed, the browser/CDN/Render is NOT serving this exact commit —
 # stop looking for a code bug and go fix the deploy instead.
-BUILD_MARKER = "session-guard-signature-fix-2026-09-09"
+BUILD_MARKER = "roc-dump-background-job-fix-2026-09-27"
 
 
 def _health_route_paths():
