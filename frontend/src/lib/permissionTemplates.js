@@ -183,7 +183,7 @@ export const DEFAULT_ROLE_PERMISSIONS = {
     },
   }
 
-const EMPTY_PERMISSIONS = {
+export const EMPTY_PERMISSIONS = {
   can_view_tasks: false, can_view_clients: false,
   can_view_all_tasks: false, can_view_all_clients: false, can_approve_clients: false, can_view_all_dsc: false,
   can_approve_whatsapp_wishes: false, can_approve_email_wishes: false,
