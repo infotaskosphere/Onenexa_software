@@ -1048,9 +1048,114 @@ def _extract_company(text):
     ], text)
     address = _find([
         r"registered office(?: address)?\s*[:\-]?\s*([^\n]{10,300})",
+        r"address of (?:the )?registered office\s*[:\-]?\s*([^\n]{10,300})",
         r"address of the registered office[^\n]*\n([^\n]{10,300})",
     ], text)
     return {"cin": cin, "company_name": name, "registered_office_address": address}
+
+
+def _extract_shareholders_from_workbook(filename: str, raw: bytes) -> List[Dict[str, Any]]:
+    """Read the MCA MGT-7/MGT-7A shareholder XLS/XLSM attachment."""
+    lower = str(filename or "").lower()
+    rows: List[Dict[str, Any]] = []
+    try:
+        if lower.endswith(".xls"):
+            import xlrd
+            book = xlrd.open_workbook(file_contents=raw, on_demand=True)
+            for sheet in book.sheets():
+                header_index = None
+                headers = {}
+                for r_index in range(sheet.nrows):
+                    values = [str(sheet.cell_value(r_index, c)).strip() for c in range(sheet.ncols)]
+                    lowered = [v.lower() for v in values]
+                    if any("name of shareholder" in v for v in lowered):
+                        header_index = r_index
+                        headers = {v.lower(): i for i, v in enumerate(values) if v}
+                        break
+                if header_index is None:
+                    continue
+                for r_index in range(header_index + 1, sheet.nrows):
+                    values = [sheet.cell_value(r_index, c) for c in range(sheet.ncols)]
+                    def cell(label):
+                        idx = next((i for h, i in headers.items() if label in h), None)
+                        return values[idx] if idx is not None and idx < len(values) else None
+                    name = cell("name of shareholder")
+                    shares = _number(cell("number of security"))
+                    if not name or shares is None:
+                        continue
+                    rows.append({
+                        "name": _clean_text(name),
+                        "holder_type": cell("type of shareholder"),
+                        "category": cell("category of shareholder"),
+                        "details": cell("details of shareholder"),
+                        "class_of_shares": cell("class of security") or cell("type of security") or "Equity",
+                        "folio_no": str(cell("folio number") or "").strip() or None,
+                        "nationality": cell("nationality"),
+                        "gender": cell("gender"),
+                        "identifier_type": cell("type of identifier"),
+                        "pan": cell("identification no"),
+                        "occupation": cell("occupation"),
+                        "shares_held": shares,
+                        "face_value": _number(cell("nominal value per security")) or 10,
+                    })
+            book.release_resources()
+        else:
+            import openpyxl
+            wb = openpyxl.load_workbook(io.BytesIO(raw), read_only=True, data_only=True, keep_vba=lower.endswith(".xlsm"))
+            for ws in wb.worksheets:
+                header_index = None
+                headers = {}
+                for r_index, row in enumerate(ws.iter_rows(values_only=True), start=1):
+                    values = [_clean_text(v) for v in row]
+                    if any("name of shareholder" in v.lower() for v in values):
+                        header_index = r_index
+                        headers = {v.lower(): i for i, v in enumerate(values) if v}
+                        break
+                if header_index is None:
+                    continue
+                for row in ws.iter_rows(min_row=header_index + 1, values_only=True):
+                    values = list(row)
+                    def cell(label):
+                        idx = next((i for h, i in headers.items() if label in h), None)
+                        return values[idx] if idx is not None and idx < len(values) else None
+                    name = cell("name of shareholder")
+                    shares = _number(cell("number of security"))
+                    if not name or shares is None:
+                        continue
+                    rows.append({
+                        "name": _clean_text(name),
+                        "holder_type": cell("type of shareholder"),
+                        "category": cell("category of shareholder"),
+                        "details": cell("details of shareholder"),
+                        "class_of_shares": cell("class of security") or cell("type of security") or "Equity",
+                        "folio_no": str(cell("folio number") or "").strip() or None,
+                        "nationality": cell("nationality"),
+                        "gender": cell("gender"),
+                        "identifier_type": cell("type of identifier"),
+                        "pan": cell("identification no"),
+                        "occupation": cell("occupation"),
+                        "shares_held": shares,
+                        "face_value": _number(cell("nominal value per security")) or 10,
+                    })
+            wb.close()
+    except Exception as exc:
+        logger.warning("ROC dump shareholder workbook extraction failed for %s: %s", filename, exc)
+        return []
+
+    unique = {}
+    for row in rows:
+        key = (
+            str(row.get("name") or "").strip().lower(),
+            str(row.get("folio_no") or "").strip().lower(),
+            str(row.get("pan") or "").strip().lower(),
+        )
+        unique[key] = row
+    rows = list(unique.values())
+    total = sum(float(row.get("shares_held") or 0) for row in rows)
+    for row in rows:
+        row["percentage"] = round(float(row.get("shares_held") or 0) / total * 100, 2) if total else None
+        row["source"] = "MGT-7/MGT-7A shareholder attachment"
+    return rows
 
 
 def _extract_people(text):
@@ -1273,6 +1378,8 @@ def _summary_sections(company, filings, events):
                 "filing_date": f.get("metadata", {}).get("filing_date"),
                 "status": f.get("status"),
                 "confidence": f.get("confidence"),
+                "extracted": f.get("extracted") or {},
+                "source_archive": f.get("source_archive"),
             }
             for f in filings
         ],
@@ -1481,10 +1588,18 @@ async def _process_one_roc_dump_file(
         people = _extract_people(text)
         if people:
             extracted["directors"] = people
+
+    lower_filename = str(filename or "").lower()
+    if classification == "annual_return" and lower_filename.endswith((".xls", ".xlsx", ".xlsm")):
+        shareholders = _extract_shareholders_from_workbook(filename, raw)
+        if shareholders:
+            extracted["shareholders"] = shareholders
     if classification == "share_transfer":
         extracted["share_transfer"] = _extract_share_transfer(text)
-    if classification in {"financial", "share_allotment"}:
-        extracted["financial"] = _extract_financial(text)
+    if classification in {"financial", "share_allotment", "annual_return"}:
+        financial = _extract_financial(text)
+        if financial:
+            extracted["financial"] = financial
     if classification in {"loan_deposit", "charge"}:
         extracted["loans"] = _extract_loans(text)
     if classification == "auditor":
