@@ -79,7 +79,11 @@ LEARNING = db.roc_form_dump_learning
 # Files accepted directly. ZIP/RAR archives are expanded and every eligible
 # member inside (including nested folders and nested ZIP/RAR files) is run
 # through the same pipeline as a directly uploaded file.
-ALLOWED_EXT = (".pdf", ".xlsx", ".xlsm", ".xls", ".csv", ".docx")
+ALLOWED_EXT = (
+    ".pdf", ".xlsx", ".xlsm", ".xls", ".csv", ".docx", ".docm",
+    ".pptx", ".txt", ".rtf", ".xml", ".json",
+    ".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".webp",
+)
 ARCHIVE_EXT = (".zip", ".rar")
 # .doc (legacy binary Word) and password-protected/scanned files cannot be
 # read reliably without extra OCR/conversion infrastructure; they are still
@@ -93,6 +97,10 @@ MAX_ZIP_MEMBERS = 2000
 MAX_ZIP_NESTING = 5
 MAX_ZIP_MEMBER_BYTES = 100 * 1024 * 1024
 MAX_EXPANDED_FILES = 5000
+MAX_ARCHIVE_EXTRACTED_BYTES = 1024 * 1024 * 1024
+MAX_OCR_PAGES = int(os.getenv("ROC_OCR_MAX_PAGES", "400"))
+OCR_DPI = int(os.getenv("ROC_OCR_DPI", "150"))
+OCR_PAGE_TIMEOUT = int(os.getenv("ROC_OCR_PAGE_TIMEOUT", "25"))
 
 ROC_JOBS = db.roc_form_dump_jobs
 ROC_UPLOADS = db.roc_form_dump_uploads
@@ -126,8 +134,217 @@ def _sha256(raw):
     return hashlib.sha256(raw).hexdigest()
 
 
+def _is_pdf_placeholder(text: str) -> bool:
+    normalized = re.sub(r"\s+", " ", str(text or "")).lower()
+    return (
+        "please wait" in normalized
+        and "pdf viewer may not be able to display" in normalized
+    )
+
+
+def _xfa_dataset_leaves(raw: bytes) -> Tuple[Dict[str, str], Dict[str, str]]:
+    """Return XFA dataset leaves and optional template field-name mappings.
+
+    MCA eForms frequently store the submitted values in XFA datasets rather
+    than the visible PDF text layer. Parsing the XML directly is considerably
+    more reliable than rendering the PDF and guessing at page coordinates.
+    """
+    from pypdf import PdfReader
+    import xml.etree.ElementTree as ET
+
+    reader = PdfReader(io.BytesIO(raw))
+    root = reader.trailer.get("/Root")
+    if not root:
+        return {}, {}
+    acro_form = root.get("/AcroForm")
+    if not acro_form:
+        return {}, {}
+    acro_form = acro_form.get_object()
+    xfa = acro_form.get("/XFA")
+    if not xfa:
+        return {}, {}
+
+    items = list(xfa)
+    parts = {
+        str(items[i]): items[i + 1]
+        for i in range(0, len(items) - 1, 2)
+    }
+    datasets_obj = parts.get("datasets")
+    if not datasets_obj:
+        return {}, {}
+
+    dataset_root = ET.fromstring(datasets_obj.get_object().get_data())
+    leaves: Dict[str, str] = {}
+
+    def walk(node: Any, parents: Tuple[str, ...] = ()) -> None:
+        tag = re.sub(r"\{.*?\}", "", str(node.tag))
+        current = parents + ((tag,) if tag else ())
+        children = list(node)
+        if not children:
+            value = re.sub(r"\s+", " ", node.text or "").strip()
+            if value:
+                leaves["/".join(current)] = value
+            return
+        for child in children:
+            walk(child, current)
+
+    walk(dataset_root)
+
+    field_names: Dict[str, str] = {}
+    template_obj = parts.get("template")
+    if template_obj:
+        try:
+            template_root = ET.fromstring(template_obj.get_object().get_data())
+            for field in template_root.iter():
+                if field.tag.split("}")[-1] != "field":
+                    continue
+                field_name = field.attrib.get("name")
+                if not field_name:
+                    continue
+                for bind in field.iter():
+                    if bind.tag.split("}")[-1] != "bind":
+                        continue
+                    ref = bind.attrib.get("ref", "")
+                    if ref.startswith("$."):
+                        leaf = ref[2:].split(".")[-1]
+                        field_names.setdefault(leaf, field_name)
+        except Exception:
+            logger.debug("ROC dump XFA template mapping unavailable", exc_info=True)
+
+    return leaves, field_names
+
+
+def _xfa_semantic_label(leaf: str, field_name: Optional[str] = None) -> Optional[str]:
+    """Map recurring MCA XFA field names into labels the existing parsers know."""
+    name = f"{leaf} {field_name or ''}".upper()
+
+    rules = (
+        (r"HI_COMPANYNAME|NAME_OF_COMPANY|COMPANYNAME", "Name of the company"),
+        (r"(^|_)CIN(_|$)|CORPORATEIDENTITY", "Corporate identity number"),
+        (r"REG_OFFICE|REGISTERED.?OFFICE|ZNCAADDRESS", "Address of the registered office"),
+        (r"SHARE_CAPITAL|SHARECAP", "Share capital"),
+        (r"RESERVE.*SURP|RESERVES_SURP", "Reserves and surplus"),
+        (r"NET.?WORTH|NETWORTH", "Net Worth of the company"),
+        (r"TOTAL_REVENUE|TOTAL.?INCOME|TOTALREV", "Total Income"),
+        (r"TOTAL_EXPENSES|TOTALEXP", "Total expenses"),
+        (r"PROFIT_BEF.?TAX|PROFITBEF", "Profit before tax"),
+        (r"TURNOVER|TURNOVR", "Turnover"),
+        (r"DATE_AGM|AGMDATE|DATE.?OF.?AGM", "Date of AGM"),
+        (r"DATE_BOD|BOD.*DATE|BOARD.*MEETING", "Date of board meeting"),
+        (r"NAME_AUDT|NAME_AUDITOR|AUDITOR.*NAME", "Name of auditor or auditor's firm"),
+        (r"MEMBERSHIP_NUM|MEMBERSHIP", "Membership number of auditor"),
+        (r"FIRM.?REG|REGISTRATION.*NUMBER", "Auditor's firm's registration number"),
+        (r"EMAIL_ID", "Email"),
+        (r"FY_START|FROM_DATE|FY_FROM", "From (DD/MM/YYYY)"),
+        (r"FY_END|TO_DATE|FY_TO", "To (DD/MM/YYYY)"),
+        (r"PAN_AUDITOR", "PAN of auditor"),
+    )
+    for pattern, label in rules:
+        if re.search(pattern, name):
+            return label
+    return None
+
+
+def _extract_xfa_pdf_text(raw: bytes) -> str:
+    try:
+        leaves, field_names = _xfa_dataset_leaves(raw)
+        if not leaves:
+            return ""
+
+        lines = [
+            "XFA DATASET — MCA dynamic eForm values",
+            "The following values were read from the embedded XFA dataset.",
+        ]
+        seen_semantic: set = set()
+
+        for field_path, value in leaves.items():
+            leaf = field_path.rsplit("/", 1)[-1]
+            field_name = field_names.get(leaf)
+            semantic = _xfa_semantic_label(leaf, field_name)
+            if semantic and semantic not in seen_semantic:
+                lines.append(f"{semantic}: {value}")
+                seen_semantic.add(semantic)
+            if field_name:
+                lines.append(f"XFA FIELD {field_name}: {value}")
+            lines.append(f"XFA {leaf}: {value}")
+
+        return "\n".join(lines)
+    except Exception as exc:
+        logger.warning("ROC dump XFA extraction failed: %s", exc)
+        return ""
+
+
+def _ocr_pdf_text(raw: bytes) -> Tuple[str, int]:
+    """OCR scanned/image PDFs only after text and XFA extraction fail.
+
+    OCR is deliberately a fallback. Native PDF/XFA extraction remains the
+    source of truth whenever available.
+    """
+    try:
+        from pdf2image import convert_from_bytes
+        import pytesseract
+    except Exception as exc:
+        logger.warning("ROC dump OCR dependencies unavailable: %s", exc)
+        return "", 0
+
+    parts: List[str] = []
+    page_count = 0
+    try:
+        images = convert_from_bytes(
+            raw,
+            dpi=OCR_DPI,
+            first_page=1,
+            last_page=MAX_OCR_PAGES,
+            fmt="jpeg",
+            thread_count=1,
+        )
+        page_count = len(images)
+        for index, image in enumerate(images, start=1):
+            try:
+                text = pytesseract.image_to_string(
+                    image,
+                    lang="eng",
+                    timeout=OCR_PAGE_TIMEOUT,
+                    config="--psm 6",
+                )
+                if text.strip():
+                    parts.append(f"[OCR PAGE {index}]\n{text.strip()}")
+            except Exception as exc:
+                logger.warning("ROC dump OCR page %s failed: %s", index, exc)
+            finally:
+                try:
+                    image.close()
+                except Exception:
+                    pass
+    except Exception as exc:
+        logger.warning("ROC dump PDF rendering/OCR failed: %s", exc)
+
+    return "\n".join(parts), page_count
+
+
 def _extract_pdf_text(raw):
-    """Extract text from text-based PDFs, with pypdf as a second parser."""
+    """Extract normal PDF text, then XFA datasets, then OCR as a last resort."""
+    page_count = 0
+    text = ""
+
+    try:
+        from pypdf import PdfReader
+        reader = PdfReader(io.BytesIO(raw))
+        page_count = len(reader.pages)
+        text = "\n".join((page.extract_text() or "") for page in reader.pages).strip()
+    except Exception as exc:
+        logger.warning("ROC dump pypdf extraction failed: %s", exc)
+
+    # Dynamic MCA forms: the visible PDF text can be only the Adobe Reader
+    # "Please wait..." placeholder while the real values live in XFA.
+    if text and not _is_pdf_placeholder(text) and len(re.sub(r"\s+", "", text)) >= 80:
+        return text, page_count
+
+    xfa_text = _extract_xfa_pdf_text(raw)
+    if xfa_text:
+        return xfa_text, page_count
+
+    # pdfplumber often preserves table flow better than pypdf for static PDFs.
     try:
         import pdfplumber
         with pdfplumber.open(io.BytesIO(raw)) as pdf:
@@ -136,19 +353,17 @@ def _extract_pdf_text(raw):
             for page in pdf.pages:
                 parts.append(page.extract_text(x_tolerance=1, y_tolerance=3) or "")
             text = "\n".join(parts).strip()
-            if text:
+            if text and not _is_pdf_placeholder(text):
                 return text, page_count
     except Exception as exc:
-        logger.warning("ROC dump pdfplumber extraction failed: %s", exc)
+        logger.warning("ROC dump pdfplumber fallback failed: %s", exc)
 
-    try:
-        from pypdf import PdfReader
-        reader = PdfReader(io.BytesIO(raw))
-        parts = [(page.extract_text() or "") for page in reader.pages]
-        return "\n".join(parts), len(reader.pages)
-    except Exception as exc:
-        logger.warning("ROC dump pypdf extraction failed: %s", exc)
-        return "", 0
+    ocr_text, ocr_pages = _ocr_pdf_text(raw)
+    if ocr_text.strip():
+        return ocr_text, max(page_count, ocr_pages)
+
+    return text, page_count
+
 
 
 def _extract_workbook_text(filename, raw):
@@ -295,16 +510,79 @@ def _extract_legacy_doc_text(raw):
     return "", 0
 
 
+def _extract_pptx_text(raw):
+    try:
+        from pptx import Presentation
+        presentation = Presentation(io.BytesIO(raw))
+        lines = []
+        for slide_index, slide in enumerate(presentation.slides, start=1):
+            slide_lines = [f"[SLIDE {slide_index}]"]
+            for shape in slide.shapes:
+                if getattr(shape, "has_text_frame", False):
+                    value = _clean_text(shape.text)
+                    if value:
+                        slide_lines.append(value)
+                if getattr(shape, "has_table", False):
+                    for row in shape.table.rows:
+                        values = [_clean_text(cell.text) for cell in row.cells]
+                        values = [v for v in values if v]
+                        if values:
+                            slide_lines.append(" | ".join(values))
+            if len(slide_lines) > 1:
+                lines.extend(slide_lines)
+        return "\n".join(lines), 0
+    except Exception as exc:
+        logger.warning("ROC dump PPTX extraction failed: %s", exc)
+        return "", 0
+
+
+def _extract_image_text(filename, raw):
+    try:
+        from PIL import Image
+        import pytesseract
+        image = Image.open(io.BytesIO(raw))
+        image.load()
+        try:
+            text = pytesseract.image_to_string(
+                image,
+                lang="eng",
+                timeout=OCR_PAGE_TIMEOUT,
+                config="--psm 6",
+            )
+        finally:
+            image.close()
+        return text.strip(), 0
+    except Exception as exc:
+        logger.warning("ROC dump image OCR failed for %s: %s", filename, exc)
+        return "", 0
+
+
+def _extract_rtf_text(raw):
+    try:
+        from striprtf.striprtf import rtf_to_text
+        return rtf_to_text(raw.decode("utf-8", errors="ignore")), 0
+    except Exception:
+        return _decode_text_bytes(raw)
+
+
 def _extract_text(filename, raw):
     name = str(filename or "").lower()
     if name.endswith(".pdf"):
         return _extract_pdf_text(raw)
     if name.endswith((".xlsx", ".xlsm", ".xls")):
         return _extract_workbook_text(name, raw)
-    if name.endswith(".docx"):
+    if name.endswith((".docx", ".docm")):
         return _extract_docx_text(raw)
     if name.endswith(UNREADABLE_BUT_ACCEPTED_EXT):
         return _extract_legacy_doc_text(raw)
+    if name.endswith(".pptx"):
+        return _extract_pptx_text(raw)
+    if name.endswith(".rtf"):
+        return _extract_rtf_text(raw)
+    if name.endswith((".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".webp")):
+        return _extract_image_text(name, raw)
+    if name.endswith((".txt", ".xml", ".json")):
+        return _decode_text_bytes(raw)
     return _decode_text_bytes(raw)
 
 
@@ -671,13 +949,20 @@ def _learning_boost(text: str, weights: Dict[str, Counter]) -> Tuple[Optional[st
     return best_label, min(0.25, round(margin * 0.25, 3))
 
 
-async def _classify_with_learning(form: str, text: str, company_id: Optional[str] = None):
-    """Static regex classification is the reliable baseline; the learned
-    table only steps in when the regexes found nothing (classification ==
-    'other') and only if it has already seen enough confirmed examples of a
-    pattern to be useful."""
+async def _classify_with_learning(
+    form: str,
+    text: str,
+    company_id: Optional[str] = None,
+    weights: Optional[Dict[str, Counter]] = None,
+):
+    """Static regex classification is the reliable baseline.
+
+    A job may pass a single preloaded learning table so hundreds of files do
+    not each issue another Mongo query just to classify one document.
+    """
     base = _classify(form, text)
-    weights = await _learned_weights(company_id)
+    if weights is None:
+        weights = await _learned_weights(company_id)
     learned_label, boost = _learning_boost(text, weights)
     if base == "other" and learned_label and learned_label != "other" and boost > 0.05:
         return learned_label, boost, True
@@ -1149,151 +1434,171 @@ async def _rebuild(company_id, prepared_by):
 
 
 
+async def _process_one_roc_dump_file(
+    company_id: str,
+    filename: str,
+    raw: bytes,
+    prepared_by: str,
+    job_id: Optional[str] = None,
+    entry_index: int = 1,
+    total_entries: int = 1,
+    source_archive: Optional[str] = None,
+    learning_weights: Optional[Dict[str, Counter]] = None,
+):
+    """Read and store exactly one ROC evidence file.
+
+    Keeping a single document in memory at a time prevents a full-company
+    archive from turning into hundreds of megabytes of Python byte objects.
+    """
+    if not filename.lower().endswith(ALLOWED_EXT + UNREADABLE_BUT_ACCEPTED_EXT):
+        return {"filename": filename, "status": "SKIPPED", "error": "Unsupported file type"}
+
+    if not raw:
+        return {"filename": filename, "status": "FAILED", "error": "Empty file"}
+
+    digest = _sha256(raw)
+    duplicate = await DUMP.find_one({"company_id": company_id, "sha256": digest})
+    if duplicate:
+        return {
+            "filename": filename,
+            "status": "DUPLICATE",
+            "filing_id": duplicate.get("id"),
+            "form_number": duplicate.get("form_number"),
+        }
+
+    filing_id = _uid()
+    text, page_count = await asyncio.to_thread(_extract_text, filename, raw)
+    form_number, prefix, number = _form_number(filename, text)
+    classification, learning_boost, learned = await _classify_with_learning(
+        form_number, text, company_id, learning_weights
+    )
+    metadata = _extract_metadata(form_number, text)
+    company_extract = _extract_company(text)
+    extracted = {"company": company_extract, "metadata": metadata}
+
+    if classification in {"director_change", "director_resignation", "annual_return", "director_kyc"}:
+        people = _extract_people(text)
+        if people:
+            extracted["directors"] = people
+    if classification == "share_transfer":
+        extracted["share_transfer"] = _extract_share_transfer(text)
+    if classification in {"financial", "share_allotment"}:
+        extracted["financial"] = _extract_financial(text)
+    if classification in {"loan_deposit", "charge"}:
+        extracted["loans"] = _extract_loans(text)
+    if classification == "auditor":
+        extracted["auditor"] = _extract_auditor(text)
+
+    raw_text_hash = _sha256(text.encode("utf-8", errors="ignore")) if text else None
+    warnings = []
+    errors = []
+    if not text.strip():
+        warnings.append(
+            "No machine-readable text was extracted. OCR may be unavailable, or this file may be encrypted/unsupported."
+        )
+    if form_number == "UNKNOWN":
+        warnings.append(
+            "Form number could not be classified; the complete file is retained as UNKNOWN for manual review."
+        )
+    if classification == "other":
+        warnings.append(
+            "No specialized parser matched this form. Generic metadata and source text were retained."
+        )
+    elif learned:
+        warnings.append(
+            "Classified using previously learned filing patterns; please verify."
+        )
+    if text and not extracted.get("company", {}).get("cin"):
+        warnings.append("CIN/LLPIN was not confidently identified.")
+
+    status = "SUCCESS" if text.strip() and form_number != "UNKNOWN" else "NEEDS_REVIEW"
+    confidence = _confidence(extracted, text, classification, learning_boost)
+    if classification != "other" and confidence >= 0.75:
+        await _record_learning_feedback(company_id, classification, text)
+
+    events = _events_for(classification, form_number, extracted, metadata)
+    filing = {
+        "id": filing_id,
+        "company_id": company_id,
+        "filename": filename,
+        "original_filename": filename,
+        "source_archive": source_archive,
+        "sha256": digest,
+        "size_bytes": len(raw),
+        "page_count": page_count,
+        "form_number": form_number,
+        "form_prefix": prefix,
+        "form_numeric": number,
+        "classification": classification,
+        "classified_by_learning": learned,
+        "metadata": metadata,
+        "extracted": extracted,
+        "raw_text": text[:MAX_TEXT_STORE],
+        "raw_text_truncated": len(text) > MAX_TEXT_STORE,
+        "raw_text_sha256": raw_text_hash,
+        "events": events,
+        "status": status,
+        "confidence": confidence,
+        "warnings": warnings,
+        "errors": errors,
+        "uploaded_at": _now(),
+        "uploaded_by": prepared_by,
+        "review": {"status": "PENDING" if status != "SUCCESS" else "NOT_REQUIRED"},
+    }
+
+    await DUMP.insert_one(filing)
+    await _store_chunks(filing_id, raw)
+
+    if job_id:
+        try:
+            progress = 35 + int((entry_index / max(total_entries, 1)) * 60)
+            await ROC_JOBS.update_one(
+                {"id": job_id},
+                {"$set": {
+                    "progress": min(95, progress),
+                    "processed_files": entry_index,
+                    "expanded_files": total_entries,
+                    "message": f"Processed {entry_index}/{total_entries}: {filename}",
+                }},
+            )
+        except Exception:
+            logger.warning("ROC dump progress update failed for %s", job_id, exc_info=True)
+
+    return {
+        "filename": filename,
+        "filing_id": filing_id,
+        "form_number": form_number,
+        "classification": classification,
+        "status": status,
+        "confidence": confidence,
+        "warnings": warnings,
+        "event_count": len(events),
+    }
+
+
 async def _process_roc_dump_entries(
     company_id: str,
     entries: List[Tuple[str, bytes]],
     prepared_by: str,
     job_id: Optional[str] = None,
 ):
-    total = 0
-    expanded_count = 0
+    """Backward-compatible in-memory adapter for legacy callers."""
     results = []
-    now = _now()
-
-    for entry_index, (filename, raw) in enumerate(entries, start=1):
-        expanded_count += 1
-        if expanded_count > MAX_EXPANDED_FILES:
-            results.append({
-                "filename": filename,
-                "status": "FAILED",
-                "error": f"Batch exceeds {MAX_EXPANDED_FILES} expanded files",
-            })
-            continue
-        if not filename.lower().endswith(ALLOWED_EXT + UNREADABLE_BUT_ACCEPTED_EXT):
-            results.append({"filename": filename, "status": "FAILED", "error": "Unsupported file type"})
-            continue
-        total += len(raw)
-        if total > MAX_BATCH:
-            results.append({"filename": filename, "status": "FAILED", "error": "Batch exceeds 500 MB"})
-            continue
-        if not raw:
-            results.append({"filename": filename, "status": "FAILED", "error": "Empty file"})
-            continue
-
-        digest = _sha256(raw)
-        duplicate = await DUMP.find_one({"company_id": company_id, "sha256": digest})
-        if duplicate:
-            results.append({
-                "filename": filename,
-                "status": "DUPLICATE",
-                "filing_id": duplicate.get("id"),
-                "form_number": duplicate.get("form_number"),
-            })
-            continue
-
-        filing_id = _uid()
-        # Keep synchronous PDF/Office parsing off the FastAPI event loop.
-        text, page_count = await asyncio.to_thread(_extract_text, filename, raw)
-        form_number, prefix, number = _form_number(filename, text)
-        classification, learning_boost, learned = await _classify_with_learning(form_number, text, company_id)
-        metadata = _extract_metadata(form_number, text)
-        company_extract = _extract_company(text)
-        extracted = {"company": company_extract, "metadata": metadata}
-
-        if classification in {"director_change", "director_resignation", "annual_return", "director_kyc"}:
-            people = _extract_people(text)
-            if people:
-                extracted["directors"] = people
-        if classification == "share_transfer":
-            extracted["share_transfer"] = _extract_share_transfer(text)
-        if classification in {"financial", "share_allotment"}:
-            extracted["financial"] = _extract_financial(text)
-        if classification in {"loan_deposit", "charge"}:
-            extracted["loans"] = _extract_loans(text)
-        if classification == "auditor":
-            extracted["auditor"] = _extract_auditor(text)
-
-        # Keep all source text for auditability, but cap the inline copy so a
-        # single Mongo document never grows without bound.
-        raw_text_hash = _sha256(text.encode("utf-8", errors="ignore")) if text else None
-        warnings = []
-        errors = []
-        if not text.strip():
-            warnings.append("No machine-readable text was extracted. This may be a scanned/image-only or password-protected file; manual/OCR review is required.")
-        if form_number == "UNKNOWN":
-            warnings.append("Form number could not be classified; the complete file is retained as UNKNOWN for manual review.")
-        if classification == "other":
-            warnings.append("No specialized parser matched this form. Generic metadata and source text were retained.")
-        elif learned:
-            warnings.append("Classified from patterns learned out of previously reviewed filings (no static rule matched); please verify.")
-        if text and not extracted.get("company", {}).get("cin"):
-            warnings.append("CIN/LLPIN was not confidently identified.")
-        status = "SUCCESS" if text.strip() and form_number != "UNKNOWN" else "NEEDS_REVIEW"
-        confidence = _confidence(extracted, text, classification, learning_boost)
-        if classification != "other" and confidence >= 0.75:
-            # A confidently auto-classified filing is itself training signal
-            # — this is the "evolves on its own" loop: no reviewer action
-            # required for well-matched forms to reinforce the pattern.
-            await _record_learning_feedback(company_id, classification, text)
-
-        events = _events_for(classification, form_number, extracted, metadata)
-        filing = {
-            "id": filing_id,
-            "company_id": company_id,
-            "filename": filename,
-            "original_filename": filename,
-            "sha256": digest,
-            "size_bytes": len(raw),
-            "page_count": page_count,
-            "form_number": form_number,
-            "form_prefix": prefix,
-            "form_numeric": number,
-            "classification": classification,
-            "classified_by_learning": learned,
-            "metadata": metadata,
-            "extracted": extracted,
-            "raw_text": text[:MAX_TEXT_STORE],
-            "raw_text_truncated": len(text) > MAX_TEXT_STORE,
-            "raw_text_sha256": raw_text_hash,
-            "events": events,
-            "status": status,
-            "confidence": confidence,
-            "warnings": warnings,
-            "errors": errors,
-            "uploaded_at": now,
-            "uploaded_by": prepared_by,
-            "review": {"status": "PENDING" if status != "SUCCESS" else "NOT_REQUIRED"},
-        }
-        await DUMP.insert_one(filing)
-        await _store_chunks(filing_id, raw)
-        results.append({
-            "filename": filename,
-            "filing_id": filing_id,
-            "form_number": form_number,
-            "classification": classification,
-            "status": status,
-            "confidence": confidence,
-            "warnings": warnings,
-            "event_count": len(events),
-        })
-
-        if job_id:
-            try:
-                progress = 35 + int((entry_index / max(len(entries), 1)) * 60)
-                await ROC_JOBS.update_one(
-                    {"id": job_id},
-                    {"$set": {
-                        "progress": min(95, progress),
-                        "processed_files": entry_index,
-                        "expanded_files": len(entries),
-                        "message": f"Processed {entry_index}/{len(entries)}: {filename}",
-                    }},
-                )
-            except Exception:
-                logger.warning("ROC dump progress update failed for %s", job_id, exc_info=True)
-
-
-
+    weights = await _learned_weights(company_id)
+    total_entries = len(entries)
+    for index, (filename, raw) in enumerate(entries, start=1):
+        results.append(
+            await _process_one_roc_dump_file(
+                company_id,
+                filename,
+                raw,
+                prepared_by,
+                job_id=job_id,
+                entry_index=index,
+                total_entries=total_entries,
+                learning_weights=weights,
+            )
+        )
     summary, events, summary_doc = await _rebuild(company_id, prepared_by)
     return {
         "company_id": company_id,
@@ -1306,6 +1611,162 @@ async def _process_roc_dump_entries(
     }
 
 
+def _is_ignored_archive_entry(path: Path) -> bool:
+    name = path.name.lower()
+    return (
+        name in {"thumbs.db", "desktop.ini"} or
+        name.startswith("~$") or
+        path.suffix.lower() in {".db", ".lnk"}
+    )
+
+
+def _safe_archive_output(output_dir: Path, relative_name: str) -> Path:
+    relative = _safe_relative_path(relative_name)
+    target = output_dir / relative
+    output_dir_resolved = output_dir.resolve()
+    target_resolved_parent = target.parent.resolve()
+    if output_dir_resolved != target_resolved_parent and output_dir_resolved not in target_resolved_parent.parents:
+        raise RuntimeError(f"Unsafe archive member path rejected: {relative_name}")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    return target
+
+
+def _extract_archive_to_disk(
+    archive_path: Path,
+    output_dir: Path,
+    state: Optional[Dict[str, int]] = None,
+    depth: int = 0,
+) -> List[Path]:
+    """Expand ZIP/RAR to disk recursively and return supported document paths.
+
+    Archive members are never accumulated as a list of Python byte strings.
+    Only the file currently being processed is loaded later by the parser.
+    """
+    if state is None:
+        state = {"expanded_files": 0, "expanded_bytes": 0}
+    if depth > MAX_ZIP_NESTING:
+        logger.warning("ROC dump archive nesting limit reached: %s", archive_path)
+        return []
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    suffix = archive_path.suffix.lower()
+
+    if suffix == ".zip":
+        try:
+            with zipfile.ZipFile(archive_path) as archive:
+                for info in archive.infolist():
+                    if info.is_dir() or state["expanded_files"] >= MAX_EXPANDED_FILES:
+                        continue
+                    safe = _safe_archive_output(output_dir, info.filename)
+                    base = safe.name.lower()
+                    if _is_ignored_archive_entry(safe):
+                        continue
+                    declared = int(info.file_size or 0)
+                    if declared > MAX_ZIP_MEMBER_BYTES:
+                        logger.warning("ROC dump ZIP member too large: %s", safe)
+                        continue
+                    if state["expanded_bytes"] + declared > MAX_ARCHIVE_EXTRACTED_BYTES:
+                        logger.warning("ROC dump archive expansion limit reached at %s", safe)
+                        break
+
+                    try:
+                        with archive.open(info, "r") as source, safe.open("wb") as target:
+                            shutil.copyfileobj(source, target, length=1024 * 1024)
+                    except Exception as exc:
+                        logger.warning("ROC dump ZIP extraction failed for %s: %s", safe, exc)
+                        continue
+
+                    actual = safe.stat().st_size
+                    if actual > MAX_ZIP_MEMBER_BYTES:
+                        safe.unlink(missing_ok=True)
+                        continue
+                    state["expanded_files"] += 1
+                    state["expanded_bytes"] += actual
+        except zipfile.BadZipFile as exc:
+            raise ValueError(f"not a valid ZIP archive: {exc}") from exc
+
+    elif suffix == ".rar":
+        tool = shutil.which("7z") or shutil.which("7zz") or shutil.which("7zr")
+        if not tool:
+            # rarfile is retained as a compatibility fallback for deployments
+            # that provide an unrar-compatible binary instead of 7-Zip.
+            try:
+                import rarfile
+                with rarfile.RarFile(str(archive_path)) as archive:
+                    archive.extractall(str(output_dir))
+            except Exception as exc:
+                raise ValueError(f"RAR extraction backend unavailable: {exc}") from exc
+        else:
+            result = subprocess.run(
+                [
+                    tool, "x", "-y", "-mmt=on", "-bd", "-bb0",
+                    str(archive_path), f"-o{output_dir}",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=15 * 60,
+                check=False,
+            )
+            if result.returncode not in (0, 1):
+                detail = result.stderr.decode("utf-8", errors="replace").strip()
+                raise ValueError(
+                    f"7-Zip could not extract archive: {detail or 'exit code ' + str(result.returncode)}"
+                )
+
+            # Validate/sanitize what 7-Zip produced and enforce disk limits.
+            for produced in output_dir.rglob("*"):
+                if not produced.is_file() or produced.is_symlink() or _is_ignored_archive_entry(produced):
+                    continue
+                try:
+                    state["expanded_files"] += 1
+                    state["expanded_bytes"] += produced.stat().st_size
+                except OSError:
+                    continue
+                if (
+                    state["expanded_files"] > MAX_EXPANDED_FILES
+                    or state["expanded_bytes"] > MAX_ARCHIVE_EXTRACTED_BYTES
+                ):
+                    raise ValueError(
+                        f"Archive exceeds the {MAX_EXPANDED_FILES}-file / "
+                        f"{MAX_ARCHIVE_EXTRACTED_BYTES // (1024 * 1024)} MB expanded limit"
+                    )
+    else:
+        raise ValueError(f"Unsupported archive format: {archive_path.name}")
+
+    supported: List[Path] = []
+    nested: List[Path] = []
+    for produced in output_dir.rglob("*"):
+        if not produced.is_file() or produced.is_symlink() or _is_ignored_archive_entry(produced):
+            continue
+        if produced.suffix.lower() in ARCHIVE_EXT:
+            nested.append(produced)
+            continue
+        if produced.suffix.lower() in ALLOWED_EXT + UNREADABLE_BUT_ACCEPTED_EXT:
+            supported.append(produced)
+
+    # Expand nested archives only after the parent is safely materialized.
+    for nested_archive in nested:
+        nested_dir = nested_archive.parent / f"{nested_archive.stem}__expanded"
+        try:
+            supported.extend(
+                _extract_archive_to_disk(
+                    nested_archive,
+                    nested_dir,
+                    state=state,
+                    depth=depth + 1,
+                )
+            )
+        except Exception as exc:
+            logger.warning("ROC dump nested archive failed for %s: %s", nested_archive, exc)
+        finally:
+            try:
+                nested_archive.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+    return list(dict.fromkeys(supported))
+
+
 async def _process_roc_dump_job(job_id: str):
     async with ROC_JOB_LOCK:
         job = await ROC_JOBS.find_one({"id": job_id})
@@ -1315,6 +1776,8 @@ async def _process_roc_dump_job(job_id: str):
         company_id = job.get("company_id")
         prepared_by = job.get("prepared_by") or "—"
         staged_files = job.get("files") or []
+        work_dir = ROC_STAGING_ROOT / f"job_{_safe_name(job_id)}"
+        work_dir.mkdir(parents=True, exist_ok=True)
 
         await ROC_JOBS.update_one(
             {"id": job_id},
@@ -1326,82 +1789,144 @@ async def _process_roc_dump_job(job_id: str):
         )
 
         try:
-            entries: List[Tuple[str, bytes]] = []
-            staged_count = max(len(staged_files), 1)
+            # Preload learning data once for the whole archive instead of one
+            # Mongo query per document.
+            learning_weights = await _learned_weights(company_id)
+
+            manifest: List[Tuple[Path, str, Optional[str]]] = []
+            extract_state = {"expanded_files": 0, "expanded_bytes": 0}
+
             for staged_index, staged in enumerate(staged_files):
-                path = Path(staged.get("path") or "")
-                filename = _safe_relative_path(staged.get("filename") or "roc-form")
-                if not path.exists():
-                    raise RuntimeError(f"Staged upload is no longer available: {filename}")
+                source_path = Path(staged.get("path") or "")
+                source_name = _safe_relative_path(staged.get("filename") or "roc-form")
+                if not source_path.exists():
+                    raise RuntimeError(f"Staged upload is no longer available: {source_name}")
 
                 await ROC_JOBS.update_one(
                     {"id": job_id},
                     {"$set": {
-                        "progress": min(20, int((staged_index / staged_count) * 20)),
-                        "message": (
-                            f"Extracting archive {staged_index + 1}/{staged_count}: {filename}"
-                            if filename.lower().endswith(ARCHIVE_EXT)
-                            else f"Preparing file {staged_index + 1}/{staged_count}: {filename}"
-                        ),
+                        "progress": min(15, int((staged_index / max(len(staged_files), 1)) * 15)),
+                        "message": f"Preparing {staged_index + 1}/{len(staged_files)}: {source_name}",
                     }},
                 )
 
-                raw = await asyncio.to_thread(path.read_bytes)
-                if filename.lower().endswith(ARCHIVE_EXT):
+                if source_name.lower().endswith(ARCHIVE_EXT):
+                    extracted_dir = work_dir / f"archive_{staged_index:04d}"
                     try:
-                        expanded = await asyncio.wait_for(
-                            asyncio.to_thread(_iter_archive_members, raw, filename),
-                            timeout=15 * 60,
+                        paths = await asyncio.to_thread(
+                            _extract_archive_to_disk,
+                            source_path,
+                            extracted_dir,
+                            extract_state,
+                            0,
                         )
-                    except asyncio.TimeoutError as exc:
-                        raise RuntimeError(
-                            f"Archive extraction timed out after 15 minutes: {filename}"
-                        ) from exc
-                    except ValueError as exc:
-                        raise RuntimeError(f"Unable to read archive {filename}: {exc}") from exc
-                    entries.extend(expanded)
+                    except Exception as exc:
+                        raise RuntimeError(f"Unable to extract {source_name}: {exc}") from exc
+
+                    for extracted_path in paths:
+                        relative = _safe_relative_path(
+                            str(extracted_path.relative_to(extracted_dir))
+                        )
+                        manifest.append(
+                            (extracted_path, f"{source_name}/{relative}", source_name)
+                        )
+
                     await ROC_JOBS.update_one(
                         {"id": job_id},
                         {"$set": {
                             "progress": 30,
-                            "expanded_files": len(entries),
-                            "message": f"Archive extracted: {len(expanded)} supported ROC file(s) found. Starting document extraction…",
+                            "expanded_files": len(manifest),
+                            "archive_files_seen": extract_state["expanded_files"],
+                            "archive_bytes_extracted": extract_state["expanded_bytes"],
+                            "message": (
+                                f"{source_name}: discovered {len(paths)} supported document(s). "
+                                "Starting detailed extraction…"
+                            ),
                         }},
                     )
+                    source_path.unlink(missing_ok=True)
                 else:
-                    entries.append((filename, raw))
+                    manifest.append((source_path, source_name, None))
 
-                try:
-                    path.unlink(missing_ok=True)
-                except Exception:
-                    pass
-                await asyncio.sleep(0)
-
+            total_entries = len(manifest)
             await ROC_JOBS.update_one(
                 {"id": job_id},
                 {"$set": {
                     "progress": 35,
-                    "message": f"Extracting and classifying {len(entries)} ROC file(s)…",
+                    "expanded_files": total_entries,
+                    "message": f"Reading and interpreting {total_entries} supported document(s)…",
                 }},
             )
 
-            result = await _process_roc_dump_entries(
-                company_id, entries, prepared_by, job_id=job_id
-            )
+            results = []
+            processed_count = 0
+            skipped_count = 0
+
+            for index, (file_path, logical_name, source_archive) in enumerate(manifest, start=1):
+                try:
+                    raw = await asyncio.to_thread(file_path.read_bytes)
+                    result = await _process_one_roc_dump_file(
+                        company_id,
+                        logical_name,
+                        raw,
+                        prepared_by,
+                        job_id=job_id,
+                        entry_index=index,
+                        total_entries=total_entries,
+                        source_archive=source_archive,
+                        learning_weights=learning_weights,
+                    )
+                    results.append(result)
+                    if result.get("filing_id"):
+                        processed_count += 1
+                    elif result.get("status") == "SKIPPED":
+                        skipped_count += 1
+                except Exception as exc:
+                    logger.exception("ROC dump file failed: %s", logical_name)
+                    results.append({
+                        "filename": logical_name,
+                        "status": "FAILED",
+                        "error": str(exc),
+                    })
+                    await ROC_JOBS.update_one(
+                        {"id": job_id},
+                        {"$set": {
+                            "processed_files": index,
+                            "progress": min(95, 35 + int((index / max(total_entries, 1)) * 60)),
+                            "message": f"File {index}/{total_entries} failed but processing will continue: {logical_name}",
+                        }},
+                    )
+                finally:
+                    try:
+                        file_path.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+
+                # Let normal API requests run between large document parses.
+                await asyncio.sleep(0)
+
+            # Rebuild once, after the full archive has been ingested.
+            summary, events, summary_doc = await _rebuild(company_id, prepared_by)
 
             await ROC_JOBS.update_one(
                 {"id": job_id},
                 {"$set": {
                     "status": "COMPLETED",
                     "progress": 100,
-                    "processed_files": result.get("processed", 0),
-                    "expanded_files": len(entries),
-                    "event_count": result.get("event_count", 0),
-                    "summary_document_id": result.get("summary_document_id"),
-                    "summary": result.get("summary"),
-                    "result_count": len(result.get("results") or []),
+                    "processed_files": processed_count,
+                    "expanded_files": total_entries,
+                    "skipped_files": skipped_count,
+                    "archive_files_seen": extract_state["expanded_files"],
+                    "archive_bytes_extracted": extract_state["expanded_bytes"],
+                    "event_count": len(events),
+                    "summary_document_id": summary_doc["id"],
+                    "summary": summary,
+                    "result_count": len(results),
                     "finished_at": _now(),
-                    "message": result.get("message") or "ROC Forms Dump completed.",
+                    "message": (
+                        f"ROC Forms Dump completed: {processed_count} document(s) processed, "
+                        f"{skipped_count} skipped."
+                    ),
                 }},
             )
         except Exception as exc:
@@ -1412,15 +1937,24 @@ async def _process_roc_dump_job(job_id: str):
                     "status": "FAILED",
                     "finished_at": _now(),
                     "error": str(exc),
-                    "message": "ROC Forms Dump processing failed.",
+                    "message": "ROC Forms Dump processing failed. See job error details.",
                 }},
             )
         finally:
+            # Remove all temporary extraction data. MongoDB chunks remain the
+            # durable copy for every successfully ingested evidence file.
+            shutil.rmtree(work_dir, ignore_errors=True)
             for staged in staged_files:
                 try:
                     Path(staged.get("path") or "").unlink(missing_ok=True)
                 except Exception:
                     pass
+
+
+def _schedule_roc_dump_job(job_id: str):
+    task = asyncio.create_task(_process_roc_dump_job(job_id))
+    ROC_JOB_TASKS.add(task)
+    task.add_done_callback(ROC_JOB_TASKS.discard)
 
 
 
