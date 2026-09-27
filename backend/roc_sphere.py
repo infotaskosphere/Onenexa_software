@@ -1245,6 +1245,108 @@ def _identify_roc_form_type(filename: str, text: str) -> str:
     return "roc-form"
 
 
+def _extract_xfa_pdf_text(raw: bytes) -> str:
+    """Extract data from MCA dynamic XFA PDFs when normal PDF text is empty.
+
+    MCA eForms such as AOC-4 can expose only an Adobe Reader placeholder to
+    ordinary PDF text extractors even though the real submitted values are
+    stored in the AcroForm XFA datasets XML.
+    """
+    try:
+        from pypdf import PdfReader
+        import xml.etree.ElementTree as ET
+
+        reader = PdfReader(io.BytesIO(raw))
+        root = reader.trailer.get("/Root")
+        if not root:
+            return ""
+        acro_form = root.get("/AcroForm")
+        if not acro_form:
+            return ""
+        acro_form = acro_form.get_object()
+        xfa = acro_form.get("/XFA")
+        if not xfa:
+            return ""
+
+        xfa = list(xfa)
+        datasets_obj = None
+        for index in range(0, len(xfa) - 1, 2):
+            if str(xfa[index]) == "datasets":
+                datasets_obj = xfa[index + 1]
+                break
+        if datasets_obj is None:
+            return ""
+
+        datasets_raw = datasets_obj.get_object().get_data()
+        xml_root = ET.fromstring(datasets_raw)
+        leaves: Dict[str, str] = {}
+
+        def walk(node: Any, path_parts: List[str]) -> None:
+            children = list(node)
+            tag = re.sub(r"\\{.*?\\}", "", str(node.tag))
+            next_path = path_parts + ([tag] if tag else [])
+            if not children:
+                value = re.sub(r"\\s+", " ", (node.text or "")).strip()
+                if value:
+                    leaves["/".join(next_path)] = value
+                return
+            for child in children:
+                walk(child, next_path)
+
+        walk(xml_root, [])
+        if not leaves:
+            return ""
+
+        aliases = {
+            "HI_COMPANYNAME": "Name of the company",
+            "CIN": "Corporate identity number",
+            "REG_OFFICE_ADDR": "Address of the registered office",
+            "FY_START_DATE": "From (DD/MM/YYYY)",
+            "FY_END_DATE": "To (DD/MM/YYYY)",
+            "DATE_AGM": "Date of AGM",
+            "DATE_BOD_MEETING": "Date of board meeting",
+            "SHARE_CAPITAL_CR": "(a) Share capital",
+            "RESERVE_SURPLUS1": "(b) Reserves and surplus",
+            "NET_WORTH_COMPAN": "Net Worth of the company",
+            "TOTAL_REVENUE_CR": "(III) Total Income",
+            "TOTAL_EXPENSES_C": "Total expenses",
+            "PROFIT_BEF_TAX_C": "(IX) Profit before tax",
+            "PROF_LOSS_OPER_C": "(XV) Profit /(Loss) (XI+XIV)",
+            "SALES_SUPPLY_CR": "Domestic turnover",
+            "NAME_AUDT_AUDTRF": "Name of the auditor or auditor's firm",
+            "MEMBERSHIP_NUM_A": "Auditor's firm's registration number",
+            "NAME_OF_MEMBER": "Name of auditor",
+            "MEMBERSHIP_NUMBR": "Membership number of auditor",
+        }
+
+        def normalize_date(value: str) -> str:
+            match = re.fullmatch(r"(\\d{4})-(\\d{2})-(\\d{2})", value)
+            if match:
+                return f"{match.group(3)}/{match.group(2)}/{match.group(1)}"
+            return value
+
+        lines: List[str] = [
+            "XFA PDF DATA — extracted from MCA dynamic form datasets",
+            "Form ID: " + str(
+                leaves.get("datasets/data/data/ZTAB_FORM1_HIDDE/ZFORMID_C")
+                or leaves.get("datasets/data/data/FORM_ID")
+                or ""
+            ),
+        ]
+
+        for field_path, value in leaves.items():
+            field_name = field_path.rsplit("/", 1)[-1]
+            label = aliases.get(field_name)
+            if label:
+                lines.append(f"{label}: {normalize_date(value)}")
+            lines.append(f"XFA {field_name}: {value}")
+
+        return "\n".join(lines)
+    except Exception as exc:
+        logger.warning("roc_sphere: XFA dataset extraction failed: %s", exc)
+        return ""
+
+
 def _extract_text_from_upload(filename: str, raw: bytes) -> str:
     name = (filename or "").lower()
     try:
@@ -1254,7 +1356,20 @@ def _extract_text_from_upload(filename: str, raw: bytes) -> str:
             with pdfplumber.open(io.BytesIO(raw)) as pdf:
                 for page in pdf.pages[:20]:
                     text_parts.append(page.extract_text() or "")
-            return "\n".join(text_parts)
+            text = "\n".join(text_parts).strip()
+
+            # Dynamic/XFA MCA forms often expose only an Adobe Reader
+            # "Please wait..." placeholder to ordinary PDF text extractors.
+            # Recover the actual submitted values from AcroForm XFA datasets.
+            placeholder = (
+                "please wait" in text.lower()
+                and "pdf viewer may not be able to display" in text.lower()
+            )
+            if not text or placeholder or len(re.sub(r"\\s+", "", text)) < 80:
+                xfa_text = _extract_xfa_pdf_text(raw)
+                if xfa_text:
+                    return xfa_text
+            return text
         if name.endswith((".xlsx", ".xlsm", ".xls")):
             import openpyxl
             wb = openpyxl.load_workbook(
