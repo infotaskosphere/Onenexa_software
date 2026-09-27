@@ -31,7 +31,7 @@ from docx import Document as DocxDocument
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Pt
 
-from backend.dependencies import db, check_module_permission
+from backend.dependencies import db, check_module_permission, get_current_user
 from backend.models import User
 
 logger = logging.getLogger("roc_forms_dump")
@@ -41,6 +41,31 @@ router = APIRouter(tags=["roc-forms-dump"])
 VIEW = check_module_permission("roc_sphere", "view")
 CREATE = check_module_permission("roc_sphere", "create")
 EDIT = check_module_permission("roc_sphere", "edit")
+
+async def roc_job_access(current_user: User = Depends(get_current_user)):
+    """Allow users who can operate ROC Sphere to follow their background jobs.
+
+    Job polling is part of the upload workflow. A user may legitimately have
+    create/manage access without a separate read flag being present in an
+    older permission profile. Treat ROC read or manage access as sufficient
+    for job-status reads, while keeping the module permission boundary intact.
+    """
+    if getattr(current_user, "role", None) == "admin":
+        return current_user
+
+    permissions = getattr(current_user, "permissions", None)
+    if hasattr(permissions, "model_dump"):
+        permissions = permissions.model_dump()
+    elif not isinstance(permissions, dict):
+        permissions = {}
+
+    if permissions.get("can_view_roc_sphere") or permissions.get("can_manage_roc_sphere"):
+        return current_user
+
+    raise HTTPException(
+        status_code=403,
+        detail="Permission required: roc_sphere.view or roc_sphere.manage",
+    )
 
 COMPANIES = db.roc_companies
 DUMP = db.roc_form_dump
@@ -1499,7 +1524,7 @@ async def upload_roc_dump(
 async def roc_dump_job_status(
     company_id: str,
     job_id: str,
-    current_user: User = Depends(VIEW),
+    current_user: User = Depends(roc_job_access),
 ):
     job = await ROC_JOBS.find_one(
         {"id": job_id, "company_id": company_id},
