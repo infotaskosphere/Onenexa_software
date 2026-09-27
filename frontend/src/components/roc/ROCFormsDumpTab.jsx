@@ -4,7 +4,7 @@ import { toast } from 'sonner';
 import api from '@/lib/api';
 import { useROCDumpUploads } from '@/contexts/ROCDumpUploadContext.jsx';
 
-const ACCEPTED_EXT = '.pdf,.xlsx,.xlsm,.xls,.csv,.docx,.doc,.zip,.rar';
+const ACCEPTED_EXT = '.pdf,.xlsx,.xlsm,.xls,.csv,.docx,.docm,.doc,.pptx,.txt,.rtf,.xml,.json,.jpg,.jpeg,.png,.tif,.tiff,.bmp,.webp,.zip,.rar';
 
 const CLASSIFICATION_OPTIONS = [
   ['share_transfer', 'Share transfer'],
@@ -296,8 +296,9 @@ function ROCFormsDumpTab({ company, isDark, text, muted }) {
             <div className={`rounded-lg border p-3 ${isDark ? 'border-blue-800 bg-blue-950/20' : 'border-blue-200 bg-blue-50'}`}>
               <p className={`text-xs ${text}`}>
                 Upload the company's ROC forms from incorporation to date using one chooser — individual files,
-                multiple files, a whole folder, or ZIP/RAR archives. PDFs, Excel/CSV sheets and Word (.docx) documents are all read
-                and interpreted automatically; files inside ZIPs/RARs and folders (including nested subfolders)
+                multiple files, a whole folder, or ZIP/RAR archives. PDFs (including MCA XFA and scanned PDFs), Excel/CSV sheets, Word documents,
+                presentations and image evidence are read and interpreted automatically; files inside ZIPs/RARs
+                and folders (including nested subfolders)
                 are extracted and processed the same way. Every filing is retained, classified and
                 extracted, and marked for review when the source can't be read confidently. Verifying a
                 filing (or correcting a wrong classification) feeds a learned pattern table that improves
