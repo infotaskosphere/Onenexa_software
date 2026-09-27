@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ChevronDown, Download, FileArchive, FolderUp, Loader2, Minimize2, Upload, X } from 'lucide-react';
+import { ChevronDown, Download, FileArchive, FolderUp, Loader2, Maximize2, Minimize2, Upload, X } from 'lucide-react';
 import { toast } from 'sonner';
 import api from '@/lib/api';
 import { useROCDumpUploads } from '@/contexts/ROCDumpUploadContext.jsx';
@@ -258,14 +258,40 @@ function ROCFormsDumpTab({ company, isDark, text, muted }) {
             <h3 className={`text-sm font-semibold ${text}`}>ROC Forms Dump</h3>
             <p className={`text-[11px] mt-0.5 ${muted}`}>Historical ROC forms, extraction evidence and Company Summary.</p>
           </div>
-          <button type="button" onClick={() => setMinimized(true)}
+          <button
+            type="button"
+            onClick={() => setMinimized((current) => !current)}
             className={`p-1.5 rounded-md ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}
-            title="Minimize ROC Forms Dump">
-            <Minimize2 size={16} className={text} />
+            title={minimized ? "Expand ROC Forms Dump" : "Minimize ROC Forms Dump"}
+            aria-label={minimized ? "Expand ROC Forms Dump" : "Minimize ROC Forms Dump"}
+          >
+            {minimized
+              ? <Maximize2 size={16} className={text} />
+              : <Minimize2 size={16} className={text} />}
           </button>
         </div>
 
-        {!minimized && (
+        {minimized ? (
+          <div className={`px-4 py-3 flex items-center justify-between gap-3 ${isDark ? 'bg-slate-900/30' : 'bg-slate-50'}`}>
+            <div className="min-w-0">
+              <p className={`text-xs font-semibold ${text}`}>ROC Forms Dump minimized</p>
+              <p className={`text-[11px] mt-0.5 ${muted}`}>
+                {activeUploadJob
+                  ? 'Upload/processing continues in the background.'
+                  : 'Expand to view ROC Forms Dump.'}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setMinimized(false)}
+              className="shrink-0 inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:bg-blue-700"
+              title="Expand ROC Forms Dump"
+            >
+              <Maximize2 size={13} />
+              Expand
+            </button>
+          </div>
+        ) : (
           <div className="p-4 space-y-4">
             <div className={`rounded-lg border p-3 ${isDark ? 'border-blue-800 bg-blue-950/20' : 'border-blue-200 bg-blue-50'}`}>
               <p className={`text-xs ${text}`}>

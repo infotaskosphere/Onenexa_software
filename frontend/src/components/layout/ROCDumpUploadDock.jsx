@@ -121,7 +121,13 @@ export default function ROCDumpUploadDock() {
                         </button>
                       )}
                       {active && (
-                        <button type="button" onClick={openROC} className="rounded-md p-1.5 text-blue-600 hover:bg-blue-50" title="Open ROC Sphere">
+                        <button
+                          type="button"
+                          onClick={() => setCollapsed(false)}
+                          className="rounded-md p-1.5 text-blue-600 hover:bg-blue-50"
+                          title="Expand ROC upload status"
+                          aria-label="Expand ROC upload status"
+                        >
                           <Maximize2 size={13} />
                         </button>
                       )}
