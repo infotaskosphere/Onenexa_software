@@ -122,6 +122,15 @@ export function ROCDumpUploadProvider({ children }) {
     }
   }, [updateJob]);
 
+  // Keep ROC uploads conservative: only one large multipart request runs at a
+  // time. Additional batches remain queued in the root provider and therefore
+  // cannot overload the API when the user works across multiple companies.
+  useEffect(() => {
+    if (workersRef.current.size > 0) return;
+    const next = jobs.find((job) => job.status === 'queued' && job.files?.length);
+    if (next) void runJob(next);
+  }, [jobs, runJob]);
+
   const queueUpload = useCallback(({ companyId, companyName, files }) => {
     if (!companyId || !files?.length) return null;
 
@@ -142,7 +151,6 @@ export function ROCDumpUploadProvider({ children }) {
     };
 
     setJobs((prev) => [...prev.filter((item) => item.status !== 'done'), job].slice(-MAX_HISTORY));
-    void runJob(job);
     return id;
   }, [runJob]);
 
@@ -159,8 +167,7 @@ export function ROCDumpUploadProvider({ children }) {
       finishedAt: null,
       message: 'Queued for retry…',
     });
-    void runJob({ ...job, status: 'queued' });
-  }, [runJob, updateJob]);
+  }, [updateJob]);
 
   const dismissJob = useCallback((id) => {
     setJobs((prev) => prev.filter((job) => job.id !== id));
