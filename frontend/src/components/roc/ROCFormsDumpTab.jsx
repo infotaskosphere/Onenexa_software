@@ -4,7 +4,7 @@ import { toast } from 'sonner';
 import api from '@/lib/api';
 import { useROCDumpUploads } from '@/contexts/ROCDumpUploadContext.jsx';
 
-const ACCEPTED_EXT = '.pdf,.xlsx,.xlsm,.xls,.csv,.docx,.doc,.zip';
+const ACCEPTED_EXT = '.pdf,.xlsx,.xlsm,.xls,.csv,.docx,.doc,.zip,.rar';
 
 const CLASSIFICATION_OPTIONS = [
   ['share_transfer', 'Share transfer'],
@@ -270,8 +270,8 @@ function ROCFormsDumpTab({ company, isDark, text, muted }) {
             <div className={`rounded-lg border p-3 ${isDark ? 'border-blue-800 bg-blue-950/20' : 'border-blue-200 bg-blue-50'}`}>
               <p className={`text-xs ${text}`}>
                 Upload the company's ROC forms from incorporation to date using one chooser — individual files,
-                multiple files, a whole folder, or ZIP archives. PDFs, Excel/CSV sheets and Word (.docx) documents are all read
-                and interpreted automatically; files inside ZIPs and folders (including nested subfolders)
+                multiple files, a whole folder, or ZIP/RAR archives. PDFs, Excel/CSV sheets and Word (.docx) documents are all read
+                and interpreted automatically; files inside ZIPs/RARs and folders (including nested subfolders)
                 are extracted and processed the same way. Every filing is retained, classified and
                 extracted, and marked for review when the source can't be read confidently. Verifying a
                 filing (or correcting a wrong classification) feeds a learned pattern table that improves
@@ -305,7 +305,7 @@ function ROCFormsDumpTab({ company, isDark, text, muted }) {
                   <div className={`absolute left-0 top-full mt-1 z-40 w-56 rounded-lg border shadow-lg p-1 ${card}`}>
                     <button type="button" onClick={() => fileInputRef.current?.click()}
                       className={`w-full text-left px-3 py-2 rounded-md text-xs font-semibold flex items-center gap-2 ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}>
-                      <Upload size={13} /> Files / ZIP archives
+                      <Upload size={13} /> Files / ZIP / RAR archives
                     </button>
                     <button type="button" onClick={() => folderInputRef.current?.click()}
                       className={`w-full text-left px-3 py-2 rounded-md text-xs font-semibold flex items-center gap-2 ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}>
@@ -343,7 +343,7 @@ function ROCFormsDumpTab({ company, isDark, text, muted }) {
                   : isDark ? 'border-slate-600 bg-slate-900/20 text-slate-300' : 'border-slate-300 bg-slate-50 text-slate-600'}`}>
                 <div className="flex items-center gap-2">
                   <FileArchive size={15} />
-                  <span>Drag and drop files, ZIPs, or folders here. Mixed files, multiple folders, and nested ZIPs are supported in one upload.</span>
+                  <span>Drag and drop files, ZIPs, RARs, or folders here. Mixed files, multiple folders, and nested ZIP/RAR archives are supported in one upload.</span>
                   {files.length > 0 && (
                     <button type="button" onClick={() => setFiles([])}
                       className="ml-auto p-1 rounded hover:bg-black/5" title="Clear selected files">

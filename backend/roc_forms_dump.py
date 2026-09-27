@@ -20,6 +20,7 @@ import subprocess
 import tempfile
 import uuid
 import zipfile
+import rarfile
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -51,11 +52,11 @@ DOCS = db.roc_documents
 # incremental (Naive-Bayes-style) learning loop, not a marketing label.
 LEARNING = db.roc_form_dump_learning
 
-# Files accepted directly. ZIP archives are expanded and every eligible
-# member inside (including nested folders and nested .zip files) is run
+# Files accepted directly. ZIP/RAR archives are expanded and every eligible
+# member inside (including nested folders and nested ZIP/RAR files) is run
 # through the same pipeline as a directly uploaded file.
 ALLOWED_EXT = (".pdf", ".xlsx", ".xlsm", ".xls", ".csv", ".docx")
-ARCHIVE_EXT = (".zip",)
+ARCHIVE_EXT = (".zip", ".rar")
 # .doc (legacy binary Word) and password-protected/scanned files cannot be
 # read reliably without extra OCR/conversion infrastructure; they are still
 # accepted and archived, just flagged NEEDS_REVIEW instead of silently
@@ -299,79 +300,132 @@ def _safe_relative_path(name: str) -> str:
     return "/".join(parts) or "roc-form"
 
 
+
+def _archive_kind(filename: str) -> str:
+    lower = str(filename or "").lower()
+    if lower.endswith(".zip"):
+        return "zip"
+    if lower.endswith(".rar"):
+        return "rar"
+    return ""
+
+
 def _iter_archive_members(
     raw: bytes,
     path_prefix: str = "",
     depth: int = 0,
     state: Optional[Dict[str, int]] = None,
 ) -> List[Tuple[str, bytes]]:
-    """Expand ZIPs recursively while preserving paths and bounding expansion."""
+    """Expand ZIP/RAR recursively while preserving paths and bounding expansion."""
     if state is None:
         state = {"files": 0, "bytes": 0}
 
     members: List[Tuple[str, bytes]] = []
     if depth > MAX_ZIP_NESTING:
+        logger.warning("ROC dump archive nesting limit reached at %s", path_prefix)
         return members
 
-    try:
-        with zipfile.ZipFile(io.BytesIO(raw)) as zf:
-            infos = [info for info in zf.infolist() if not info.is_dir()]
+    kind = _archive_kind(path_prefix or "archive.zip")
 
-            for info in infos:
-                if state["files"] >= MAX_EXPANDED_FILES:
-                    logger.warning("ROC dump ZIP expansion stopped at %s files", MAX_EXPANDED_FILES)
-                    break
+    if kind == "zip":
+        try:
+            with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+                infos = [info for info in archive.infolist() if not info.is_dir()]
+                for info in infos:
+                    if state["files"] >= MAX_EXPANDED_FILES:
+                        logger.warning("ROC dump archive expansion stopped at %s files", MAX_EXPANDED_FILES)
+                        break
+                    name = _safe_relative_path(info.filename)
+                    base = name.rsplit("/", 1)[-1]
+                    if not base or base.startswith("."):
+                        continue
+                    if "__MACOSX" in name or base.lower() in {"thumbs.db", "desktop.ini"}:
+                        continue
+                    if info.file_size > MAX_ZIP_MEMBER_BYTES:
+                        logger.warning("ROC dump ZIP member too large: %s (%s bytes)", name, info.file_size)
+                        continue
+                    if state["bytes"] + info.file_size > MAX_BATCH:
+                        logger.warning("ROC dump ZIP expansion reached MAX_BATCH at %s", name)
+                        break
+                    try:
+                        member_raw = archive.read(info)
+                    except Exception as exc:
+                        logger.warning("ROC dump ZIP member unreadable %s: %s", name, exc)
+                        continue
+                    if len(member_raw) > MAX_ZIP_MEMBER_BYTES:
+                        logger.warning("ROC dump ZIP member expanded beyond limit: %s", name)
+                        continue
+                    if state["bytes"] + len(member_raw) > MAX_BATCH:
+                        logger.warning("ROC dump ZIP expansion reached MAX_BATCH at %s", name)
+                        break
 
-                name = _safe_relative_path(info.filename)
-                base = name.rsplit("/", 1)[-1]
-                if not base or base.startswith("."):
-                    continue
-                if "__MACOSX" in name or base.lower() in {"thumbs.db", "desktop.ini"}:
-                    continue
+                    relative_name = f"{path_prefix}/{name}" if path_prefix else name
+                    lower = base.lower()
+                    if lower.endswith(ARCHIVE_EXT):
+                        state["bytes"] += len(member_raw)
+                        members.extend(_iter_archive_members(member_raw, relative_name, depth + 1, state))
+                    elif lower.endswith(ALLOWED_EXT + UNREADABLE_BUT_ACCEPTED_EXT):
+                        state["files"] += 1
+                        state["bytes"] += len(member_raw)
+                        members.append((relative_name, member_raw))
+        except zipfile.BadZipFile as exc:
+            raise ValueError(f"not a valid ZIP archive ({exc})") from exc
+        return members
 
-                # Inspect declared uncompressed size before reading to avoid
-                # allocating an unexpectedly large member in memory.
-                if info.file_size > MAX_ZIP_MEMBER_BYTES:
-                    logger.warning("ROC dump ZIP member too large: %s (%s bytes)", name, info.file_size)
-                    continue
-                if state["bytes"] + info.file_size > MAX_BATCH:
-                    logger.warning("ROC dump ZIP expansion reached MAX_BATCH at %s", name)
-                    break
+    if kind == "rar":
+        try:
+            with rarfile.RarFile(io.BytesIO(raw)) as archive:
+                infos = [info for info in archive.infolist() if not info.isdir()]
+                for info in infos:
+                    if state["files"] >= MAX_EXPANDED_FILES:
+                        logger.warning("ROC dump archive expansion stopped at %s files", MAX_EXPANDED_FILES)
+                        break
+                    name = _safe_relative_path(info.filename)
+                    base = name.rsplit("/", 1)[-1]
+                    if not base or base.startswith("."):
+                        continue
+                    if "__MACOSX" in name or base.lower() in {"thumbs.db", "desktop.ini"}:
+                        continue
 
-                lower = base.lower()
-                try:
-                    member_raw = zf.read(info)
-                except Exception as exc:
-                    logger.warning("ROC dump ZIP member unreadable %s: %s", name, exc)
-                    continue
+                    declared_size = int(getattr(info, "file_size", 0) or 0)
+                    if declared_size > MAX_ZIP_MEMBER_BYTES:
+                        logger.warning("ROC dump RAR member too large: %s (%s bytes)", name, declared_size)
+                        continue
+                    if declared_size and state["bytes"] + declared_size > MAX_BATCH:
+                        logger.warning("ROC dump RAR expansion reached MAX_BATCH at %s", name)
+                        break
 
-                if len(member_raw) > MAX_ZIP_MEMBER_BYTES:
-                    logger.warning("ROC dump ZIP member expanded beyond limit: %s", name)
-                    continue
-                if state["bytes"] + len(member_raw) > MAX_BATCH:
-                    logger.warning("ROC dump ZIP expansion reached MAX_BATCH at %s", name)
-                    break
+                    lower = base.lower()
+                    if not lower.endswith(ALLOWED_EXT + UNREADABLE_BUT_ACCEPTED_EXT + ARCHIVE_EXT):
+                        continue
 
-                relative_name = f"{path_prefix}/{name}" if path_prefix else name
+                    try:
+                        member_raw = archive.read(info)
+                    except Exception as exc:
+                        logger.warning("ROC dump RAR member unreadable %s: %s", name, exc)
+                        continue
+                    if len(member_raw) > MAX_ZIP_MEMBER_BYTES:
+                        logger.warning("ROC dump RAR member expanded beyond limit: %s", name)
+                        continue
+                    if state["bytes"] + len(member_raw) > MAX_BATCH:
+                        logger.warning("ROC dump RAR expansion reached MAX_BATCH at %s", name)
+                        break
 
-                if lower.endswith(ARCHIVE_EXT):
-                    state["bytes"] += len(member_raw)
-                    nested = _iter_archive_members(
-                        member_raw,
-                        relative_name,
-                        depth + 1,
-                        state,
-                    )
-                    members.extend(nested)
-                elif lower.endswith(ALLOWED_EXT + UNREADABLE_BUT_ACCEPTED_EXT):
-                    state["files"] += 1
-                    state["bytes"] += len(member_raw)
-                    members.append((relative_name, member_raw))
+                    relative_name = f"{path_prefix}/{name}" if path_prefix else name
+                    if lower.endswith(ARCHIVE_EXT):
+                        state["bytes"] += len(member_raw)
+                        members.extend(_iter_archive_members(member_raw, relative_name, depth + 1, state))
+                    else:
+                        state["files"] += 1
+                        state["bytes"] += len(member_raw)
+                        members.append((relative_name, member_raw))
+        except (rarfile.Error, OSError) as exc:
+            raise ValueError(f"not a readable RAR archive ({exc})") from exc
+        return members
 
-    except zipfile.BadZipFile as exc:
-        raise ValueError(f"not a valid ZIP archive ({exc})") from exc
+    raise ValueError(f"unsupported archive format: {path_prefix}")
 
-    return members
+
 
 def _form_number(filename, text):
     hay = f"{filename}\n{text[:12000]}"
@@ -1133,10 +1187,9 @@ async def _process_roc_dump_job(job_id: str):
                 raw = await asyncio.to_thread(path.read_bytes)
                 if filename.lower().endswith(ARCHIVE_EXT):
                     try:
-                        expanded = await asyncio.to_thread(_iter_archive_members, raw)
+                        expanded = await asyncio.to_thread(_iter_archive_members, raw, filename)
                     except ValueError as exc:
-                        expanded = []
-                        logger.warning("ROC dump archive failed for %s: %s", filename, exc)
+                        raise RuntimeError(f"Unable to read archive {filename}: {exc}") from exc
                     entries.extend(expanded)
                 else:
                     entries.append((filename, raw))
