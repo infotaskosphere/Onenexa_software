@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ChevronDown, Download, FileArchive, FolderUp, Loader2, Upload, X } from 'lucide-react';
+import { ChevronDown, Download, FileArchive, FolderUp, Loader2, Minimize2, Upload, X } from 'lucide-react';
 import { toast } from 'sonner';
 import api from '@/lib/api';
+import { useROCDumpUploads } from '@/contexts/ROCDumpUploadContext.jsx';
 
 const ACCEPTED_EXT = '.pdf,.xlsx,.xlsm,.xls,.csv,.docx,.doc,.zip';
 
@@ -62,8 +63,14 @@ function ROCFormsDumpTab({ company, isDark, text, muted }) {
   const [files, setFiles] = useState([]);
   const [items, setItems] = useState([]);
   const [summary, setSummary] = useState(null);
-  const [busy, setBusy] = useState(false);
   const [minimized, setMinimized] = useState(false);
+  const [rebuilding, setRebuilding] = useState(false);
+  const { jobs, queueUpload } = useROCDumpUploads();
+  const activeUploadJob = jobs.find((job) => (
+    job.companyId === company?.id &&
+    ['queued', 'uploading', 'processing'].includes(job.status)
+  ));
+  const busy = !!activeUploadJob || rebuilding;
   const [correctingId, setCorrectingId] = useState(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [dropActive, setDropActive] = useState(false);
@@ -161,29 +168,21 @@ function ROCFormsDumpTab({ company, isDark, text, muted }) {
 
   useEffect(() => { void load(); }, [load]);
 
-  const upload = async () => {
-    if (!files.length || busy) return;
-    setBusy(true);
-    try {
-      const form = new FormData();
-      appendFilesToForm(form);
-      await api.post(`/roc-sphere/companies/${company.id}/roc-dump/upload`, form, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
-      setFiles([]);
-      setPickerOpen(false);
-      await load();
-      toast.success('ROC Forms Dump processed and Company Summary updated');
-    } catch (err) {
-      toast.error(await parseBlobError(err) || 'ROC Forms Dump processing failed');
-    } finally {
-      setBusy(false);
-    }
+  const upload = () => {
+    if (!files.length || busy || !company?.id) return;
+    queueUpload({
+      companyId: company.id,
+      companyName: company.company_name,
+      files,
+    });
+    setFiles([]);
+    setPickerOpen(false);
+    setMinimized(true);
   };
 
   const rebuild = async () => {
     if (busy) return;
-    setBusy(true);
+    setRebuilding(true);
     try {
       await api.post(`/roc-sphere/companies/${company.id}/roc-dump/rebuild-summary`);
       await load();
@@ -191,7 +190,7 @@ function ROCFormsDumpTab({ company, isDark, text, muted }) {
     } catch (err) {
       toast.error(await parseBlobError(err) || 'Summary rebuild failed');
     } finally {
-      setBusy(false);
+      setRebuilding(false);
     }
   };
 
@@ -251,8 +250,8 @@ function ROCFormsDumpTab({ company, isDark, text, muted }) {
           </div>
           <button type="button" onClick={() => setMinimized(true)}
             className={`p-1.5 rounded-md ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}
-            title="Minimize">
-            <ChevronDown size={16} className={text} />
+            title="Minimize ROC Forms Dump">
+            <Minimize2 size={16} className={text} />
           </button>
         </div>
 
@@ -432,20 +431,7 @@ function ROCFormsDumpTab({ company, isDark, text, muted }) {
         )}
       </div>
 
-      {minimized && (
-        <div className={`fixed bottom-4 right-4 z-[80] w-[min(520px,calc(100vw-2rem))] rounded-xl border shadow-xl ${card}`}>
-          <div className="flex items-center gap-3 px-3 py-2.5">
-            <div className="min-w-0 flex-1">
-              <p className={`text-xs font-semibold ${text}`}>ROC Forms Dump</p>
-              <p className={`text-[10px] ${muted}`}>{busy ? 'Processing ROC forms…' : `${items.length} form(s) archived`}</p>
-            </div>
-            <button type="button" onClick={() => setMinimized(false)} className="px-2 py-1 rounded border text-xs">
-              Expand
-            </button>
-          </div>
-          {busy && <div className="h-1 bg-blue-600 animate-pulse" />}
-        </div>
-      )}
+
     </div>
   );
 }
