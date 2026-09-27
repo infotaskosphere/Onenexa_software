@@ -14,6 +14,7 @@ const MODULE_BRANDING = {
   proposals: { label: 'LeadSense', landingPath: '/client-proposals-dashboard', lightLogo: '/leadsense-logo.png', darkLogo: '/leadsense-logo.png', collapsedLogo: '/leadsense-logo.png', alt: 'LeadSense' },
   'people-matrix': { label: 'People Matrix', landingPath: '/people-matrix', lightLogo: '/people-matrix-logo.png', darkLogo: '/people-matrix-logo.png', collapsedLogo: '/people-matrix-logo.png', alt: 'People Matrix' },
   aiweave: { label: 'AIWeave', landingPath: '/aiweave', lightLogo: '/aiweave-logo-lite.png', darkLogo: '/aiweave-logo-dark.png', collapsedLogo: '/aiweave-icon.png', alt: 'AIWeave' },
+  records: { label: 'Records', landingPath: '/records-dashboard', lightLogo: '/logo-lite.png', darkLogo: '/logo-dark.png', collapsedLogo: '/icon-192.png', alt: 'Records Vault' },
 };
 
 // Last-resort logo that ships INSIDE the JS bundle. If a static file is missing
@@ -49,9 +50,10 @@ const getRouteModuleId = () => {
     path === '/salary-slips' || path.startsWith('/salary-slips/')
   ) return 'compliance';
   if (path === '/client-proposals-dashboard' || path.startsWith('/leads/') || path === '/leads' || path.startsWith('/quotations/') || path === '/quotations' || path.startsWith('/client-discussion/') || path === '/client-discussion') return 'proposals';
-  if (path === '/finix-dashboard' || path.startsWith('/invoicing') || path.startsWith('/purchase') || path.startsWith('/bank-accounts') || path.startsWith('/journal-entries')) return 'accounts';
+  if (path === '/finix-dashboard' || path.startsWith('/invoicing') || path.startsWith('/purchase') || path.startsWith('/bank-accounts') || path.startsWith('/journal-entries') || path === '/chart-of-accounts' || path === '/zero-touch-entry' || path === '/accounting-reports' || path === '/day-book') return 'accounts';
   if (path === '/people-matrix' || path.startsWith('/users') || path.startsWith('/leave') || path.startsWith('/payroll') || path.startsWith('/hr') || path.startsWith('/recruitment')) return 'people-matrix';
   if (path === '/aiweave' || path.startsWith('/aiweave/')) return 'aiweave';
+  if (path === '/records-dashboard' || path === '/dsc' || path === '/documents' || path === '/clients' || path === '/passwords' || path === '/client-approvals') return 'records';
   return null;
 };
 
@@ -60,7 +62,7 @@ const getActiveModuleId = () => {
   // leaving the previous module logo visible during client-side navigation.
   const routeModuleId = getRouteModuleId();
   if (routeModuleId) return routeModuleId;
-  const activeTab = document.querySelector('#top-module-switcher-bar [id^="nav-tab-"].font-semibold');
+  const activeTab = document.querySelector('#top-module-switcher-bar [id^="nav-tab-"][data-active="true"], #top-module-switcher-bar [id^="nav-tab-"][aria-current="page"], #top-module-switcher-bar [id^="nav-tab-"].font-semibold');
   const moduleId = (activeTab?.id || '').replace(/^nav-tab-/, '');
   return MODULE_BRANDING[moduleId] ? moduleId : 'core';
 };
@@ -75,8 +77,13 @@ const setTabLabel = (id, label) => {
 };
 
 const renameNavigation = () => {
-  setTabLabel('#nav-tab-proposals', 'LeadSense');
+  setTabLabel('#nav-tab-core', 'Taskosphere');
+  setTabLabel('#nav-tab-accounts', 'Finix');
+  setTabLabel('#nav-tab-aiweave', 'AIWeave');
   setTabLabel('#nav-tab-compliance', 'CompliGenie');
+  setTabLabel('#nav-tab-records', 'Records');
+  setTabLabel('#nav-tab-proposals', 'LeadSense');
+  setTabLabel('#nav-tab-people-matrix', 'People Matrix');
 };
 
 const renameSidebarText = (from, to) => {
@@ -159,11 +166,6 @@ const syncModuleBranding = () => {
   }
 
   if (moduleId === 'compliance') {
-    const complianceTab = document.querySelector('#nav-tab-compliance');
-    if (complianceTab) {
-      complianceTab.style.borderBottom = '2px solid #1F6FB2';
-      complianceTab.style.color = '#0D3B66';
-    }
     visibleLogo.style.width = collapsed ? '58px' : '205px';
     visibleLogo.style.height = collapsed ? '58px' : '55px';
   }

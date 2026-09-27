@@ -20,6 +20,35 @@ licensingApi.interceptors.request.use((config) => {
     config.headers = config.headers || {};
     config.headers.Authorization = `Bearer ${token}`;
   }
+  if (!import.meta.env.VITE_API_URL) {
+    config.adapter = async (cfg) => {
+      const method = (cfg.method || "get").toLowerCase();
+      const rawUrl = cfg.url || "";
+      let bodyData = cfg.data;
+      if (typeof bodyData === "string") {
+        try {
+          bodyData = JSON.parse(bodyData);
+        } catch {}
+      }
+      const mockRes = handleMockRoute(method, rawUrl, bodyData);
+      if (mockRes) {
+        return {
+          data: mockRes.data,
+          status: mockRes.status || 200,
+          statusText: "OK",
+          headers: {},
+          config: cfg,
+        };
+      }
+      return {
+        data: method === "get" ? [] : { success: true },
+        status: 200,
+        statusText: "OK",
+        headers: {},
+        config: cfg,
+      };
+    };
+  }
   return config;
 });
 

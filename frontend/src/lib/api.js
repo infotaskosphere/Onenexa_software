@@ -248,6 +248,10 @@ export function markBackendNotReady() {
 }
 
 export function ensureBackendReady() {
+  if (!CONFIGURED_API_URL) {
+    return Promise.resolve(true);
+  }
+
   if (_isReady) {
     return Promise.resolve(true);
   }
@@ -365,6 +369,50 @@ const api = axios.create({
 
 api.interceptors.request.use(
   async (config) => {
+    // If no remote API backend URL is provided, route directly to the in-memory mock handler
+    if (!CONFIGURED_API_URL) {
+      config.adapter = async (cfg) => {
+        const method = (cfg.method || "get").toLowerCase();
+        const rawUrl = cfg.url || "";
+        let bodyData = cfg.data;
+        if (typeof bodyData === "string") {
+          try {
+            bodyData = JSON.parse(bodyData);
+          } catch {}
+        }
+        const mockRes = handleMockRoute(method, rawUrl, bodyData);
+        if (mockRes) {
+          const validate = cfg.validateStatus || ((s) => s >= 200 && s < 300);
+          if (!validate(mockRes.status || 200)) {
+            const err = new Error(`Request failed with status code ${mockRes.status}`);
+            err.response = {
+              data: mockRes.data,
+              status: mockRes.status,
+              statusText: "Error",
+              headers: {},
+              config: cfg,
+            };
+            return Promise.reject(err);
+          }
+          return {
+            data: mockRes.data,
+            status: mockRes.status || 200,
+            statusText: "OK",
+            headers: {},
+            config: cfg,
+          };
+        }
+        return {
+          data: method === "get" ? [] : { success: true, message: "OK" },
+          status: 200,
+          statusText: "OK",
+          headers: {},
+          config: cfg,
+        };
+      };
+      return config;
+    }
+
     // Wait for Render backend cold start unless explicitly skipped.
     if (!config._skipReadyGate) {
       await ensureBackendReady();

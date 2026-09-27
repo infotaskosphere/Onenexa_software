@@ -20,6 +20,7 @@ import "./module-branding.css";
 import "./module-branding.js";
 import "./header-tabs-canonical.css";
 import "./ui-layout-fixes.css";
+import "./module-switcher-commercial.css";
 
 const BottomLoadingBar = memo(function BottomLoadingBar() {
   const loading = useLoading();

@@ -507,7 +507,8 @@ export const MOCK_COMPLIANCE = [
 ];
 
 export function handleMockRoute(method, url, data) {
-  const normUrl = url.replace(/^\/api/, "").split("?")[0];
+  const cleanPath = (url || "").replace(/^https?:\/\/[^/]+/, "");
+  const normUrl = (cleanPath.startsWith("/api") ? cleanPath.slice(4) : cleanPath).split("?")[0] || "/";
 
   // AIWeave is server-authoritative. Do not simulate provider connections,
   // credentials, executions, quota, or routing when the backend is unavailable.
