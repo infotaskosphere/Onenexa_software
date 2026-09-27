@@ -1183,6 +1183,71 @@ async def _process_roc_dump_job(job_id: str):
                     pass
 
 
+
+async def resume_pending_roc_dump_jobs():
+    """Resume ROC Forms Dump jobs left pending by a process restart.
+
+    Render/local staging is temporary, so only jobs whose staged files are
+    still present can safely be resumed. Missing staging is recorded as a
+    failed job instead of allowing startup to fail.
+    """
+    try:
+        pending = await ROC_JOBS.find(
+            {"status": {"$in": ["QUEUED", "PROCESSING"]}}
+        ).to_list(1000)
+
+        resumed = 0
+        failed = 0
+
+        for job in pending:
+            job_id = str(job.get("id") or "")
+            if not job_id:
+                continue
+
+            staged_files = job.get("files") or []
+            missing = []
+            for staged in staged_files:
+                path = Path(staged.get("path") or "")
+                if not path.exists():
+                    missing.append(staged.get("filename") or "unknown file")
+
+            if missing:
+                await ROC_JOBS.update_one(
+                    {"id": job_id},
+                    {"$set": {
+                        "status": "FAILED",
+                        "finished_at": _now(),
+                        "error": "Staged upload files are no longer available after restart.",
+                        "message": (
+                            "ROC Forms Dump could not be resumed because "
+                            f"staged files are missing: {', '.join(missing[:10])}"
+                        ),
+                    }},
+                )
+                failed += 1
+                continue
+
+            await ROC_JOBS.update_one(
+                {"id": job_id},
+                {"$set": {
+                    "status": "QUEUED",
+                    "message": "ROC Forms Dump job resumed after backend restart.",
+                }},
+            )
+            _schedule_roc_dump_job(job_id)
+            resumed += 1
+
+        logger.info(
+            "ROC Forms Dump startup recovery complete: %s resumed, %s failed.",
+            resumed,
+            failed,
+        )
+        return {"resumed": resumed, "failed": failed}
+    except Exception:
+        logger.exception("ROC Forms Dump startup recovery failed")
+        return {"resumed": 0, "failed": 0}
+
+
 def _schedule_roc_dump_job(job_id: str):
     task = asyncio.create_task(_process_roc_dump_job(job_id))
     ROC_JOB_TASKS.add(task)
