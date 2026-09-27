@@ -20,7 +20,6 @@ import subprocess
 import tempfile
 import uuid
 import zipfile
-import rarfile
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -310,6 +309,95 @@ def _archive_kind(filename: str) -> str:
     return ""
 
 
+def _rar_member_payloads_with_7zip(raw: bytes, archive_name: str) -> List[Tuple[str, bytes]]:
+    """RAR fallback that does not require the Python rarfile module at import time.
+
+    Render images can have 7-Zip available even when the optional Python
+    wrapper is absent. Listing and extracting one eligible member at a time
+    keeps the same path/size limits used by the native ZIP/RAR path.
+    """
+    tool = shutil.which("7z") or shutil.which("7zz") or shutil.which("7zr")
+    if not tool:
+        raise RuntimeError(
+            "RAR5 support is unavailable: neither rarfile nor a 7-Zip executable is installed."
+        )
+
+    with tempfile.TemporaryDirectory(prefix="roc_rar_") as temp_dir:
+        archive_path = Path(temp_dir) / "upload.rar"
+        archive_path.write_bytes(raw)
+
+        listed = subprocess.run(
+            [tool, "l", "-slt", str(archive_path)],
+            capture_output=True,
+            timeout=120,
+            check=False,
+        )
+        if listed.returncode != 0:
+            detail = listed.stderr.decode("utf-8", errors="replace").strip()
+            raise ValueError(f"7-Zip could not read RAR archive: {detail or 'unknown error'}")
+
+        listing = listed.stdout.decode("utf-8", errors="replace")
+        names: List[str] = []
+        current: Dict[str, str] = {}
+        for line in listing.splitlines() + [""]:
+            if not line.strip():
+                if current.get("Path") and current.get("Folder") != "+":
+                    names.append(current["Path"])
+                current = {}
+                continue
+            key, separator, value = line.partition(" = ")
+            if separator:
+                current[key.strip()] = value
+
+        members: List[Tuple[str, bytes]] = []
+        state = {"files": 0, "bytes": 0}
+
+        for member_name in names:
+            if state["files"] >= MAX_EXPANDED_FILES:
+                break
+
+            safe_name = _safe_relative_path(member_name)
+            base = safe_name.rsplit("/", 1)[-1]
+            if not base or base.startswith("."):
+                continue
+            if "__MACOSX" in safe_name or base.lower() in {"thumbs.db", "desktop.ini"}:
+                continue
+
+            lower = base.lower()
+            if not lower.endswith(ALLOWED_EXT + UNREADABLE_BUT_ACCEPTED_EXT + ARCHIVE_EXT):
+                continue
+
+            # Extract exactly this member to stdout. No archive contents are
+            # written into a path controlled by the archive.
+            extracted = subprocess.run(
+                [tool, "x", "-so", str(archive_path), "--", member_name],
+                capture_output=True,
+                timeout=120,
+                check=False,
+            )
+            if extracted.returncode != 0:
+                logger.warning(
+                    "ROC dump 7-Zip member unreadable %s: %s",
+                    safe_name,
+                    extracted.stderr.decode("utf-8", errors="replace").strip(),
+                )
+                continue
+
+            member_raw = extracted.stdout
+            if len(member_raw) > MAX_ZIP_MEMBER_BYTES:
+                logger.warning("ROC dump RAR member too large: %s", safe_name)
+                continue
+            if state["bytes"] + len(member_raw) > MAX_BATCH:
+                logger.warning("ROC dump RAR expansion reached MAX_BATCH at %s", safe_name)
+                break
+
+            state["files"] += 1
+            state["bytes"] += len(member_raw)
+            members.append((f"{archive_name}/{safe_name}", member_raw))
+
+        return members
+
+
 def _iter_archive_members(
     raw: bytes,
     path_prefix: str = "",
@@ -374,6 +462,8 @@ def _iter_archive_members(
 
     if kind == "rar":
         try:
+            import rarfile
+
             with rarfile.RarFile(io.BytesIO(raw)) as archive:
                 infos = [info for info in archive.infolist() if not info.isdir()]
                 for info in infos:
@@ -419,9 +509,28 @@ def _iter_archive_members(
                         state["files"] += 1
                         state["bytes"] += len(member_raw)
                         members.append((relative_name, member_raw))
-        except (rarfile.Error, OSError) as exc:
-            raise ValueError(f"not a readable RAR archive ({exc})") from exc
-        return members
+            return members
+        except ModuleNotFoundError:
+            # Do not make application startup dependent on an optional Python
+            # package. The production build installs 7-Zip and this fallback
+            # keeps RAR5 processing available even if the Python wrapper was
+            # omitted by a custom Render build command.
+            fallback = _rar_member_payloads_with_7zip(raw, path_prefix or "archive.rar")
+            for relative_name, member_raw in fallback:
+                base = relative_name.rsplit("/", 1)[-1].lower()
+                if base.endswith(ARCHIVE_EXT):
+                    state["bytes"] += len(member_raw)
+                    members.extend(_iter_archive_members(member_raw, relative_name, depth + 1, state))
+                else:
+                    state["files"] += 1
+                    state["bytes"] += len(member_raw)
+                    members.append((relative_name, member_raw))
+            return members
+        except Exception as exc:
+            if isinstance(exc, (ValueError, OSError)):
+                raise ValueError(f"not a readable RAR archive ({exc})") from exc
+            raise
+
 
     raise ValueError(f"unsupported archive format: {path_prefix}")
 
