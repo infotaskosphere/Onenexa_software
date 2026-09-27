@@ -34,7 +34,7 @@ import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useFormMinimizer } from '@/contexts/MinimizedFormsContext';
 import AccessGovernancePanel from '@/components/governance/AccessGovernancePanel';
-import { DEFAULT_ROLE_PERMISSIONS } from '@/lib/permissionTemplates';
+import { DEFAULT_ROLE_PERMISSIONS, EMPTY_PERMISSIONS } from '@/lib/permissionTemplates';
 import { GLOBAL_PERMS, OPS_PERMS, EDIT_PERMS, permTabs, MODULE_PERM_KEYS } from '@/lib/permissionCatalog';
 
 // ── Brand Colors ─────────────────────────────────────────────────────────────
