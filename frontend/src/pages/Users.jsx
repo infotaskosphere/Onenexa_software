@@ -36,6 +36,7 @@ import { useFormMinimizer } from '@/contexts/MinimizedFormsContext';
 import AccessGovernancePanel from '@/components/governance/AccessGovernancePanel';
 import { DEFAULT_ROLE_PERMISSIONS, EMPTY_PERMISSIONS } from '@/lib/permissionTemplates';
 import { GLOBAL_PERMS, OPS_PERMS, EDIT_PERMS, permTabs, MODULE_PERM_KEYS } from '@/lib/permissionCatalog';
+import { isCommercialTenant, isPlatformOwner as checkIsPlatformOwner } from '@/lib/commercialPermissionMatrix';
 
 // ── Brand Colors ─────────────────────────────────────────────────────────────
 const COLORS = {
@@ -2630,9 +2631,13 @@ export default function Users() {
       const raw = res.data;
       const list = Array.isArray(raw) ? raw : (raw?.users || raw?.data || []);
       const filtered = isPlatformOwner ? list.filter((u) => {
+        if (checkIsPlatformOwner(u)) return true;
+        if (isCommercialTenant(u)) return false;
         const isCommercialLicensee = (
           (u.commercial_customer_id && u.commercial_customer_id !== 'platform-owner') ||
-          (u.license_id && u.license_id !== 'platform-owner-license')
+          (u.license_id && u.license_id !== 'platform-owner-license') ||
+          (u.company_id && !String(u.company_id).startsWith('platform-owner') && u.company_id !== '__commercial_internal__') ||
+          (Array.isArray(u.licensed_modules) && u.licensed_modules.length > 0)
         );
         return !isCommercialLicensee;
       }) : list;

@@ -27,7 +27,7 @@ body:not(.website-surface) #root #top-module-switcher-bar[data-active-module="co
   border-top: 2.5px solid #2563eb !important;
 }
 body:not(.website-surface) #root #top-module-switcher-bar[data-active-module="accounts"] {
-  border-top: 2.5px solid #7c3aed !important;
+  border-top: 2.5px solid #0a67d9 !important;
 }
 body:not(.website-surface) #root #top-module-switcher-bar[data-active-module="aiweave"] {
   border-top: 2.5px solid #9333ea !important;
@@ -36,13 +36,13 @@ body:not(.website-surface) #root #top-module-switcher-bar[data-active-module="co
   border-top: 2.5px solid #059669 !important;
 }
 body:not(.website-surface) #root #top-module-switcher-bar[data-active-module="records"] {
-  border-top: 2.5px solid #0284c7 !important;
+  border-top: 2.5px solid #0369a1 !important;
 }
 body:not(.website-surface) #root #top-module-switcher-bar[data-active-module="proposals"] {
-  border-top: 2.5px solid #ea580c !important;
+  border-top: 2.5px solid #0891b2 !important;
 }
 body:not(.website-surface) #root #top-module-switcher-bar[data-active-module="people-matrix"] {
-  border-top: 2.5px solid #e11d48 !important;
+  border-top: 2.5px solid #4338ca !important;
 }
 body:not(.website-surface) #root #top-module-switcher-bar[data-active-module="admin"] {
   border-top: 2.5px solid #475569 !important;
@@ -109,28 +109,28 @@ body:not(.website-surface) #root #top-module-switcher-bar button#nav-tab-core[ar
 }
 
 /* ==========================================================================
-   MODULE 2: FINIX (accounts) — Rich Finance Violet
+   MODULE 2: FINIX (accounts) — Cobalt Blue / Financial Sapphire
    ========================================================================== */
 body:not(.website-surface) #root #top-module-switcher-bar button#nav-tab-accounts:hover {
-  background: #faf8ff !important;
-  color: #6d28d9 !important;
+  background: #f0f7ff !important;
+  color: #0a5ea2 !important;
   border-radius: 0 !important;
 }
 body:not(.website-surface) #root #top-module-switcher-bar button#nav-tab-accounts:hover svg {
-  color: #7c3aed !important;
+  color: #0a67d9 !important;
 }
 body:not(.website-surface) #root #top-module-switcher-bar button#nav-tab-accounts[data-active="true"],
 body:not(.website-surface) #root #top-module-switcher-bar button#nav-tab-accounts[aria-current="page"] {
-  background: #f5f3ff !important;
-  color: #6d28d9 !important;
+  background: #f0f7ff !important;
+  color: #0a5ea2 !important;
   font-weight: 600 !important;
   border-radius: 0 !important;
-  border-bottom: 2.5px solid #7c3aed !important;
+  border-bottom: 2.5px solid #0a67d9 !important;
   box-shadow: none !important;
 }
 body:not(.website-surface) #root #top-module-switcher-bar button#nav-tab-accounts[data-active="true"] svg,
 body:not(.website-surface) #root #top-module-switcher-bar button#nav-tab-accounts[aria-current="page"] svg {
-  color: #7c3aed !important;
+  color: #0a67d9 !important;
 }
 
 /* ==========================================================================
@@ -184,78 +184,78 @@ body:not(.website-surface) #root #top-module-switcher-bar button#nav-tab-complia
 }
 
 /* ==========================================================================
-   MODULE 5: RECORDS (records) — Vault Cyan / Sky Blue
+   MODULE 5: RECORDS (records) — Vault Steel Blue
    ========================================================================== */
 body:not(.website-surface) #root #top-module-switcher-bar button#nav-tab-records:hover {
-  background: #f5fbff !important;
-  color: #0369a1 !important;
+  background: #f0f9ff !important;
+  color: #075985 !important;
   border-radius: 0 !important;
 }
 body:not(.website-surface) #root #top-module-switcher-bar button#nav-tab-records:hover svg {
-  color: #0284c7 !important;
+  color: #0369a1 !important;
 }
 body:not(.website-surface) #root #top-module-switcher-bar button#nav-tab-records[data-active="true"],
 body:not(.website-surface) #root #top-module-switcher-bar button#nav-tab-records[aria-current="page"] {
   background: #f0f9ff !important;
-  color: #0369a1 !important;
+  color: #075985 !important;
   font-weight: 600 !important;
   border-radius: 0 !important;
-  border-bottom: 2.5px solid #0284c7 !important;
+  border-bottom: 2.5px solid #0369a1 !important;
   box-shadow: none !important;
 }
 body:not(.website-surface) #root #top-module-switcher-bar button#nav-tab-records[data-active="true"] svg,
 body:not(.website-surface) #root #top-module-switcher-bar button#nav-tab-records[aria-current="page"] svg {
-  color: #0284c7 !important;
+  color: #0369a1 !important;
 }
 
 /* ==========================================================================
-   MODULE 6: LEADSENSE (proposals) — Growth & Leads Amber / Orange
+   MODULE 6: LEADSENSE (proposals) — Ocean Teal / Turquoise
    ========================================================================== */
 body:not(.website-surface) #root #top-module-switcher-bar button#nav-tab-proposals:hover {
-  background: #fffaf5 !important;
-  color: #c2410c !important;
+  background: #ecfeff !important;
+  color: #0e7490 !important;
   border-radius: 0 !important;
 }
 body:not(.website-surface) #root #top-module-switcher-bar button#nav-tab-proposals:hover svg {
-  color: #ea580c !important;
+  color: #0891b2 !important;
 }
 body:not(.website-surface) #root #top-module-switcher-bar button#nav-tab-proposals[data-active="true"],
 body:not(.website-surface) #root #top-module-switcher-bar button#nav-tab-proposals[aria-current="page"] {
-  background: #fff7ed !important;
-  color: #c2410c !important;
+  background: #ecfeff !important;
+  color: #0e7490 !important;
   font-weight: 600 !important;
   border-radius: 0 !important;
-  border-bottom: 2.5px solid #ea580c !important;
+  border-bottom: 2.5px solid #0891b2 !important;
   box-shadow: none !important;
 }
 body:not(.website-surface) #root #top-module-switcher-bar button#nav-tab-proposals[data-active="true"] svg,
 body:not(.website-surface) #root #top-module-switcher-bar button#nav-tab-proposals[aria-current="page"] svg {
-  color: #ea580c !important;
+  color: #0891b2 !important;
 }
 
 /* ==========================================================================
-   MODULE 7: PEOPLE MATRIX (people-matrix) — HRMS Crimson / Rose
+   MODULE 7: PEOPLE MATRIX (people-matrix) — Royal Indigo / Sapphire
    ========================================================================== */
 body:not(.website-surface) #root #top-module-switcher-bar button#nav-tab-people-matrix:hover {
-  background: #fff6f7 !important;
-  color: #be123c !important;
+  background: #eef2ff !important;
+  color: #3730a3 !important;
   border-radius: 0 !important;
 }
 body:not(.website-surface) #root #top-module-switcher-bar button#nav-tab-people-matrix:hover svg {
-  color: #e11d48 !important;
+  color: #4338ca !important;
 }
 body:not(.website-surface) #root #top-module-switcher-bar button#nav-tab-people-matrix[data-active="true"],
 body:not(.website-surface) #root #top-module-switcher-bar button#nav-tab-people-matrix[aria-current="page"] {
-  background: #fff1f2 !important;
-  color: #be123c !important;
+  background: #eef2ff !important;
+  color: #3730a3 !important;
   font-weight: 600 !important;
   border-radius: 0 !important;
-  border-bottom: 2.5px solid #e11d48 !important;
+  border-bottom: 2.5px solid #4338ca !important;
   box-shadow: none !important;
 }
 body:not(.website-surface) #root #top-module-switcher-bar button#nav-tab-people-matrix[data-active="true"] svg,
 body:not(.website-surface) #root #top-module-switcher-bar button#nav-tab-people-matrix[aria-current="page"] svg {
-  color: #e11d48 !important;
+  color: #4338ca !important;
 }
 
 /* ==========================================================================
@@ -321,7 +321,7 @@ html.dark body:not(.website-surface) #root #top-module-switcher-bar[data-active-
   border-top: 2.5px solid #60a5fa !important;
 }
 html.dark body:not(.website-surface) #root #top-module-switcher-bar[data-active-module="accounts"] {
-  border-top: 2.5px solid #a78bfa !important;
+  border-top: 2.5px solid #60a5fa !important;
 }
 html.dark body:not(.website-surface) #root #top-module-switcher-bar[data-active-module="aiweave"] {
   border-top: 2.5px solid #c084fc !important;
@@ -333,10 +333,10 @@ html.dark body:not(.website-surface) #root #top-module-switcher-bar[data-active-
   border-top: 2.5px solid #38bdf8 !important;
 }
 html.dark body:not(.website-surface) #root #top-module-switcher-bar[data-active-module="proposals"] {
-  border-top: 2.5px solid #fb923c !important;
+  border-top: 2.5px solid #22d3ee !important;
 }
 html.dark body:not(.website-surface) #root #top-module-switcher-bar[data-active-module="people-matrix"] {
-  border-top: 2.5px solid #fb7185 !important;
+  border-top: 2.5px solid #818cf8 !important;
 }
 html.dark body:not(.website-surface) #root #top-module-switcher-bar[data-active-module="admin"] {
   border-top: 2.5px solid #94a3b8 !important;
@@ -368,13 +368,13 @@ html.dark body:not(.website-surface) #root #top-module-switcher-bar button#nav-t
 
 html.dark body:not(.website-surface) #root #top-module-switcher-bar button#nav-tab-accounts[data-active="true"],
 html.dark body:not(.website-surface) #root #top-module-switcher-bar button#nav-tab-accounts[aria-current="page"] {
-  background: rgba(124, 58, 237, 0.22) !important;
-  color: #c4b5fd !important;
-  border-bottom-color: #a78bfa !important;
+  background: rgba(10, 103, 217, 0.22) !important;
+  color: #93c5fd !important;
+  border-bottom-color: #60a5fa !important;
 }
 html.dark body:not(.website-surface) #root #top-module-switcher-bar button#nav-tab-accounts[data-active="true"] svg,
 html.dark body:not(.website-surface) #root #top-module-switcher-bar button#nav-tab-accounts[aria-current="page"] svg {
-  color: #a78bfa !important;
+  color: #60a5fa !important;
 }
 
 html.dark body:not(.website-surface) #root #top-module-switcher-bar button#nav-tab-aiweave[data-active="true"],
@@ -401,7 +401,7 @@ html.dark body:not(.website-surface) #root #top-module-switcher-bar button#nav-t
 
 html.dark body:not(.website-surface) #root #top-module-switcher-bar button#nav-tab-records[data-active="true"],
 html.dark body:not(.website-surface) #root #top-module-switcher-bar button#nav-tab-records[aria-current="page"] {
-  background: rgba(2, 132, 199, 0.22) !important;
+  background: rgba(3, 105, 161, 0.22) !important;
   color: #7dd3fc !important;
   border-bottom-color: #38bdf8 !important;
 }
@@ -412,24 +412,24 @@ html.dark body:not(.website-surface) #root #top-module-switcher-bar button#nav-t
 
 html.dark body:not(.website-surface) #root #top-module-switcher-bar button#nav-tab-proposals[data-active="true"],
 html.dark body:not(.website-surface) #root #top-module-switcher-bar button#nav-tab-proposals[aria-current="page"] {
-  background: rgba(234, 88, 12, 0.22) !important;
-  color: #fdba74 !important;
-  border-bottom-color: #fb923c !important;
+  background: rgba(8, 145, 178, 0.22) !important;
+  color: #67e8f9 !important;
+  border-bottom-color: #22d3ee !important;
 }
 html.dark body:not(.website-surface) #root #top-module-switcher-bar button#nav-tab-proposals[data-active="true"] svg,
 html.dark body:not(.website-surface) #root #top-module-switcher-bar button#nav-tab-proposals[aria-current="page"] svg {
-  color: #fb923c !important;
+  color: #22d3ee !important;
 }
 
 html.dark body:not(.website-surface) #root #top-module-switcher-bar button#nav-tab-people-matrix[data-active="true"],
 html.dark body:not(.website-surface) #root #top-module-switcher-bar button#nav-tab-people-matrix[aria-current="page"] {
-  background: rgba(225, 29, 72, 0.22) !important;
-  color: #fda4af !important;
-  border-bottom-color: #fb7185 !important;
+  background: rgba(67, 56, 202, 0.22) !important;
+  color: #a5b4fc !important;
+  border-bottom-color: #818cf8 !important;
 }
 html.dark body:not(.website-surface) #root #top-module-switcher-bar button#nav-tab-people-matrix[data-active="true"] svg,
 html.dark body:not(.website-surface) #root #top-module-switcher-bar button#nav-tab-people-matrix[aria-current="page"] svg {
-  color: #fb7185 !important;
+  color: #818cf8 !important;
 }
 
 html.dark body:not(.website-surface) #root #top-module-switcher-bar button#nav-tab-admin[data-active="true"],
