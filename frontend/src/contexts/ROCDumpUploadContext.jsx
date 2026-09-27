@@ -72,34 +72,80 @@ export function ROCDumpUploadProvider({ children }) {
     });
 
     try {
-      const form = new FormData();
-      job.files.forEach((file) => {
-        const relativeName = file.rocRelativePath || file.webkitRelativePath || file.name;
-        form.append('files', file, relativeName);
-      });
+      // Use bounded, resumable chunks instead of one large multipart request.
+      // This is transparent to the single chooser and supports mixed files,
+      // folders and ZIP/RAR archives without changing the UI.
+      const CHUNK_SIZE = 8 * 1024 * 1024;
+      const metadata = job.files.map((file, index) => ({
+        index,
+        filename: file.rocRelativePath || file.webkitRelativePath || file.name,
+        size_bytes: file.size || 0,
+        total_chunks: Math.max(1, Math.ceil((file.size || 0) / CHUNK_SIZE)),
+      }));
+
+      const init = await api.post(
+        `/roc-sphere/companies/${job.companyId}/roc-dump/upload/initiate`,
+        { files: metadata },
+        { _skipReadyGate: true },
+      );
+      const uploadId = init.data?.upload_id;
+      if (!uploadId) throw new Error('Backend did not return a ROC upload session ID');
+
+      let uploadedBytes = 0;
+      for (let fileIndex = 0; fileIndex < job.files.length; fileIndex += 1) {
+        const file = job.files[fileIndex];
+        const totalChunks = metadata[fileIndex].total_chunks;
+        for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex += 1) {
+          const start = chunkIndex * CHUNK_SIZE;
+          const end = Math.min(file.size, start + CHUNK_SIZE);
+          const blob = file.slice(start, end);
+
+          let lastError = null;
+          for (let attempt = 0; attempt < 4; attempt += 1) {
+            try {
+              const form = new FormData();
+              form.append('upload_id', uploadId);
+              form.append('file_index', String(fileIndex));
+              form.append('chunk_index', String(chunkIndex));
+              form.append('total_chunks', String(totalChunks));
+              form.append('chunk', blob, file.name || 'chunk');
+              await api.post(
+                `/roc-sphere/companies/${job.companyId}/roc-dump/upload/chunk`,
+                form,
+                {
+                  _skipReadyGate: true,
+                  timeout: 120000,
+                  headers: { 'Content-Type': 'multipart/form-data' },
+                },
+              );
+              lastError = null;
+              break;
+            } catch (chunkError) {
+              lastError = chunkError;
+              if (attempt < 3) {
+                await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)));
+              }
+            }
+          }
+          if (lastError) throw lastError;
+
+          uploadedBytes += blob.size;
+          const progress = Math.min(98, Math.round((uploadedBytes / Math.max(totalBytes, 1)) * 98));
+          updateJob(job.id, {
+            status: 'uploading',
+            progress,
+            loadedBytes: uploadedBytes,
+            totalBytes,
+            message: `Uploading ${fileIndex + 1}/${job.files.length}: ${file.name}`,
+          });
+        }
+      }
 
       const { data } = await api.post(
-        `/roc-sphere/companies/${job.companyId}/roc-dump/upload`,
-        form,
-        {
-          headers: { 'Content-Type': 'multipart/form-data' },
-          onUploadProgress: (event) => {
-            const total = event.total || totalBytes || 1;
-            const loaded = Math.min(event.loaded || 0, total);
-            const progress = Math.min(99, Math.round((loaded / total) * 100));
-            updateJob(job.id, {
-              status: progress >= 99 ? 'processing' : 'uploading',
-              progress,
-              loadedBytes: loaded,
-              totalBytes: total,
-              message: progress >= 99
-                ? 'Upload received. Backend job queued; processing continues independently…'
-                : 'Uploading files to ROC Sphere…',
-            });
-          },
-        },
+        `/roc-sphere/companies/${job.companyId}/roc-dump/upload/finalize`,
+        { upload_id: uploadId },
+        { _skipReadyGate: true },
       );
-
       const serverJobId = data?.job_id;
       if (!serverJobId) {
         throw new Error('Backend did not return a ROC Forms Dump job ID');
@@ -109,6 +155,7 @@ export function ROCDumpUploadProvider({ children }) {
         serverJobId,
         status: 'processing',
         progress: 99,
+        loadedBytes: totalBytes,
         message: 'Upload received. Backend is processing the ROC Forms Dump in the background…',
       });
 

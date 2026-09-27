@@ -31,6 +31,8 @@ CORS_ALLOWED_ORIGINS = [
 
     # Vercel production frontend
     "https://tasko-commercial-frontend.vercel.app",
+    # Current production frontend hostname (legacy spelling retained intentionally).
+    "https://tasko-commecial-frontend.vercel.app",
 
     # Render frontend / legacy frontend
     "https://final-taskosphere-frontend.onrender.com",

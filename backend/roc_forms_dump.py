@@ -95,6 +95,7 @@ MAX_ZIP_MEMBER_BYTES = 100 * 1024 * 1024
 MAX_EXPANDED_FILES = 5000
 
 ROC_JOBS = db.roc_form_dump_jobs
+ROC_UPLOADS = db.roc_form_dump_uploads
 ROC_STAGING_ROOT = Path(tempfile.gettempdir()) / "taskosphere_roc_dump_jobs"
 ROC_STAGING_ROOT.mkdir(parents=True, exist_ok=True)
 ROC_JOB_LOCK = asyncio.Lock()
@@ -1433,6 +1434,254 @@ async def resume_pending_roc_dump_jobs():
     except Exception:
         logger.exception("ROC Forms Dump startup recovery failed")
         return {"resumed": 0, "failed": 0}
+
+
+def _chunk_upload_dir(upload_id: str) -> Path:
+    return ROC_STAGING_ROOT / f"upload_{_safe_name(upload_id)}"
+
+
+async def _create_roc_dump_job_from_staged_files(
+    company_id: str,
+    prepared_by: str,
+    staged_files: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    total_bytes = sum(int(item.get("size_bytes") or 0) for item in staged_files)
+    if not staged_files:
+        raise HTTPException(400, "No files were staged for ROC Forms Dump")
+    if total_bytes > MAX_BATCH:
+        raise HTTPException(413, "Batch exceeds 500 MB")
+
+    job_id = _uid()
+    await ROC_JOBS.insert_one({
+        "id": job_id,
+        "company_id": company_id,
+        "prepared_by": prepared_by,
+        "status": "QUEUED",
+        "progress": 0,
+        "file_count": len(staged_files),
+        "processed_files": 0,
+        "expanded_files": 0,
+        "total_bytes": total_bytes,
+        "files": staged_files,
+        "created_at": _now(),
+        "message": "Upload received. Processing continues in the background.",
+    })
+    _schedule_roc_dump_job(job_id)
+    return {
+        "job_id": job_id,
+        "company_id": company_id,
+        "status": "QUEUED",
+        "file_count": len(staged_files),
+        "total_bytes": total_bytes,
+        "message": "Upload received. Processing continues in the background.",
+        "status_url": f"/roc-sphere/companies/{company_id}/roc-dump/jobs/{job_id}",
+    }
+
+
+@router.post("/companies/{company_id}/roc-dump/upload/initiate", status_code=201)
+async def initiate_roc_dump_upload(
+    company_id: str,
+    payload: Dict[str, Any],
+    current_user: User = Depends(CREATE),
+):
+    """Create a resumable upload session.
+
+    Large ROC archives are uploaded in bounded chunks so a 200–500 MB archive
+    does not have to survive as one long HTTP request through the Render edge.
+    The normal single chooser in the browser still uses this endpoint
+    transparently.
+    """
+    company = await COMPANIES.find_one({"id": company_id})
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    incoming = payload.get("files") if isinstance(payload, dict) else None
+    if not isinstance(incoming, list) or not incoming:
+        raise HTTPException(400, "Select at least one ROC form")
+
+    total_bytes = 0
+    normalized: List[Dict[str, Any]] = []
+    for index, item in enumerate(incoming):
+        if not isinstance(item, dict):
+            raise HTTPException(400, f"Invalid file metadata at index {index}")
+        filename = _safe_relative_path(item.get("filename") or "roc-form")
+        lower = filename.lower()
+        if not lower.endswith(ALLOWED_EXT + ARCHIVE_EXT + UNREADABLE_BUT_ACCEPTED_EXT):
+            raise HTTPException(400, f"Unsupported file type: {filename}")
+        try:
+            size = int(item.get("size_bytes") or 0)
+        except (TypeError, ValueError):
+            raise HTTPException(400, f"Invalid file size for {filename}")
+        if size < 0:
+            raise HTTPException(400, f"Invalid file size for {filename}")
+        total_bytes += size
+        if total_bytes > MAX_BATCH:
+            raise HTTPException(413, "Batch exceeds 500 MB")
+        normalized.append({
+            "index": index,
+            "filename": filename,
+            "size_bytes": size,
+            "total_chunks": max(1, int(item.get("total_chunks") or 1)),
+        })
+
+    upload_id = _uid()
+    upload_dir = _chunk_upload_dir(upload_id)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    session = {
+        "id": upload_id,
+        "company_id": company_id,
+        "prepared_by": _who(current_user),
+        "status": "UPLOADING",
+        "created_at": _now(),
+        "updated_at": _now(),
+        "total_bytes": total_bytes,
+        "files": normalized,
+    }
+    try:
+        await ROC_UPLOADS.insert_one(session)
+    except Exception:
+        shutil.rmtree(upload_dir, ignore_errors=True)
+        raise
+
+    return {
+        "upload_id": upload_id,
+        "company_id": company_id,
+        "file_count": len(normalized),
+        "total_bytes": total_bytes,
+        "chunk_size": 8 * 1024 * 1024,
+        "status": "UPLOADING",
+    }
+
+
+@router.post("/companies/{company_id}/roc-dump/upload/chunk", status_code=204)
+async def upload_roc_dump_chunk(
+    company_id: str,
+    upload_id: str = Form(...),
+    file_index: int = Form(...),
+    chunk_index: int = Form(...),
+    total_chunks: int = Form(...),
+    chunk: UploadFile = File(...),
+    current_user: User = Depends(CREATE),
+):
+    """Receive one bounded chunk and persist it before acknowledging it."""
+    session = await ROC_UPLOADS.find_one({"id": upload_id, "company_id": company_id})
+    if not session:
+        raise HTTPException(404, "ROC upload session not found")
+    if session.get("status") != "UPLOADING":
+        raise HTTPException(409, "ROC upload session is no longer accepting chunks")
+
+    descriptors = session.get("files") or []
+    if file_index < 0 or file_index >= len(descriptors):
+        raise HTTPException(400, "Invalid file index")
+    descriptor = descriptors[file_index]
+    expected_chunks = int(descriptor.get("total_chunks") or 1)
+    if total_chunks != expected_chunks or chunk_index < 0 or chunk_index >= expected_chunks:
+        raise HTTPException(400, "Invalid chunk metadata")
+
+    upload_dir = _chunk_upload_dir(upload_id)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    file_dir = upload_dir / f"{file_index:06d}"
+    file_dir.mkdir(parents=True, exist_ok=True)
+    target = file_dir / f"{chunk_index:06d}.part"
+
+    written = 0
+    try:
+        with target.open("wb") as output:
+            while True:
+                data = await chunk.read(CHUNK_SIZE)
+                if not data:
+                    break
+                written += len(data)
+                if written > 8 * 1024 * 1024 + 1024 * 1024:
+                    raise HTTPException(413, "Upload chunk exceeds 9 MB")
+                output.write(data)
+    finally:
+        await chunk.close()
+
+    expected_size = int(descriptor.get("size_bytes") or 0)
+    if expected_chunks == 1 and written != expected_size:
+        target.unlink(missing_ok=True)
+        raise HTTPException(400, f"Chunk size mismatch for {descriptor.get('filename')}")
+    await ROC_UPLOADS.update_one(
+        {"id": upload_id},
+        {"$set": {"updated_at": _now()}},
+    )
+
+
+@router.post("/companies/{company_id}/roc-dump/upload/finalize", status_code=202)
+async def finalize_roc_dump_upload(
+    company_id: str,
+    payload: Dict[str, Any],
+    current_user: User = Depends(CREATE),
+):
+    upload_id = str((payload or {}).get("upload_id") or "").strip()
+    if not upload_id:
+        raise HTTPException(400, "upload_id is required")
+
+    session = await ROC_UPLOADS.find_one({"id": upload_id, "company_id": company_id})
+    if not session:
+        raise HTTPException(404, "ROC upload session not found")
+    if session.get("status") != "UPLOADING":
+        raise HTTPException(409, "ROC upload session has already been finalized")
+
+    upload_dir = _chunk_upload_dir(upload_id)
+    staged_files: List[Dict[str, Any]] = []
+    try:
+        for descriptor in session.get("files") or []:
+            index = int(descriptor.get("index") or 0)
+            total_chunks = int(descriptor.get("total_chunks") or 1)
+            file_dir = upload_dir / f"{index:06d}"
+            if not file_dir.exists():
+                raise HTTPException(409, f"File is incomplete: {descriptor.get('filename')}")
+
+            assembled = upload_dir / f"{index:06d}.upload"
+            with assembled.open("wb") as output:
+                for chunk_index in range(total_chunks):
+                    part = file_dir / f"{chunk_index:06d}.part"
+                    if not part.exists():
+                        raise HTTPException(409, f"Missing chunk {chunk_index + 1}/{total_chunks} for {descriptor.get('filename')}")
+                    with part.open("rb") as source:
+                        shutil.copyfileobj(source, output, length=1024 * 1024)
+
+            size = assembled.stat().st_size
+            if size != int(descriptor.get("size_bytes") or 0):
+                raise HTTPException(409, f"File size mismatch after upload: {descriptor.get('filename')}")
+
+            staged_files.append({
+                "path": str(assembled),
+                "filename": _safe_relative_path(descriptor.get("filename") or "roc-form"),
+                "size_bytes": size,
+            })
+            shutil.rmtree(file_dir, ignore_errors=True)
+
+        await ROC_UPLOADS.update_one(
+            {"id": upload_id},
+            {"$set": {"status": "FINALIZING", "updated_at": _now()}},
+        )
+        result = await _create_roc_dump_job_from_staged_files(
+            company_id,
+            _who(current_user),
+            staged_files,
+        )
+        await ROC_UPLOADS.update_one(
+            {"id": upload_id},
+            {"$set": {
+                "status": "QUEUED",
+                "job_id": result["job_id"],
+                "updated_at": _now(),
+            }},
+        )
+        shutil.rmtree(upload_dir, ignore_errors=True)
+        return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("ROC chunked upload finalization failed")
+        await ROC_UPLOADS.update_one(
+            {"id": upload_id},
+            {"$set": {"status": "FAILED", "error": str(exc), "updated_at": _now()}},
+        )
+        raise HTTPException(500, "Unable to finalize ROC Forms Dump upload") from exc
 
 
 def _schedule_roc_dump_job(job_id: str):
