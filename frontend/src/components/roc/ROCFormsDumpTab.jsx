@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ChevronDown, Download, FolderUp, Loader2, Upload } from 'lucide-react';
+import { ChevronDown, Download, FileArchive, FolderUp, Loader2, Upload, X } from 'lucide-react';
 import { toast } from 'sonner';
 import api from '@/lib/api';
 
@@ -65,7 +65,85 @@ function ROCFormsDumpTab({ company, isDark, text, muted }) {
   const [busy, setBusy] = useState(false);
   const [minimized, setMinimized] = useState(false);
   const [correctingId, setCorrectingId] = useState(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [dropActive, setDropActive] = useState(false);
+  const fileInputRef = useRef(null);
   const folderInputRef = useRef(null);
+
+  const addFiles = useCallback((incoming) => {
+    setFiles((prev) => mergeFiles(prev, Array.from(incoming || [])));
+  }, []);
+
+  const readDroppedEntries = useCallback(async (items) => {
+    const output = [];
+
+    const readFileEntry = (entry, relativePath) => new Promise((resolve) => {
+      entry.file((file) => {
+        try {
+          Object.defineProperty(file, 'rocRelativePath', {
+            value: relativePath,
+            configurable: true,
+          });
+        } catch {
+          // The File remains usable even if a browser refuses the custom path.
+        }
+        output.push(file);
+        resolve();
+      }, () => resolve());
+    });
+
+    const readDirectoryEntry = async (entry, parentPath = '') => {
+      const directoryPath = parentPath ? `${parentPath}/${entry.name}` : entry.name;
+      const reader = entry.createReader();
+
+      // Chromium may return only a batch (commonly 100 entries) from
+      // readEntries(), so keep reading until the browser returns [].
+      while (true) {
+        const entries = await new Promise((resolve) => {
+          reader.readEntries(resolve, () => resolve([]));
+        });
+        if (!entries.length) break;
+
+        for (const child of entries) {
+          if (child.isFile) {
+            await readFileEntry(child, `${directoryPath}/${child.name}`);
+          } else if (child.isDirectory) {
+            await readDirectoryEntry(child, directoryPath);
+          }
+        }
+      }
+    };
+
+    for (const item of Array.from(items || [])) {
+      const getEntry = item?.webkitGetAsEntry || item?.getAsEntry;
+      const entry = getEntry ? getEntry.call(item) : null;
+      if (entry?.isFile) {
+        await readFileEntry(entry, entry.name);
+      } else if (entry?.isDirectory) {
+        await readDirectoryEntry(entry);
+      } else {
+        const file = item?.getAsFile?.();
+        if (file) output.push(file);
+      }
+    }
+
+    return output;
+  }, []);
+
+  const handleDrop = useCallback(async (event) => {
+    event.preventDefault();
+    setDropActive(false);
+    if (busy) return;
+    const dropped = await readDroppedEntries(event.dataTransfer?.items || []);
+    addFiles(dropped);
+  }, [addFiles, busy, readDroppedEntries]);
+
+  const appendFilesToForm = useCallback((form) => {
+    files.forEach((file) => {
+      const relativeName = file.rocRelativePath || file.webkitRelativePath || file.name;
+      form.append('files', file, relativeName);
+    });
+  }, [files]);
 
   const load = useCallback(async () => {
     if (!company?.id) return;
@@ -88,11 +166,12 @@ function ROCFormsDumpTab({ company, isDark, text, muted }) {
     setBusy(true);
     try {
       const form = new FormData();
-      files.forEach((file) => form.append('files', file));
+      appendFilesToForm(form);
       await api.post(`/roc-sphere/companies/${company.id}/roc-dump/upload`, form, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       setFiles([]);
+      setPickerOpen(false);
       await load();
       toast.success('ROC Forms Dump processed and Company Summary updated');
     } catch (err) {
@@ -181,8 +260,8 @@ function ROCFormsDumpTab({ company, isDark, text, muted }) {
           <div className="p-4 space-y-4">
             <div className={`rounded-lg border p-3 ${isDark ? 'border-blue-800 bg-blue-950/20' : 'border-blue-200 bg-blue-50'}`}>
               <p className={`text-xs ${text}`}>
-                Upload the company's ROC forms from incorporation to date — individual files, a whole
-                folder, or a ZIP archive. PDFs, Excel/CSV sheets and Word (.docx) documents are all read
+                Upload the company's ROC forms from incorporation to date using one chooser — individual files,
+                multiple files, a whole folder, or ZIP archives. PDFs, Excel/CSV sheets and Word (.docx) documents are all read
                 and interpreted automatically; files inside ZIPs and folders (including nested subfolders)
                 are extracted and processed the same way. Every filing is retained, classified and
                 extracted, and marked for review when the source can't be read confidently. Verifying a
@@ -192,17 +271,41 @@ function ROCFormsDumpTab({ company, isDark, text, muted }) {
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              <input type="file" multiple accept={ACCEPTED_EXT}
-                onChange={(e) => setFiles((prev) => mergeFiles(prev, Array.from(e.target.files || [])))}
-                className={`roc-forms-dump-file-input block text-xs ${muted} file:mr-3 file:px-3 file:py-1.5 file:border file:border-slate-300 file:bg-slate-50 file:text-slate-700 file:font-semibold file:cursor-pointer`} />
+              <input ref={fileInputRef} type="file" multiple accept={ACCEPTED_EXT}
+                onChange={(e) => {
+                  addFiles(Array.from(e.target.files || []));
+                  e.target.value = '';
+                  setPickerOpen(false);
+                }}
+                className="hidden" />
               <input ref={folderInputRef} type="file" multiple
                 webkitdirectory="" directory="" mozdirectory=""
-                onChange={(e) => setFiles((prev) => mergeFiles(prev, Array.from(e.target.files || [])))}
+                onChange={(e) => {
+                  addFiles(Array.from(e.target.files || []));
+                  e.target.value = '';
+                  setPickerOpen(false);
+                }}
                 className="hidden" />
-              <button type="button" onClick={() => folderInputRef.current?.click()}
-                className="px-3 py-2 rounded-lg border border-slate-300 text-xs font-semibold flex items-center gap-1.5">
-                <FolderUp size={13} /> Choose folder
-              </button>
+
+              <div className="relative">
+                <button type="button" disabled={busy} onClick={() => setPickerOpen((value) => !value)}
+                  className="px-3 py-2 rounded-lg border border-slate-300 text-xs font-semibold flex items-center gap-1.5 disabled:opacity-50">
+                  <FolderUp size={13} /> Choose files / folders
+                </button>
+                {pickerOpen && (
+                  <div className={`absolute left-0 top-full mt-1 z-40 w-56 rounded-lg border shadow-lg p-1 ${card}`}>
+                    <button type="button" onClick={() => fileInputRef.current?.click()}
+                      className={`w-full text-left px-3 py-2 rounded-md text-xs font-semibold flex items-center gap-2 ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}>
+                      <Upload size={13} /> Files / ZIP archives
+                    </button>
+                    <button type="button" onClick={() => folderInputRef.current?.click()}
+                      className={`w-full text-left px-3 py-2 rounded-md text-xs font-semibold flex items-center gap-2 ${isDark ? 'hover:bg-slate-700' : 'hover:bg-slate-100'}`}>
+                      <FolderUp size={13} /> Entire folder
+                    </button>
+                  </div>
+                )}
+              </div>
+
               {files.length > 0 && (
                 <span className={`text-[11px] ${muted}`}>{files.length} file(s) selected</span>
               )}
@@ -222,6 +325,24 @@ function ROCFormsDumpTab({ company, isDark, text, muted }) {
                 Rebuild Summary
               </button>
             </div>
+              <div
+                onDragOver={(event) => { event.preventDefault(); if (!busy) setDropActive(true); }}
+                onDragLeave={() => setDropActive(false)}
+                onDrop={handleDrop}
+                className={`rounded-lg border-2 border-dashed p-3 text-xs transition ${dropActive
+                  ? 'border-blue-500 bg-blue-50 text-blue-700'
+                  : isDark ? 'border-slate-600 bg-slate-900/20 text-slate-300' : 'border-slate-300 bg-slate-50 text-slate-600'}`}>
+                <div className="flex items-center gap-2">
+                  <FileArchive size={15} />
+                  <span>Drag and drop files, ZIPs, or folders here. Mixed files, multiple folders, and nested ZIPs are supported in one upload.</span>
+                  {files.length > 0 && (
+                    <button type="button" onClick={() => setFiles([])}
+                      className="ml-auto p-1 rounded hover:bg-black/5" title="Clear selected files">
+                      <X size={13} />
+                    </button>
+                  )}
+                </div>
+              </div>
 
             {summary && (
               <div className="grid grid-cols-2 md:grid-cols-5 gap-2">

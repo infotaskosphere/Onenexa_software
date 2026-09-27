@@ -14,6 +14,8 @@ import io
 import json
 import logging
 import re
+import subprocess
+import tempfile
 import uuid
 import zipfile
 from collections import Counter
@@ -57,10 +59,12 @@ ARCHIVE_EXT = (".zip",)
 # rejected.
 UNREADABLE_BUT_ACCEPTED_EXT = (".doc",)
 CHUNK_SIZE = 512 * 1024
-MAX_BATCH = 200 * 1024 * 1024
+MAX_BATCH = 500 * 1024 * 1024
 MAX_TEXT_STORE = 150_000
-MAX_ZIP_MEMBERS = 500
-MAX_ZIP_NESTING = 2
+MAX_ZIP_MEMBERS = 2000
+MAX_ZIP_NESTING = 5
+MAX_ZIP_MEMBER_BYTES = 100 * 1024 * 1024
+MAX_EXPANDED_FILES = 5000
 
 
 def _now():
@@ -88,63 +92,172 @@ def _sha256(raw):
 
 
 def _extract_pdf_text(raw):
-    parts = []
+    """Extract text from text-based PDFs, with pypdf as a second parser."""
     try:
         import pdfplumber
         with pdfplumber.open(io.BytesIO(raw)) as pdf:
             page_count = len(pdf.pages)
+            parts = []
             for page in pdf.pages:
                 parts.append(page.extract_text(x_tolerance=1, y_tolerance=3) or "")
-        return "\n".join(parts), page_count
+            text = "\n".join(parts).strip()
+            if text:
+                return text, page_count
     except Exception as exc:
-        logger.warning("ROC dump PDF extraction failed: %s", exc)
+        logger.warning("ROC dump pdfplumber extraction failed: %s", exc)
+
+    try:
+        from pypdf import PdfReader
+        reader = PdfReader(io.BytesIO(raw))
+        parts = [(page.extract_text() or "") for page in reader.pages]
+        return "\n".join(parts), len(reader.pages)
+    except Exception as exc:
+        logger.warning("ROC dump pypdf extraction failed: %s", exc)
         return "", 0
 
 
 def _extract_workbook_text(filename, raw):
     try:
+        lower_name = str(filename or "").lower()
+
+        if lower_name.endswith(".xls"):
+            import xlrd
+            book = xlrd.open_workbook(file_contents=raw, on_demand=True)
+            lines = []
+            try:
+                for sheet in book.sheets():
+                    lines.append(f"[SHEET: {sheet.name}]")
+                    for row_index in range(sheet.nrows):
+                        values = [
+                            _clean_text(sheet.cell_value(row_index, col_index))
+                            for col_index in range(sheet.ncols)
+                        ]
+                        values = [value for value in values if value]
+                        if values:
+                            lines.append(" | ".join(values))
+            finally:
+                book.release_resources()
+            return "\n".join(lines), 0
+
         import openpyxl
-        wb = openpyxl.load_workbook(
+        # data_only=True gives the cached/display value of formula cells.
+        # A second pass with formulas enabled fills cells where the workbook
+        # has no cached result, so formula-heavy ROC workbooks are not blank.
+        wb_values = openpyxl.load_workbook(
             io.BytesIO(raw),
             read_only=True,
             data_only=True,
-            keep_vba=str(filename).lower().endswith(".xlsm"),
+            keep_vba=lower_name.endswith(".xlsm"),
         )
-        lines = []
-        for ws in wb.worksheets:
-            lines.append(f"[SHEET: {ws.title}]")
-            for row in ws.iter_rows(values_only=True):
-                values = [_clean_text(v) for v in row if v is not None]
-                if values:
-                    lines.append(" | ".join(values))
-        wb.close()
-        return "\n".join(lines), 0
+        wb_formulas = None
+        try:
+            lines = []
+            for ws in wb_values.worksheets:
+                lines.append(f"[SHEET: {ws.title}]")
+                for row in ws.iter_rows(values_only=True):
+                    values = [_clean_text(value) for value in row if value is not None]
+                    if values:
+                        lines.append(" | ".join(values))
+
+            if not any(line.strip() for line in lines[1:]):
+                wb_formulas = openpyxl.load_workbook(
+                    io.BytesIO(raw),
+                    read_only=True,
+                    data_only=False,
+                    keep_vba=lower_name.endswith(".xlsm"),
+                )
+                lines = []
+                for ws in wb_formulas.worksheets:
+                    lines.append(f"[SHEET: {ws.title}]")
+                    for row in ws.iter_rows(values_only=True):
+                        values = [_clean_text(value) for value in row if value is not None]
+                        if values:
+                            lines.append(" | ".join(values))
+            return "\n".join(lines), 0
+        finally:
+            wb_values.close()
+            if wb_formulas is not None:
+                wb_formulas.close()
     except Exception as exc:
-        logger.warning("ROC dump workbook extraction failed: %s", exc)
+        logger.warning("ROC dump workbook extraction failed for %s: %s", filename, exc)
         return "", 0
 
 
 def _extract_docx_text(raw):
-    """Read a Word (.docx) ROC form: body paragraphs plus any tables, in
-    document order, so downstream regex extraction sees the same layout a
-    reviewer would."""
+    """Read DOCX body, tables, headers and footers without losing table data."""
     try:
         doc = DocxDocument(io.BytesIO(raw))
         lines = []
-        for para in doc.paragraphs:
-            text = _clean_text(para.text)
+
+        for section in doc.sections:
+            for para in section.header.paragraphs:
+                text = _clean_text(para.text)
+                if text:
+                    lines.append(f"[HEADER] {text}")
+            for para in section.footer.paragraphs:
+                text = _clean_text(para.text)
+                if text:
+                    lines.append(f"[FOOTER] {text}")
+
+        for block in doc.paragraphs:
+            text = _clean_text(block.text)
             if text:
                 lines.append(text)
+
         for table in doc.tables:
             for row in table.rows:
                 cells = [_clean_text(cell.text) for cell in row.cells]
-                cells = [c for c in cells if c]
+                cells = [cell for cell in cells if cell]
                 if cells:
                     lines.append(" | ".join(cells))
+
         return "\n".join(lines), 0
     except Exception as exc:
         logger.warning("ROC dump .docx extraction failed: %s", exc)
         return "", 0
+
+
+def _decode_text_bytes(raw):
+    """Decode CSV/text payloads with UTF-8 first, then a detected legacy encoding."""
+    try:
+        return raw.decode("utf-8-sig"), 0
+    except UnicodeDecodeError:
+        pass
+
+    try:
+        import chardet
+        detected = chardet.detect(raw)
+        encoding = detected.get("encoding") if detected else None
+        if encoding:
+            return raw.decode(encoding, errors="replace"), 0
+    except Exception as exc:
+        logger.warning("ROC dump text encoding detection failed: %s", exc)
+
+    return raw.decode("utf-8", errors="replace"), 0
+
+
+def _extract_legacy_doc_text(raw):
+    """Best-effort extraction for old binary .doc files when a system extractor exists."""
+    with tempfile.TemporaryDirectory(prefix="roc_doc_") as temp_dir:
+        source = f"{temp_dir}/document.doc"
+        with open(source, "wb") as handle:
+            handle.write(raw)
+
+        for command in ("antiword", "catdoc"):
+            try:
+                result = subprocess.run(
+                    [command, source],
+                    capture_output=True,
+                    timeout=30,
+                    check=False,
+                )
+            except (FileNotFoundError, subprocess.SubprocessError):
+                continue
+            if result.returncode == 0:
+                text = result.stdout.decode("utf-8", errors="replace").strip()
+                if text:
+                    return text, 0
+    return "", 0
 
 
 def _extract_text(filename, raw):
@@ -156,51 +269,100 @@ def _extract_text(filename, raw):
     if name.endswith(".docx"):
         return _extract_docx_text(raw)
     if name.endswith(UNREADABLE_BUT_ACCEPTED_EXT):
-        # Legacy binary .doc — retained and archived, but not parsed.
-        return "", 0
-    try:
-        return raw.decode("utf-8", errors="replace"), 0
-    except Exception:
-        return "", 0
+        return _extract_legacy_doc_text(raw)
+    return _decode_text_bytes(raw)
 
 
-def _iter_archive_members(raw: bytes, path_prefix: str = "", depth: int = 0) -> List[Tuple[str, bytes]]:
-    """Expand a .zip (folder upload or archive) into (relative_filename, raw_bytes)
-    pairs for every eligible member, recursing into nested zips up to
-    MAX_ZIP_NESTING deep. Directories, hidden/system files (__MACOSX,
-    .DS_Store, Thumbs.db) and anything outside ALLOWED_EXT/ARCHIVE_EXT are
-    skipped rather than rejected, so a mixed folder upload doesn't fail as a
-    whole."""
+def _safe_relative_path(name: str) -> str:
+    """Normalize user/ZIP supplied paths before storing them as provenance."""
+    raw_name = str(name or "").replace("\\", "/")
+    parts = []
+    for part in raw_name.split("/"):
+        part = part.strip()
+        if not part or part == ".":
+            continue
+        if part == "..":
+            continue
+        part = re.sub(r"^[A-Za-z]:$", "", part)
+        part = re.sub(r"[\\x00-\\x1f]", "", part)
+        if part:
+            parts.append(part)
+    return "/".join(parts) or "roc-form"
+
+
+def _iter_archive_members(
+    raw: bytes,
+    path_prefix: str = "",
+    depth: int = 0,
+    state: Optional[Dict[str, int]] = None,
+) -> List[Tuple[str, bytes]]:
+    """Expand ZIPs recursively while preserving paths and bounding expansion."""
+    if state is None:
+        state = {"files": 0, "bytes": 0}
+
     members: List[Tuple[str, bytes]] = []
     if depth > MAX_ZIP_NESTING:
         return members
+
     try:
         with zipfile.ZipFile(io.BytesIO(raw)) as zf:
-            infos = [i for i in zf.infolist() if not i.is_dir()][:MAX_ZIP_MEMBERS]
+            infos = [info for info in zf.infolist() if not info.is_dir()]
+
             for info in infos:
-                name = info.filename
+                if state["files"] >= MAX_EXPANDED_FILES:
+                    logger.warning("ROC dump ZIP expansion stopped at %s files", MAX_EXPANDED_FILES)
+                    break
+
+                name = _safe_relative_path(info.filename)
                 base = name.rsplit("/", 1)[-1]
                 if not base or base.startswith("."):
                     continue
                 if "__MACOSX" in name or base.lower() in {"thumbs.db", "desktop.ini"}:
                     continue
+
+                # Inspect declared uncompressed size before reading to avoid
+                # allocating an unexpectedly large member in memory.
+                if info.file_size > MAX_ZIP_MEMBER_BYTES:
+                    logger.warning("ROC dump ZIP member too large: %s (%s bytes)", name, info.file_size)
+                    continue
+                if state["bytes"] + info.file_size > MAX_BATCH:
+                    logger.warning("ROC dump ZIP expansion reached MAX_BATCH at %s", name)
+                    break
+
                 lower = base.lower()
                 try:
                     member_raw = zf.read(info)
                 except Exception as exc:
-                    logger.warning("ROC dump zip member unreadable %s: %s", name, exc)
+                    logger.warning("ROC dump ZIP member unreadable %s: %s", name, exc)
                     continue
-                relative_name = f"{path_prefix}{name}" if path_prefix else name
+
+                if len(member_raw) > MAX_ZIP_MEMBER_BYTES:
+                    logger.warning("ROC dump ZIP member expanded beyond limit: %s", name)
+                    continue
+                if state["bytes"] + len(member_raw) > MAX_BATCH:
+                    logger.warning("ROC dump ZIP expansion reached MAX_BATCH at %s", name)
+                    break
+
+                relative_name = f"{path_prefix}/{name}" if path_prefix else name
+
                 if lower.endswith(ARCHIVE_EXT):
-                    members.extend(_iter_archive_members(member_raw, f"{relative_name}/", depth + 1))
+                    state["bytes"] += len(member_raw)
+                    nested = _iter_archive_members(
+                        member_raw,
+                        relative_name,
+                        depth + 1,
+                        state,
+                    )
+                    members.extend(nested)
                 elif lower.endswith(ALLOWED_EXT + UNREADABLE_BUT_ACCEPTED_EXT):
+                    state["files"] += 1
+                    state["bytes"] += len(member_raw)
                     members.append((relative_name, member_raw))
-                # Anything else inside the archive (images, readme, etc.) is
-                # silently skipped — it isn't an ROC filing to extract.
+
     except zipfile.BadZipFile as exc:
         raise ValueError(f"not a valid ZIP archive ({exc})") from exc
-    return members
 
+    return members
 
 def _form_number(filename, text):
     hay = f"{filename}\n{text[:12000]}"
@@ -804,6 +966,7 @@ async def upload_roc_dump(
         raise HTTPException(400, "Select at least one ROC form")
 
     total = 0
+    expanded_count = 0
     results = []
     now = _now()
 
@@ -814,7 +977,7 @@ async def upload_roc_dump(
     # PDFs, Excel sheets, CSVs and Word documents in one request.
     entries: List[Tuple[str, bytes]] = []
     for uploaded in files:
-        filename = uploaded.filename or "roc-form"
+        filename = _safe_relative_path(uploaded.filename or "roc-form")
         raw = await uploaded.read()
         if filename.lower().endswith(ARCHIVE_EXT):
             try:
@@ -830,12 +993,20 @@ async def upload_roc_dump(
             entries.append((filename, raw))
 
     for filename, raw in entries:
+        expanded_count += 1
+        if expanded_count > MAX_EXPANDED_FILES:
+            results.append({
+                "filename": filename,
+                "status": "FAILED",
+                "error": f"Batch exceeds {MAX_EXPANDED_FILES} expanded files",
+            })
+            continue
         if not filename.lower().endswith(ALLOWED_EXT + UNREADABLE_BUT_ACCEPTED_EXT):
             results.append({"filename": filename, "status": "FAILED", "error": "Unsupported file type"})
             continue
         total += len(raw)
         if total > MAX_BATCH:
-            results.append({"filename": filename, "status": "FAILED", "error": "Batch exceeds 200 MB"})
+            results.append({"filename": filename, "status": "FAILED", "error": "Batch exceeds 500 MB"})
             continue
         if not raw:
             results.append({"filename": filename, "status": "FAILED", "error": "Empty file"})
