@@ -336,91 +336,85 @@ def _archive_kind(filename: str) -> str:
 
 
 def _rar_member_payloads_with_7zip(raw: bytes, archive_name: str) -> List[Tuple[str, bytes]]:
-    """RAR fallback that does not require the Python rarfile module at import time.
+    """Extract a RAR in one 7-Zip pass instead of reopening it per member.
 
-    Render images can have 7-Zip available even when the optional Python
-    wrapper is absent. Listing and extracting one eligible member at a time
-    keeps the same path/size limits used by the native ZIP/RAR path.
+    Reopening a large/solid RAR for every file can be extremely slow. A single
+    extraction pass is both faster and much more predictable for MCA archives.
     """
     tool = shutil.which("7z") or shutil.which("7zz") or shutil.which("7zr")
     if not tool:
         raise RuntimeError(
-            "RAR5 support is unavailable: neither rarfile nor a 7-Zip executable is installed."
+            "RAR5 support is unavailable: neither 7-Zip nor a supported RAR extractor is installed."
         )
 
     with tempfile.TemporaryDirectory(prefix="roc_rar_") as temp_dir:
-        archive_path = Path(temp_dir) / "upload.rar"
+        root = Path(temp_dir)
+        archive_path = root / "upload.rar"
+        output_dir = root / "expanded"
+        output_dir.mkdir(parents=True, exist_ok=True)
         archive_path.write_bytes(raw)
 
-        listed = subprocess.run(
-            [tool, "l", "-slt", str(archive_path)],
-            capture_output=True,
-            timeout=120,
+        result = subprocess.run(
+            [tool, "x", "-y", "-mmt=on", "-bd", "-bb0", str(archive_path), f"-o{output_dir}"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=15 * 60,
             check=False,
         )
-        if listed.returncode != 0:
-            detail = listed.stderr.decode("utf-8", errors="replace").strip()
-            raise ValueError(f"7-Zip could not read RAR archive: {detail or 'unknown error'}")
-
-        listing = listed.stdout.decode("utf-8", errors="replace")
-        names: List[str] = []
-        current: Dict[str, str] = {}
-        for line in listing.splitlines() + [""]:
-            if not line.strip():
-                if current.get("Path") and current.get("Folder") != "+":
-                    names.append(current["Path"])
-                current = {}
-                continue
-            key, separator, value = line.partition(" = ")
-            if separator:
-                current[key.strip()] = value
+        if result.returncode not in (0, 1):
+            detail = result.stderr.decode("utf-8", errors="replace").strip()
+            raise ValueError(
+                f"7-Zip could not extract RAR archive: "
+                f"{detail or 'exit code ' + str(result.returncode)}"
+            )
 
         members: List[Tuple[str, bytes]] = []
         state = {"files": 0, "bytes": 0}
 
-        for member_name in names:
+        for path in output_dir.rglob("*"):
+            if not path.is_file() or path.is_symlink():
+                continue
             if state["files"] >= MAX_EXPANDED_FILES:
+                logger.warning("ROC dump RAR expansion stopped at %s files", MAX_EXPANDED_FILES)
                 break
+            try:
+                relative = _safe_relative_path(str(path.relative_to(output_dir)))
+                size = path.stat().st_size
+            except OSError:
+                continue
 
-            safe_name = _safe_relative_path(member_name)
-            base = safe_name.rsplit("/", 1)[-1]
+            base = relative.rsplit("/", 1)[-1]
             if not base or base.startswith("."):
                 continue
-            if "__MACOSX" in safe_name or base.lower() in {"thumbs.db", "desktop.ini"}:
+            if "__MACOSX" in relative or base.lower() in {"thumbs.db", "desktop.ini"}:
                 continue
 
             lower = base.lower()
             if not lower.endswith(ALLOWED_EXT + UNREADABLE_BUT_ACCEPTED_EXT + ARCHIVE_EXT):
                 continue
-
-            # Extract exactly this member to stdout. No archive contents are
-            # written into a path controlled by the archive.
-            extracted = subprocess.run(
-                [tool, "x", "-so", str(archive_path), "--", member_name],
-                capture_output=True,
-                timeout=120,
-                check=False,
-            )
-            if extracted.returncode != 0:
-                logger.warning(
-                    "ROC dump 7-Zip member unreadable %s: %s",
-                    safe_name,
-                    extracted.stderr.decode("utf-8", errors="replace").strip(),
-                )
+            if size > MAX_ZIP_MEMBER_BYTES:
+                logger.warning("ROC dump RAR member too large: %s (%s bytes)", relative, size)
                 continue
-
-            member_raw = extracted.stdout
-            if len(member_raw) > MAX_ZIP_MEMBER_BYTES:
-                logger.warning("ROC dump RAR member too large: %s", safe_name)
-                continue
-            if state["bytes"] + len(member_raw) > MAX_BATCH:
-                logger.warning("ROC dump RAR expansion reached MAX_BATCH at %s", safe_name)
+            if state["bytes"] + size > MAX_BATCH:
+                logger.warning("ROC dump RAR expansion reached MAX_BATCH at %s", relative)
                 break
+
+            try:
+                member_raw = path.read_bytes()
+            except OSError as exc:
+                logger.warning("ROC dump RAR member unreadable %s: %s", relative, exc)
+                continue
 
             state["files"] += 1
             state["bytes"] += len(member_raw)
-            members.append((f"{archive_name}/{safe_name}", member_raw))
+            members.append((f"{archive_name}/{relative}", member_raw))
 
+        if not members and result.returncode == 1:
+            detail = result.stderr.decode("utf-8", errors="replace").strip()
+            raise ValueError(
+                f"7-Zip reported warnings/errors while extracting RAR archive: "
+                f"{detail or 'no supported ROC files were extracted'}"
+            )
         return members
 
 
@@ -487,6 +481,9 @@ def _iter_archive_members(
         return members
 
     if kind == "rar":
+        # Prefer the explicitly installed 7-Zip backend on Render.
+        if shutil.which("7z") or shutil.which("7zz") or shutil.which("7zr"):
+            return _rar_member_payloads_with_7zip(raw, path_prefix or "archive.rar")
         try:
             import rarfile
 
@@ -1156,13 +1153,14 @@ async def _process_roc_dump_entries(
     company_id: str,
     entries: List[Tuple[str, bytes]],
     prepared_by: str,
+    job_id: Optional[str] = None,
 ):
     total = 0
     expanded_count = 0
     results = []
     now = _now()
 
-    for filename, raw in entries:
+    for entry_index, (filename, raw) in enumerate(entries, start=1):
         expanded_count += 1
         if expanded_count > MAX_EXPANDED_FILES:
             results.append({
@@ -1194,7 +1192,8 @@ async def _process_roc_dump_entries(
             continue
 
         filing_id = _uid()
-        text, page_count = _extract_text(filename, raw)
+        # Keep synchronous PDF/Office parsing off the FastAPI event loop.
+        text, page_count = await asyncio.to_thread(_extract_text, filename, raw)
         form_number, prefix, number = _form_number(filename, text)
         classification, learning_boost, learned = await _classify_with_learning(form_number, text, company_id)
         metadata = _extract_metadata(form_number, text)
@@ -1278,6 +1277,21 @@ async def _process_roc_dump_entries(
             "event_count": len(events),
         })
 
+        if job_id:
+            try:
+                progress = 35 + int((entry_index / max(len(entries), 1)) * 60)
+                await ROC_JOBS.update_one(
+                    {"id": job_id},
+                    {"$set": {
+                        "progress": min(95, progress),
+                        "processed_files": entry_index,
+                        "expanded_files": len(entries),
+                        "message": f"Processed {entry_index}/{len(entries)}: {filename}",
+                    }},
+                )
+            except Exception:
+                logger.warning("ROC dump progress update failed for %s", job_id, exc_info=True)
+
 
 
     summary, events, summary_doc = await _rebuild(company_id, prepared_by)
@@ -1313,19 +1327,47 @@ async def _process_roc_dump_job(job_id: str):
 
         try:
             entries: List[Tuple[str, bytes]] = []
-            for staged in staged_files:
+            staged_count = max(len(staged_files), 1)
+            for staged_index, staged in enumerate(staged_files):
                 path = Path(staged.get("path") or "")
                 filename = _safe_relative_path(staged.get("filename") or "roc-form")
                 if not path.exists():
                     raise RuntimeError(f"Staged upload is no longer available: {filename}")
 
+                await ROC_JOBS.update_one(
+                    {"id": job_id},
+                    {"$set": {
+                        "progress": min(20, int((staged_index / staged_count) * 20)),
+                        "message": (
+                            f"Extracting archive {staged_index + 1}/{staged_count}: {filename}"
+                            if filename.lower().endswith(ARCHIVE_EXT)
+                            else f"Preparing file {staged_index + 1}/{staged_count}: {filename}"
+                        ),
+                    }},
+                )
+
                 raw = await asyncio.to_thread(path.read_bytes)
                 if filename.lower().endswith(ARCHIVE_EXT):
                     try:
-                        expanded = await asyncio.to_thread(_iter_archive_members, raw, filename)
+                        expanded = await asyncio.wait_for(
+                            asyncio.to_thread(_iter_archive_members, raw, filename),
+                            timeout=15 * 60,
+                        )
+                    except asyncio.TimeoutError as exc:
+                        raise RuntimeError(
+                            f"Archive extraction timed out after 15 minutes: {filename}"
+                        ) from exc
                     except ValueError as exc:
                         raise RuntimeError(f"Unable to read archive {filename}: {exc}") from exc
                     entries.extend(expanded)
+                    await ROC_JOBS.update_one(
+                        {"id": job_id},
+                        {"$set": {
+                            "progress": 30,
+                            "expanded_files": len(entries),
+                            "message": f"Archive extracted: {len(expanded)} supported ROC file(s) found. Starting document extraction…",
+                        }},
+                    )
                 else:
                     entries.append((filename, raw))
 
@@ -1335,7 +1377,17 @@ async def _process_roc_dump_job(job_id: str):
                     pass
                 await asyncio.sleep(0)
 
-            result = await _process_roc_dump_entries(company_id, entries, prepared_by)
+            await ROC_JOBS.update_one(
+                {"id": job_id},
+                {"$set": {
+                    "progress": 35,
+                    "message": f"Extracting and classifying {len(entries)} ROC file(s)…",
+                }},
+            )
+
+            result = await _process_roc_dump_entries(
+                company_id, entries, prepared_by, job_id=job_id
+            )
 
             await ROC_JOBS.update_one(
                 {"id": job_id},

@@ -7,7 +7,12 @@ set -e
 echo "==> Installing archive extraction support (7-Zip for RAR5)..."
 if command -v apt-get >/dev/null 2>&1; then
   apt-get update -y
-  apt-get install -y 7zip || apt-get install -y p7zip-full || true
+  apt-get install -y 7zip 7zip-rar || apt-get install -y p7zip-full p7zip-rar || true
+fi
+
+echo "==> Installing OCR runtime (Tesseract + Poppler)..."
+if command -v apt-get >/dev/null 2>&1; then
+  apt-get install -y tesseract-ocr poppler-utils || true
 fi
 
 echo "==> Installing Python dependencies..."
