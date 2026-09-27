@@ -224,7 +224,7 @@ const DashboardLayout = ({ children }) => {
           aria-label={meta.label}
           aria-current={isActive ? 'page' : undefined}
           onClick={() => navigate(meta.landingPath)}
-          className={`group relative flex items-center justify-center gap-1.5 h-[32px] my-[4px] text-[13px] whitespace-nowrap flex-shrink-0 cursor-pointer rounded-md font-medium transition-all duration-200 select-none ${
+          className={`group relative flex items-center justify-center gap-1.5 h-[32px] my-[4px] text-[13px] whitespace-nowrap flex-shrink-0 cursor-pointer rounded-none font-medium transition-all duration-200 select-none ${
             iconOnlyTabs ? 'w-9 px-1' : compactTabs ? 'px-2' : 'px-3 sm:px-3.5'
           } ${
             isActive
@@ -237,9 +237,9 @@ const DashboardLayout = ({ children }) => {
                   backgroundColor: activeBg,
                   color: activeText,
                   borderBottom: `3px solid ${activeBorder}`,
-                  boxShadow: `0 2px 8px ${activeColor}24`,
+                  borderRadius: 0,
                 }
-              : undefined
+              : { borderRadius: 0 }
           }
         >
           <Icon
@@ -257,12 +257,6 @@ const DashboardLayout = ({ children }) => {
             >
               {meta.label}
             </span>
-          )}
-          {isActive && !iconOnlyTabs && (
-            <span
-              className="w-1.5 h-1.5 rounded-full flex-shrink-0 transition-all duration-200 animate-pulse"
-              style={{ backgroundColor: activeColor }}
-            />
           )}
         </button>
       );

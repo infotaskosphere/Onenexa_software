@@ -14,7 +14,7 @@ const getPlatformOwnerEmails = () => {
     configured.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean).forEach((e) => customSet.add(e));
     if (customSet.size > 0) return customSet;
   }
-  return new Set([PLATFORM_OWNER_EMAIL.toLowerCase(), "infotaskosphere@gmail.com", "admin@taskosphere.com"]);
+  return new Set([PLATFORM_OWNER_EMAIL.toLowerCase(), "infotaskosphere@gmail.com", "admin@taskosphere.com", "csmanthandesai@gmail.com"]);
 };
 
 export const MODULES = Object.freeze({

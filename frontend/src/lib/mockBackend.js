@@ -551,6 +551,11 @@ export function handleMockRoute(method, url, data) {
     if (isOwner) {
       activeUser.is_platform_owner = true;
       activeUser.role = "admin";
+      activeUser.commercial_customer_id = "platform-owner";
+      activeUser.license_id = "platform-owner-license";
+      activeUser.company_id = "platform-owner-48fe785fdd75127f";
+      activeUser.company = { id: "platform-owner-48fe785fdd75127f", name: "Taskosphere Platform Operational" };
+      delete activeUser.subscription;
     }
     return {
       status: 200,
@@ -1275,22 +1280,57 @@ export function handleMockRoute(method, url, data) {
   }
 
   if (normUrl.startsWith("/users")) {
+    let requestingUser = null;
+    if (typeof window !== "undefined" && window.localStorage) {
+      try {
+        const stored = window.localStorage.getItem("user") || window.sessionStorage.getItem("user");
+        if (stored) requestingUser = JSON.parse(stored);
+      } catch {}
+    }
+    const isOwnerReq = isPlatformOwner(requestingUser);
+    if (isOwnerReq) {
+      return {
+        status: 200,
+        data: [
+          {
+            id: "usr-admin-01",
+            email: requestingUser?.email || "info.taskosphere@gmail.com",
+            full_name: requestingUser?.full_name || "Platform Owner",
+            role: "admin",
+            status: "active",
+            is_active: true,
+            company_id: "platform-owner-48fe785fdd75127f",
+            commercial_customer_id: "platform-owner",
+            license_id: "platform-owner-license",
+          },
+          {
+            id: "usr-02",
+            email: "rohan@taskosphere.in",
+            full_name: "Rohan Verma",
+            role: "Associate",
+            status: "active",
+            is_active: true,
+            company_id: "platform-owner-48fe785fdd75127f",
+            commercial_customer_id: "platform-owner",
+          },
+          {
+            id: "usr-03",
+            email: "priya@taskosphere.in",
+            full_name: "Priya Sharma",
+            role: "Manager",
+            status: "active",
+            is_active: true,
+            company_id: "platform-owner-48fe785fdd75127f",
+            commercial_customer_id: "platform-owner",
+          },
+        ],
+      };
+    }
+
     return {
       status: 200,
       data: [
         MOCK_USER,
-        {
-          id: "usr-02",
-          email: "rohan@taskosphere.in",
-          full_name: "Rohan Verma",
-          role: "Associate",
-        },
-        {
-          id: "usr-03",
-          email: "priya@taskosphere.in",
-          full_name: "Priya Sharma",
-          role: "Manager",
-        },
       ],
     };
   }
