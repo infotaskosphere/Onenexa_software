@@ -168,6 +168,16 @@ function ROCFormsDumpTab({ company, isDark, text, muted }) {
 
   useEffect(() => { void load(); }, [load]);
 
+  useEffect(() => {
+    const handler = (event) => {
+      if (event.detail?.companyId === company?.id) {
+        void load();
+      }
+    };
+    window.addEventListener('roc-dump-completed', handler);
+    return () => window.removeEventListener('roc-dump-completed', handler);
+  }, [company?.id, load]);
+
   const upload = () => {
     if (!files.length || busy || !company?.id) return;
     queueUpload({

@@ -93,22 +93,78 @@ export function ROCDumpUploadProvider({ children }) {
               loadedBytes: loaded,
               totalBytes: total,
               message: progress >= 99
-                ? 'Upload received. Server-side extraction and classification are continuing…'
+                ? 'Upload received. Backend job queued; processing continues independently…'
                 : 'Uploading files to ROC Sphere…',
             });
           },
         },
       );
 
+      const serverJobId = data?.job_id;
+      if (!serverJobId) {
+        throw new Error('Backend did not return a ROC Forms Dump job ID');
+      }
+
       updateJob(job.id, {
-        status: 'done',
-        progress: 100,
-        loadedBytes: totalBytes,
-        finishedAt: Date.now(),
-        result: data || null,
-        message: data?.message || 'ROC Forms Dump processed successfully.',
+        serverJobId,
+        status: 'processing',
+        progress: 99,
+        message: 'Upload received. Backend is processing the ROC Forms Dump in the background…',
       });
-      toast.success('ROC Forms Dump processed and Company Summary updated');
+
+      let consecutivePollFailures = 0;
+      while (true) {
+        try {
+          const statusResponse = await api.get(
+            \`/roc-sphere/companies/\${job.companyId}/roc-dump/jobs/\${serverJobId}\`,
+            { _silent: true, _skipReadyGate: true },
+          );
+          const serverJob = statusResponse.data || {};
+          consecutivePollFailures = 0;
+
+          if (serverJob.status === 'COMPLETED') {
+            updateJob(job.id, {
+              status: 'done',
+              progress: 100,
+              loadedBytes: totalBytes,
+              finishedAt: Date.now(),
+              result: serverJob,
+              message: serverJob.message || 'ROC Forms Dump processed successfully.',
+            });
+            window.dispatchEvent(new CustomEvent('roc-dump-completed', {
+              detail: { companyId: job.companyId, jobId: serverJobId },
+            }));
+            toast.success('ROC Forms Dump processed and Company Summary updated');
+            break;
+          }
+
+          if (serverJob.status === 'FAILED') {
+            throw new Error(serverJob.error || serverJob.message || 'ROC Forms Dump processing failed');
+          }
+
+          const processed = Number(serverJob.processed_files || 0);
+          const expanded = Number(serverJob.expanded_files || 0);
+          const fileCount = Math.max(Number(serverJob.file_count || job.fileCount || 1), 1);
+          const progress = Math.max(1, Math.min(99, Math.round((processed / fileCount) * 100)));
+          updateJob(job.id, {
+            status: 'processing',
+            progress,
+            message: serverJob.message || (expanded
+              ? \`Backend processed \${expanded} ROC file(s); continuing…\`
+              : 'Backend is processing the ROC Forms Dump in the background…'),
+          });
+        } catch (pollError) {
+          consecutivePollFailures += 1;
+          if (consecutivePollFailures >= 20) throw pollError;
+          updateJob(job.id, {
+            status: 'processing',
+            message: 'Backend temporarily unavailable; retrying ROC job status…',
+          });
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+      }
+
     } catch (err) {
       const message = errorMessage(err);
       updateJob(job.id, {

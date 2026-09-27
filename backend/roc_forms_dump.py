@@ -8,21 +8,24 @@ as the current truth without recording the source, confidence and conflicts.
 Unknown MCA forms are retained and classified generically instead of rejected.
 """
 
+import asyncio
 import base64
 import hashlib
 import io
 import json
 import logging
 import re
+import shutil
 import subprocess
 import tempfile
 import uuid
 import zipfile
 from collections import Counter
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 from docx import Document as DocxDocument
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -65,6 +68,12 @@ MAX_ZIP_MEMBERS = 2000
 MAX_ZIP_NESTING = 5
 MAX_ZIP_MEMBER_BYTES = 100 * 1024 * 1024
 MAX_EXPANDED_FILES = 5000
+
+ROC_JOBS = db.roc_form_dump_jobs
+ROC_STAGING_ROOT = Path(tempfile.gettempdir()) / "taskosphere_roc_dump_jobs"
+ROC_STAGING_ROOT.mkdir(parents=True, exist_ok=True)
+ROC_JOB_LOCK = asyncio.Lock()
+ROC_JOB_TASKS = set()
 
 
 def _now():
@@ -953,44 +962,16 @@ async def _rebuild(company_id, prepared_by):
     return summary, events, summary_doc_record
 
 
-@router.post("/companies/{company_id}/roc-dump/upload")
-async def upload_roc_dump(
-    company_id: str,
-    files: List[UploadFile] = File(...),
-    current_user: User = Depends(CREATE),
-):
-    company = await COMPANIES.find_one({"id": company_id})
-    if not company:
-        raise HTTPException(404, "Company not found")
-    if not files:
-        raise HTTPException(400, "Select at least one ROC form")
 
+async def _process_roc_dump_entries(
+    company_id: str,
+    entries: List[Tuple[str, bytes]],
+    prepared_by: str,
+):
     total = 0
     expanded_count = 0
     results = []
     now = _now()
-
-    # First pass: read every upload and expand any .zip (a zipped folder or
-    # a plain archive of scanned/typed ROC forms) into its individual member
-    # files, so a folder upload is processed exactly like selecting all of
-    # its files directly. This also makes the endpoint accept ZIPs full of
-    # PDFs, Excel sheets, CSVs and Word documents in one request.
-    entries: List[Tuple[str, bytes]] = []
-    for uploaded in files:
-        filename = _safe_relative_path(uploaded.filename or "roc-form")
-        raw = await uploaded.read()
-        if filename.lower().endswith(ARCHIVE_EXT):
-            try:
-                expanded = _iter_archive_members(raw)
-            except ValueError as exc:
-                results.append({"filename": filename, "status": "FAILED", "error": str(exc)})
-                continue
-            if not expanded:
-                results.append({"filename": filename, "status": "FAILED", "error": "Archive contained no supported ROC form files"})
-                continue
-            entries.extend(expanded)
-        else:
-            entries.append((filename, raw))
 
     for filename, raw in entries:
         expanded_count += 1
@@ -1092,7 +1073,7 @@ async def upload_roc_dump(
             "warnings": warnings,
             "errors": errors,
             "uploaded_at": now,
-            "uploaded_by": _who(current_user),
+            "uploaded_by": prepared_by,
             "review": {"status": "PENDING" if status != "SUCCESS" else "NOT_REQUIRED"},
         }
         await DUMP.insert_one(filing)
@@ -1108,7 +1089,9 @@ async def upload_roc_dump(
             "event_count": len(events),
         })
 
-    summary, events, summary_doc = await _rebuild(company_id, _who(current_user))
+
+
+    summary, events, summary_doc = await _rebuild(company_id, prepared_by)
     return {
         "company_id": company_id,
         "processed": len([r for r in results if r.get("filing_id")]),
@@ -1116,8 +1099,188 @@ async def upload_roc_dump(
         "event_count": len(events),
         "summary_document_id": summary_doc["id"],
         "summary": summary,
-        "message": "ROC Forms Dump processed. Minimize the window safely; processing is server-side and the archive remains persistent.",
+        "message": "ROC Forms Dump processed and Company Summary updated.",
     }
+
+
+async def _process_roc_dump_job(job_id: str):
+    async with ROC_JOB_LOCK:
+        job = await ROC_JOBS.find_one({"id": job_id})
+        if not job:
+            return
+
+        company_id = job.get("company_id")
+        prepared_by = job.get("prepared_by") or "—"
+        staged_files = job.get("files") or []
+
+        await ROC_JOBS.update_one(
+            {"id": job_id},
+            {"$set": {
+                "status": "PROCESSING",
+                "started_at": _now(),
+                "message": "ROC Forms Dump is being processed in the background.",
+            }},
+        )
+
+        try:
+            entries: List[Tuple[str, bytes]] = []
+            for staged in staged_files:
+                path = Path(staged.get("path") or "")
+                filename = _safe_relative_path(staged.get("filename") or "roc-form")
+                if not path.exists():
+                    raise RuntimeError(f"Staged upload is no longer available: {filename}")
+
+                raw = await asyncio.to_thread(path.read_bytes)
+                if filename.lower().endswith(ARCHIVE_EXT):
+                    try:
+                        expanded = await asyncio.to_thread(_iter_archive_members, raw)
+                    except ValueError as exc:
+                        expanded = []
+                        logger.warning("ROC dump archive failed for %s: %s", filename, exc)
+                    entries.extend(expanded)
+                else:
+                    entries.append((filename, raw))
+
+                try:
+                    path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+                await asyncio.sleep(0)
+
+            result = await _process_roc_dump_entries(company_id, entries, prepared_by)
+
+            await ROC_JOBS.update_one(
+                {"id": job_id},
+                {"$set": {
+                    "status": "COMPLETED",
+                    "progress": 100,
+                    "processed_files": result.get("processed", 0),
+                    "expanded_files": len(entries),
+                    "event_count": result.get("event_count", 0),
+                    "summary_document_id": result.get("summary_document_id"),
+                    "summary": result.get("summary"),
+                    "result_count": len(result.get("results") or []),
+                    "finished_at": _now(),
+                    "message": result.get("message") or "ROC Forms Dump completed.",
+                }},
+            )
+        except Exception as exc:
+            logger.exception("ROC Forms Dump background job %s failed", job_id)
+            await ROC_JOBS.update_one(
+                {"id": job_id},
+                {"$set": {
+                    "status": "FAILED",
+                    "finished_at": _now(),
+                    "error": str(exc),
+                    "message": "ROC Forms Dump processing failed.",
+                }},
+            )
+        finally:
+            for staged in staged_files:
+                try:
+                    Path(staged.get("path") or "").unlink(missing_ok=True)
+                except Exception:
+                    pass
+
+
+def _schedule_roc_dump_job(job_id: str):
+    task = asyncio.create_task(_process_roc_dump_job(job_id))
+    ROC_JOB_TASKS.add(task)
+    task.add_done_callback(ROC_JOB_TASKS.discard)
+
+
+@router.post("/companies/{company_id}/roc-dump/upload", status_code=202)
+async def upload_roc_dump(
+    company_id: str,
+    files: List[UploadFile] = File(...),
+    background_tasks: BackgroundTasks = None,
+    current_user: User = Depends(CREATE),
+):
+    company = await COMPANIES.find_one({"id": company_id})
+    if not company:
+        raise HTTPException(404, "Company not found")
+    if not files:
+        raise HTTPException(400, "Select at least one ROC form")
+
+    job_id = _uid()
+    job_dir = ROC_STAGING_ROOT / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+    staged_files = []
+    total_bytes = 0
+
+    try:
+        for index, uploaded in enumerate(files):
+            filename = _safe_relative_path(uploaded.filename or "roc-form")
+            if not filename.lower().endswith(ALLOWED_EXT + ARCHIVE_EXT + UNREADABLE_BUT_ACCEPTED_EXT):
+                raise HTTPException(400, f"Unsupported file type: {filename}")
+
+            destination = job_dir / f"{index:05d}_{uuid.uuid4().hex}.upload"
+            uploaded.file.seek(0)
+            with destination.open("wb") as output:
+                shutil.copyfileobj(uploaded.file, output, length=1024 * 1024)
+
+            size = destination.stat().st_size
+            total_bytes += size
+            if total_bytes > MAX_BATCH:
+                raise HTTPException(413, "Batch exceeds 500 MB")
+
+            staged_files.append({
+                "path": str(destination),
+                "filename": filename,
+                "size_bytes": size,
+            })
+
+        await ROC_JOBS.insert_one({
+            "id": job_id,
+            "company_id": company_id,
+            "prepared_by": _who(current_user),
+            "status": "QUEUED",
+            "progress": 0,
+            "file_count": len(staged_files),
+            "processed_files": 0,
+            "expanded_files": 0,
+            "total_bytes": total_bytes,
+            "files": staged_files,
+            "created_at": _now(),
+            "message": "Upload received. Processing continues in the background.",
+        })
+
+        if background_tasks is not None:
+            background_tasks.add_task(_schedule_roc_dump_job, job_id)
+        else:
+            _schedule_roc_dump_job(job_id)
+
+        return {
+            "job_id": job_id,
+            "company_id": company_id,
+            "status": "QUEUED",
+            "file_count": len(staged_files),
+            "total_bytes": total_bytes,
+            "message": "Upload received. Processing continues in the background.",
+            "status_url": f"/roc-sphere/companies/{company_id}/roc-dump/jobs/{job_id}",
+        }
+    except HTTPException:
+        shutil.rmtree(job_dir, ignore_errors=True)
+        raise
+    except Exception as exc:
+        shutil.rmtree(job_dir, ignore_errors=True)
+        logger.exception("ROC Forms Dump staging failed")
+        raise HTTPException(500, f"Unable to stage ROC Forms Dump upload: {exc}") from exc
+
+
+@router.get("/companies/{company_id}/roc-dump/jobs/{job_id}")
+async def roc_dump_job_status(
+    company_id: str,
+    job_id: str,
+    current_user: User = Depends(VIEW),
+):
+    job = await ROC_JOBS.find_one(
+        {"id": job_id, "company_id": company_id},
+        {"_id": 0, "files": 0},
+    )
+    if not job:
+        raise HTTPException(404, "ROC Forms Dump job not found")
+    return job
 
 
 @router.get("/companies/{company_id}/roc-dump")
