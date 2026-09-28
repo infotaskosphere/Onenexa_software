@@ -40,3 +40,23 @@ async def agent_upload(file: UploadFile = File(...), company_id: str = "", accou
 async def agent_ask(payload: dict, current_user: User = Depends(get_current_user)):
     from backend.accounting_ai.finix_agent_complete import AskRequest, agent_ask as impl
     return await impl(AskRequest(**payload), current_user)
+
+@router.get("/health-score")
+async def agent_health_score(company_id: str = "", current_user: User = Depends(get_current_user)):
+    from backend.accounting_ai.finix_agent_complete import agent_health_score as impl
+    return await impl(company_id, current_user)
+
+@router.get("/statutory-summary")
+async def agent_statutory_summary(company_id: str = "", current_user: User = Depends(get_current_user)):
+    from backend.accounting_ai.finix_agent_complete import agent_statutory_summary as impl
+    return await impl(company_id, current_user)
+
+@router.get("/anomalies")
+async def agent_anomalies(company_id: str = "", current_user: User = Depends(get_current_user)):
+    from backend.accounting_ai.finix_agent_complete import agent_anomalies as impl
+    return await impl(company_id, current_user)
+
+@router.get("/cashflow-forecast")
+async def agent_cashflow_forecast(company_id: str = "", current_user: User = Depends(get_current_user)):
+    from backend.accounting_ai.finix_agent_complete import agent_cashflow_forecast as impl
+    return await impl(company_id, current_user)
