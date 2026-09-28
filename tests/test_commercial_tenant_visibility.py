@@ -326,3 +326,39 @@ async def test_platform_owner_customer_user_directory_remains_explicit_and_scope
 
     assert [user["id"] for user in result["users"]] == ["licensee-a-user"]
     assert result["platform_owner"] is True
+
+
+async def test_permission_governance_grants_use_tenant_scoped_user_query(monkeypatch):
+    from backend import permission_governance as governance
+
+    users = [
+        {
+            "id": "platform-user",
+            "full_name": "Platform User",
+            "email": "owner@taskosphere.com",
+            "role": "admin",
+        },
+        {
+            "id": "licensee-user",
+            "full_name": "Licensee User",
+            "email": "licensee@example.com",
+            "role": "admin",
+            "commercial_customer_id": "customer-a",
+            "license_id": "license-a",
+        },
+    ]
+
+    captured = {}
+
+    def fake_scope(query):
+        captured["query"] = query
+        return {"email": {"$in": ["owner@taskosphere.com"]}}
+
+    monkeypatch.setattr(governance, "_scope_user_query", fake_scope)
+    monkeypatch.setattr(governance, "_require_admin", lambda current_user: None)
+    monkeypatch.setattr(governance, "db", _FakeDB([], users))
+
+    result = await governance.list_current_grants(object())
+
+    assert captured["query"] == {}
+    assert [user["id"] for user in result] == ["platform-user"]
