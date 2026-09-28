@@ -153,6 +153,22 @@ def test_platform_owner_user_scope_behaves_as_owner_only_filter(monkeypatch):
     assert visible_ids == ["platform-user"]
 
 
+def test_platform_owner_control_plane_caller_is_explicitly_allowlisted():
+    from backend import commercial_user_company_scope as scope
+
+    assert scope._PLATFORM_CUSTOMER_USER_CONTROL_CALLERS == frozenset({
+        "list_platform_company_users",
+        "create_platform_company_user",
+        "update_platform_company_user",
+        "list_platform_company_deleted_users",
+        "restore_platform_company_user",
+        "activate_platform_company_user",
+        "deactivate_platform_company_user",
+        "delete_platform_company_user",
+        "_platform_change_user_status",
+    })
+
+
 def test_platform_owner_direct_licensee_user_lookup_is_still_blocked(monkeypatch):
     from backend import commercial_user_company_scope as scope
 
