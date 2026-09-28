@@ -25,6 +25,16 @@ def _money(value: Any) -> Decimal:
     return amount.quantize(PAISE, rounding=ROUND_HALF_UP)
 
 
+def _state_code(value: Any) -> Optional[str]:
+    """Return a canonical two-digit Indian state/UT code, or None if invalid."""
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if not re.fullmatch(r"\\d{2}", text):
+        return None
+    return text
+
+
 class GSTEngine:
     @staticmethod
     def validate_gstin(gstin: Any) -> bool:
@@ -51,12 +61,31 @@ class GSTEngine:
         vendor = str(vendor_gstin or "").strip().upper()
         company_state = company[:2] if GSTEngine.validate_gstin(company) else None
         vendor_state = vendor[:2] if GSTEngine.validate_gstin(vendor) else None
-        pos = str(place_of_supply_state or "").strip().zfill(2) or None
-        supplier = str(supplier_state or vendor_state or "").strip().zfill(2) or None
+
+        # Explicit place-of-supply/supplier evidence takes precedence. A supplied
+        # but malformed state code is not evidence and must fail closed rather
+        # than being silently normalized into a different jurisdiction.
+        pos = _state_code(place_of_supply_state)
+        supplier_explicit = _state_code(supplier_state)
+        if place_of_supply_state not in (None, "") and pos is None:
+            return {
+                "cgst": 0.0, "sgst": 0.0, "igst": 0.0,
+                "status": "REVIEW_REQUIRED",
+                "reason": "Invalid place-of-supply state evidence.",
+            }
+        if supplier_state not in (None, "") and supplier_explicit is None:
+            return {
+                "cgst": 0.0, "sgst": 0.0, "igst": 0.0,
+                "status": "REVIEW_REQUIRED",
+                "reason": "Invalid supplier state evidence.",
+            }
+
+        supplier = supplier_explicit or vendor_state
 
         # For a normal registered supplier transaction, place of supply is the
-        # decisive jurisdiction. Do not assume CGST/SGST merely because a GSTIN
-        # is missing.
+        # decisive jurisdiction. If explicit place-of-supply evidence is absent,
+        # a valid supplier GSTIN supplies the jurisdiction. Otherwise the
+        # company/vendor GSTIN states are used as the registered fallback.
         if pos and supplier:
             interstate = pos != supplier
         elif company_state and vendor_state:
