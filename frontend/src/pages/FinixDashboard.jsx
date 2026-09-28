@@ -207,7 +207,16 @@ function FinixDashboardInner() {
       setCompanies(scopeCompanies(cached.data));
     }
     try {
-      const res = await api.get('/companies/list');
+      // Use the canonical Master Data endpoint first. This keeps Finix's
+      // selector aligned with the two company records visible in Admin →
+      // Master Data instead of a legacy/dropdown-only company population.
+      let res;
+      try {
+        res = await api.get('/companies');
+      } catch (masterErr) {
+        if (masterErr?.response?.status !== 404) throw masterErr;
+        res = await api.get('/companies/list');
+      }
       const list = normalizeCompanies(res);
       _companiesCache_finix.data = list;
       _companiesCache_finix.ts = Date.now();
