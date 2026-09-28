@@ -178,7 +178,8 @@ def test_platform_owner_direct_licensee_user_lookup_is_still_blocked(monkeypatch
     assert _matches_query(owner_query, owner_user)
 
 
-async def test_platform_owner_company_user_directory_excludes_licensees(monkeypatch):
+def test_platform_owner_company_user_directory_excludes_licensees(monkeypatch):
+    import asyncio
     from backend import commercial_master_data as master_data
 
     companies = [
@@ -254,12 +255,13 @@ async def test_platform_owner_company_user_directory_excludes_licensees(monkeypa
     monkeypatch.setattr(master_data, "_company_context", fake_company_context)
     monkeypatch.setattr(master_data, "db", _FakeDB(companies, users))
 
-    result = await master_data.list_company_users(object())
+    result = asyncio.run(master_data.list_company_users(object()))
 
     assert [user["id"] for user in result["users"]] == ["platform-user"]
 
 
-async def test_platform_owner_customer_user_directory_remains_explicit_and_scoped(monkeypatch):
+def test_platform_owner_customer_user_directory_remains_explicit_and_scoped(monkeypatch):
+    import asyncio
     from backend import commercial_master_data as master_data
 
     users = [
@@ -319,16 +321,17 @@ async def test_platform_owner_customer_user_directory_remains_explicit_and_scope
     )
     monkeypatch.setattr(master_data, "db", _FakeDB([], users))
 
-    result = await master_data.list_platform_company_users(
+    result = asyncio.run(master_data.list_platform_company_users(
         company_id="licensee-company-a",
         current_user=object(),
-    )
+    ))
 
     assert [user["id"] for user in result["users"]] == ["licensee-a-user"]
     assert result["platform_owner"] is True
 
 
-async def test_permission_governance_grants_use_tenant_scoped_user_query(monkeypatch):
+def test_permission_governance_grants_use_tenant_scoped_user_query(monkeypatch):
+    import asyncio
     from backend import permission_governance as governance
 
     users = [
@@ -358,7 +361,7 @@ async def test_permission_governance_grants_use_tenant_scoped_user_query(monkeyp
     monkeypatch.setattr(governance, "_require_admin", lambda current_user: None)
     monkeypatch.setattr(governance, "db", _FakeDB([], users))
 
-    result = await governance.list_current_grants(object())
+    result = asyncio.run(governance.list_current_grants(object()))
 
     assert captured["query"] == {}
     assert [user["id"] for user in result] == ["platform-user"]
