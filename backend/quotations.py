@@ -1587,12 +1587,20 @@ async def _platform_owner_operational_companies(current_user: User) -> List[Dict
     missing fields that can hide legitimate owner companies.
     """
     owner_id = str(getattr(current_user, "id", "") or "").strip()
+    if not is_platform_owner(current_user):
+        return await db.companies.find(
+            {"created_by": owner_id},
+            {"_id": 0},
+        ).sort("name", 1).to_list(500)
+
+    # Platform Owner is the control-plane owner. Historical company-master
+    # records were not always stamped with the current owner's user id, so a
+    # created_by-only query can incorrectly return zero companies. Read the
+    # company master and explicitly remove licensee records below.
     rows = await db.companies.find(
-        {"created_by": owner_id},
+        {},
         {"_id": 0},
     ).sort("name", 1).to_list(500)
-    if not is_platform_owner(current_user):
-        return rows
 
     license_rows = await db.commercial_licenses.find(
         {},
