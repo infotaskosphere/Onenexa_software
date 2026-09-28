@@ -263,8 +263,8 @@ async def agent_ask(payload: AskRequest, current_user: User = Depends(get_curren
         result.update({"total_tds_deducted": round(total_tds, 2), "challan_due": "7th of following month"})
     elif any(x in q for x in ("health", "score", "audit", "trial balance")):
         lines = await db.journal_lines.find({"company_id": cid}, {"_id": 0, "debit": 1, "credit": 1}).to_list(100000)
-        dr = sum(float(l.get("debit") or 0) for l in lines)
-        cr = sum(float(l.get("credit") or 0) for l in lines)
+        dr = sum(_safe_float(l.get("debit")) for l in lines)
+        cr = sum(_safe_float(l.get("credit")) for l in lines)
         result.update({"trial_balance_debits": round(dr, 2), "trial_balance_credits": round(cr, 2), "balanced": abs(dr - cr) < 0.05})
     elif any(x in q for x in ("cash flow", "forecast", "runway")):
         banks = await db.bank_accounts.find({"company_id": cid}, {"_id": 0, "current_balance": 1, "balance": 1}).to_list(100)
@@ -283,8 +283,8 @@ async def agent_health_score(company_id: str = "", current_user: User = Depends(
 
     # 1. Trial Balance Equilibrium (25 pts)
     lines = await db.journal_lines.find({"company_id": cid}, {"_id": 0, "debit": 1, "credit": 1, "account_id": 1}).to_list(100000)
-    total_debits = sum(float(l.get("debit") or 0) for l in lines)
-    total_credits = sum(float(l.get("credit") or 0) for l in lines)
+    total_debits = sum(_safe_float(l.get("debit")) for l in lines)
+    total_credits = sum(_safe_float(l.get("credit")) for l in lines)
     tb_diff = abs(total_debits - total_credits)
     tb_balanced = tb_diff < 0.05
     tb_score = 25 if tb_balanced else max(0, 25 - int(tb_diff))
@@ -306,8 +306,8 @@ async def agent_health_score(company_id: str = "", current_user: User = Depends(
 
     # 3. Profitability (20 pts)
     accounts = {a.get("id"): a for a in await db.chart_of_accounts.find({"company_id": cid}, {"_id": 0, "id": 1, "type": 1, "code": 1}).to_list(5000)}
-    income = sum(float(l.get("credit") or 0) - float(l.get("debit") or 0) for l in lines if accounts.get(l.get("account_id"), {}).get("type") == "income")
-    expense = sum(float(l.get("debit") or 0) - float(l.get("credit") or 0) for l in lines if accounts.get(l.get("account_id"), {}).get("type") == "expense")
+    income = sum(_safe_float(l.get("credit")) - _safe_float(l.get("debit")) for l in lines if accounts.get(l.get("account_id"), {}).get("type") == "income")
+    expense = sum(_safe_float(l.get("debit")) - _safe_float(l.get("credit")) for l in lines if accounts.get(l.get("account_id"), {}).get("type") == "expense")
     net_profit = income - expense
     profit_margin = round((net_profit / income * 100), 1) if income > 0 else 0.0
     profit_score = 20 if net_profit > 0 and profit_margin >= 15 else (15 if net_profit > 0 else (10 if income == 0 and expense == 0 else 5))
@@ -331,8 +331,8 @@ async def agent_health_score(company_id: str = "", current_user: User = Depends(
     debtors_score = 15 if overdue_ratio < 0.1 else (10 if overdue_ratio < 0.25 else 5)
 
     # 5. Statutory Compliance (GST & TDS) (10 pts)
-    output_gst = sum(float(l.get("credit") or 0) - float(l.get("debit") or 0) for l in lines if accounts.get(l.get("account_id"), {}).get("code") == "2100")
-    input_gst = sum(float(l.get("debit") or 0) - float(l.get("credit") or 0) for l in lines if accounts.get(l.get("account_id"), {}).get("code") == "1200")
+    output_gst = sum(_safe_float(l.get("credit")) - _safe_float(l.get("debit")) for l in lines if accounts.get(l.get("account_id"), {}).get("code") == "2100")
+    input_gst = sum(_safe_float(l.get("debit")) - _safe_float(l.get("credit")) for l in lines if accounts.get(l.get("account_id"), {}).get("code") == "1200")
     statutory_score = 10 if abs(output_gst) >= 0 and abs(input_gst) >= 0 else 5
 
     # 6. Audit & Anomaly Cleanliness (10 pts)
@@ -516,9 +516,9 @@ async def agent_cashflow_forecast(company_id: str = "", current_user: User = Dep
     d60 = (today + timedelta(days=60)).isoformat()
     d90 = (today + timedelta(days=90)).isoformat()
 
-    inflow_30 = sum(float(i.get("amount_due") or 0) * 0.85 for i in invoices if _date_key(i.get("due_date")) <= d30)
-    inflow_60 = inflow_30 + sum(float(i.get("amount_due") or 0) * 0.75 for i in invoices if d30 < _date_key(i.get("due_date")) <= d60)
-    inflow_90 = inflow_60 + sum(float(i.get("amount_due") or 0) * 0.65 for i in invoices if d60 < _date_key(i.get("due_date")) <= d90)
+    inflow_30 = sum(_safe_float(i.get("amount_due")) * 0.85 for i in invoices if _date_key(i.get("due_date")) <= d30)
+    inflow_60 = inflow_30 + sum(_safe_float(i.get("amount_due")) * 0.75 for i in invoices if d30 < _date_key(i.get("due_date")) <= d60)
+    inflow_90 = inflow_60 + sum(_safe_float(i.get("amount_due")) * 0.65 for i in invoices if d60 < _date_key(i.get("due_date")) <= d90)
 
     outflow_30 = sum(_safe_float(p.get("amount_due")) for p in purchases if _date_key(p.get("due_date")) <= d30)
     outflow_60 = outflow_30 + sum(_safe_float(p.get("amount_due")) for p in purchases if d30 < _date_key(p.get("due_date")) <= d60)
