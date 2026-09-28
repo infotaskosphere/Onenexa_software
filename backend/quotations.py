@@ -1578,6 +1578,59 @@ async def require_company_manage(current_user: User = Depends(get_current_user))
     )
 
 
+async def _platform_owner_operational_companies(current_user: User) -> List[Dict[str, Any]]:
+    """Return only companies in the Platform Owner operational master.
+
+    The creator boundary is applied first. Commercial companies are removed
+    only when their own record or an actual commercial-license relationship
+    identifies them as a licensee. This avoids broad Mongo predicates on
+    missing fields that can hide legitimate owner companies.
+    """
+    owner_id = str(getattr(current_user, "id", "") or "").strip()
+    rows = await db.companies.find(
+        {"created_by": owner_id},
+        {"_id": 0},
+    ).sort("name", 1).to_list(500)
+    if not is_platform_owner(current_user):
+        return rows
+
+    license_rows = await db.commercial_licenses.find(
+        {},
+        {"_id": 0, "id": 1, "customer_id": 1, "company_id": 1},
+    ).to_list(5000)
+    customer_ids = {
+        str(row.get("customer_id")).strip()
+        for row in license_rows
+        if row.get("customer_id")
+    }
+    license_ids = {
+        str(row.get("id")).strip()
+        for row in license_rows
+        if row.get("id")
+    }
+    legacy_company_ids = {
+        str(row.get("company_id")).strip()
+        for row in license_rows
+        if row.get("company_id")
+    }
+
+    filtered = []
+    for company in rows:
+        source = str(company.get("source") or "").strip().lower()
+        customer_id = str(company.get("commercial_customer_id") or "").strip()
+        license_id = str(company.get("license_id") or "").strip()
+        company_id = str(company.get("id") or "").strip()
+        if source in {"commercial-license", "commercial", "license"}:
+            continue
+        if customer_id and customer_id in customer_ids:
+            continue
+        if license_id and license_id in license_ids:
+            continue
+        if company_id and company_id in legacy_company_ids:
+            continue
+        filtered.append(company)
+    return filtered
+
 def _scrub_company(company: dict, user: User) -> dict:
     if company and not _can_manage_companies(user):
         for f in _COMPANY_SENSITIVE_FIELDS:
@@ -1685,41 +1738,12 @@ async def get_companies(
     # Platform Owner operational dropdowns must never expose commercial-license
     # tenant companies. Those companies are managed through Commercial Console.
     if is_platform_owner(current_user):
-        # Legacy licensee records may pre-date the commercial marker fields.
-        # Resolve customer/license ownership as well, so they cannot leak into
-        # Platform Owner operational company selectors.
-        # Only a license document's explicit company_id is safe to use as a
-        # legacy tenant-company identifier. Do NOT treat commercial customer
-        # ids as company ids: those namespaces are independent and doing so can
-        # hide legitimate Platform Owner company-master records.
-        commercial_licenses = await db.commercial_licenses.find(
-            {"company_id": {"$exists": True, "$nin": [None, ""]}},
-            {"_id": 0, "company_id": 1}
-        ).to_list(5000)
-        legacy_licensee_ids = {
-            str(item.get("company_id")).strip()
-            for item in commercial_licenses
-            if item.get("company_id")
-        }
-        list_filter = {
-            "created_by": str(current_user.id),
-            "$and": [
-                {"$or": [
-                    {"source": {"$exists": False}},
-                    {"source": {"$nin": ["commercial-license", "commercial", "license"]}},
-                ]},
-                {"$or": [
-                    {"commercial_customer_id": {"$exists": False}},
-                    {"commercial_customer_id": {"$in": [None, "", "platform-owner"]}},
-                ]},
-                {"$or": [
-                    {"license_id": {"$exists": False}},
-                    {"license_id": {"$in": [None, "", "platform-owner-license"]}},
-                ]},
-            ],
-        }
-        if legacy_licensee_ids:
-            list_filter["id"] = {"$nin": sorted(legacy_licensee_ids)}
+        companies = await _platform_owner_operational_companies(current_user)
+        for company in companies:
+            await _hydrate_company_bank(company)
+            _scrub_company(company, current_user)
+        return companies
+
     tenant_company_id = str(getattr(current_user, "company_id", "") or "").strip()
     tenant_customer_id = str(getattr(current_user, "commercial_customer_id", "") or "").strip()
     if not is_platform_owner(current_user) and tenant_company_id and str(getattr(current_user, "role", "") or "").lower() == "admin":
@@ -1796,39 +1820,14 @@ async def list_companies(current_user: User = Depends(get_current_user)):
     # Platform Owner must receive only its own operational companies here.
     # Licensee companies remain available only through Commercial Console.
     if is_platform_owner(current_user):
-        # Legacy licensee records may pre-date the commercial marker fields.
-        # Only a license document's explicit company_id is safe to use as a
-        # legacy tenant-company identifier. Do NOT treat commercial customer
-        # ids as company ids: those namespaces are independent and doing so can
-        # hide legitimate Platform Owner company-master records.
-        commercial_licenses = await db.commercial_licenses.find(
-            {"company_id": {"$exists": True, "$nin": [None, ""]}},
-            {"_id": 0, "company_id": 1}
-        ).to_list(5000)
-        legacy_licensee_ids = {
-            str(item.get("company_id")).strip()
-            for item in commercial_licenses
-            if item.get("company_id")
-        }
-        list_filter = {
-            "created_by": str(current_user.id),
-            "$and": [
-                {"$or": [
-                    {"source": {"$exists": False}},
-                    {"source": {"$nin": ["commercial-license", "commercial", "license"]}},
-                ]},
-                {"$or": [
-                    {"commercial_customer_id": {"$exists": False}},
-                    {"commercial_customer_id": {"$in": [None, "", "platform-owner"]}},
-                ]},
-                {"$or": [
-                    {"license_id": {"$exists": False}},
-                    {"license_id": {"$in": [None, "", "platform-owner-license"]}},
-                ]},
-            ],
-        }
-        if legacy_licensee_ids:
-            list_filter["id"] = {"$nin": sorted(legacy_licensee_ids)}
+        companies = await _platform_owner_operational_companies(current_user)
+        for company in companies:
+            await _hydrate_company_bank(company)
+        return [
+            {key: value for key, value in company.items() if key in projection}
+            for company in companies
+        ]
+
     tenant_company_id = str(getattr(current_user, "company_id", "") or "").strip()
     if (
         not is_platform_owner(current_user)
