@@ -12,6 +12,7 @@ RECONCILED_OWNERS = MappingProxyType({
     "taskosphere.dsc": "backend.modules.taskosphere.dsc.router",
     "taskosphere.dashboard": "backend.modules.taskosphere.dashboard.router",
     "finix_ai.accounting": "backend.modules.finix_ai.accounting.service",
+    "finix_ai.accounting_extended": "backend.accounting_extended",
     "finix_ai.banking": "backend.modules.finix_ai.banking.service",
     "finix_ai.reconciliation": "backend.modules.finix_ai.reconciliation.router",
     "finix_ai.ai": "backend.modules.finix_ai.ai.service",
