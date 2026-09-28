@@ -81,6 +81,10 @@ def _matches_query(query, document):
                 return False
             if "$ne" in expected and actual == expected["$ne"]:
                 return False
+            if "$regex" in expected:
+                import re
+                if re.search(str(expected["$regex"]), str(actual or "")) is None:
+                    return False
         elif actual != expected:
             return False
     return True
@@ -313,13 +317,13 @@ def test_platform_owner_customer_user_directory_remains_explicit_and_scoped(monk
         "selected_features": {},
     }
 
+    async def fake_platform_company_context(current_user, identifier):
+        return license_doc, company
+
     monkeypatch.setattr(
         master_data,
         "_platform_company_context",
-        lambda current_user, identifier: (
-            license_doc,
-            company,
-        ),
+        fake_platform_company_context,
     )
     monkeypatch.setattr(master_data, "db", _FakeDB([], users))
 
