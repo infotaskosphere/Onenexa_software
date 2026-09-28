@@ -1682,6 +1682,17 @@ async def get_companies(
     is not permitted.
     """
     list_filter: Dict[str, Any] = {"created_by": str(current_user.id)}
+    # Platform Owner operational dropdowns must never expose commercial-license
+    # tenant companies. Those companies are managed through Commercial Console.
+    if is_platform_owner(current_user):
+        list_filter = {
+            "created_by": str(current_user.id),
+            "$nor": [
+                {"source": {"$in": ["commercial-license", "commercial", "license"]}},
+                {"commercial_customer_id": {"$nin": [None, "", "platform-owner"]}},
+                {"license_id": {"$nin": [None, "", "platform-owner-license"]}},
+            ],
+        }
     tenant_company_id = str(getattr(current_user, "company_id", "") or "").strip()
     tenant_customer_id = str(getattr(current_user, "commercial_customer_id", "") or "").strip()
     if tenant_company_id and str(getattr(current_user, "role", "") or "").lower() == "admin":
@@ -1750,6 +1761,17 @@ async def list_companies(current_user: User = Depends(get_current_user)):
     # and every report call is then sent with a company_id that the tenant
     # guard rejects with 403 "Cross-company access is not permitted".
     list_filter: Dict[str, Any] = {"created_by": str(current_user.id)}
+    # Platform Owner must receive only its own operational companies here.
+    # Licensee companies remain available only through Commercial Console.
+    if is_platform_owner(current_user):
+        list_filter = {
+            "created_by": str(current_user.id),
+            "$nor": [
+                {"source": {"$in": ["commercial-license", "commercial", "license"]}},
+                {"commercial_customer_id": {"$nin": [None, "", "platform-owner"]}},
+                {"license_id": {"$nin": [None, "", "platform-owner-license"]}},
+            ],
+        }
     tenant_company_id = str(getattr(current_user, "company_id", "") or "").strip()
     if (
         tenant_company_id
