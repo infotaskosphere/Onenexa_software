@@ -29,7 +29,7 @@ def test_company_master_directory_filters_licensee_companies():
 def test_generic_user_scope_has_platform_owner_branch():
     from backend.server_modules.users_todos_admin import _scope_users_query_by_company
 
-    # This helper is the authoritative scope used by GET/PUT/DELETE /users.
+    # This helper is the authoritative tenant boundary used by GET/PUT/DELETE /users.
     assert _scope_users_query_by_company.__name__ == "_scope_users_query_by_company"
 
 
