@@ -10,7 +10,21 @@ import os
 import uuid
 from datetime import datetime, timedelta
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
+BASE_URL = (
+    os.environ.get('BACKEND_URL')
+    or os.environ.get('REACT_APP_BACKEND_URL')
+    or os.environ.get('API_BASE_URL')
+    or ''
+).rstrip('/')
+
+# These are live integration tests and require an externally running backend.
+# The repository's normal Full Pytest CI job does not start the API server, so
+# skip this module cleanly when no backend URL is supplied instead of passing
+# a relative URL such as /api/auth/login to requests.
+if not BASE_URL:
+    pytestmark = pytest.mark.skip(
+        reason="Priority-1 integration tests require BACKEND_URL, REACT_APP_BACKEND_URL, or API_BASE_URL."
+    )
 
 # Test credentials
 ADMIN_EMAIL = "admin@test.com"
