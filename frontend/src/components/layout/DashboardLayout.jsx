@@ -50,7 +50,6 @@ const NAV_GROUPS = [
     { path: '/gst-portal-sync', icon: Landmark, label: 'Live GST Portal Sync', permission: 'can_view_accounting_reports' },
     { path: '/accounting-integrity', icon: Lock, label: 'Accounting Integrity', permission: 'can_manage_chart_of_accounts' },
     { path: '/chart-of-accounts', icon: BookOpen, label: 'Charts of Accounts', permission: ['can_view_chart_of_accounts', 'can_manage_chart_of_accounts'] },
-    { path: '/bank-reconciliation', icon: ArrowLeftRight, label: 'Bank Reconciliation', permission: 'can_match_bank' },
   ]},
   { id: 'aiweave', dividerLabel: 'AIWeave', items: [
     { path: '/aiweave', icon: BrainCircuit, label: 'AIWeave', permission: 'can_view_aiweave' },
