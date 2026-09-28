@@ -239,15 +239,3 @@ async def verify_control_accounts(company_id: str = Query(""), current_user: Use
             "fully_migrated": abs(control_balance) < 0.01,
         })
     return results
-
-
-# Finix AI routes are mounted through this already-registered accounting router.
-# The import is intentionally deferred until the party-ledger module has fully
-# defined its identity helpers, preventing a circular import during startup.
-from backend.accounting_ai.finix_ai_router import router as finix_ai_router
-router.include_router(finix_ai_router)
-
-# Complete Finix agent facade: document ingestion, learning, inbox workflow,
-# conversational accounting, bank-transfer proposals and reconciliation.
-from backend.accounting_ai.finix_complete_router import router as finix_complete_router
-router.include_router(finix_complete_router)
