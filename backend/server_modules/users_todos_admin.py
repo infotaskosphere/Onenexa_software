@@ -694,7 +694,12 @@ async def offboard_preview(
     current_user: User = Depends(require_admin()),
 ):
     """Preview what data belongs to this user before offboarding."""
-    user = await db.users.find_one(_make_user_id_query(user_id), {"password": 0, "password_hash": 0, "password_salt": 0})
+    user = await _get_scoped_user_for_mutation(current_user, user_id)
+    if user:
+        user = dict(user)
+        user.pop("password", None)
+        user.pop("password_hash", None)
+        user.pop("password_salt", None)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     canonical_id = str(user.get("id") or user.get("_id") or user_id)
@@ -742,11 +747,11 @@ async def offboard_user(
             status_code=400, detail="Old and replacement user cannot be the same"
         )
 
-    old_user = await db.users.find_one(_make_user_id_query(user_id))
+    old_user = await _get_scoped_user_for_mutation(current_user, user_id)
     if not old_user:
         raise HTTPException(status_code=404, detail="User to offboard not found")
 
-    new_user = await db.users.find_one(_make_user_id_query(body.replacement_user_id))
+    new_user = await _get_scoped_user_for_mutation(current_user, body.replacement_user_id)
     if not new_user:
         raise HTTPException(status_code=404, detail="Replacement user not found")
 
