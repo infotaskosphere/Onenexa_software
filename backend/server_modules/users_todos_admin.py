@@ -332,21 +332,23 @@ async def _scope_users_query_by_company(current_user: User, base_query: Optional
 
     if is_platform_owner(current_user):
         raw_lic_comps = await db.companies.find(
-            {'': [
-                {'source': {'': ['commercial-license', 'commercial', 'license']}},
-                {'commercial_customer_id': {'': [None, '', 'platform-owner']}},
-                {'license_id': {'': [None, '', 'platform-owner-license']}}
-            ]},
-            {'_id': 0, 'id': 1}
+            {
+                "$or": [
+                    {"source": {"$in": ["commercial-license", "commercial", "license"]}},
+                    {"commercial_customer_id": {"$nin": [None, "", "platform-owner"]}},
+                    {"license_id": {"$nin": [None, "", "platform-owner-license"]}},
+                ]
+            },
+            {"_id": 0, "id": 1},
         ).to_list(5000)
-        licensee_comp_ids = [str(c['id']) for c in raw_lic_comps if c.get('id')]
+        licensee_comp_ids = [str(c["id"]) for c in raw_lic_comps if c.get("id")]
         platform_scope = {
-            'commercial_customer_id': {'': [None, '', 'platform-owner']},
-            'license_id': {'': [None, '', 'platform-owner-license']},
+            "commercial_customer_id": {"$in": [None, "", "platform-owner"]},
+            "license_id": {"$in": [None, "", "platform-owner-license"]},
         }
         if licensee_comp_ids:
-            platform_scope['company_id'] = {'': licensee_comp_ids}
-        return {'': [base, platform_scope]} if base else platform_scope
+            platform_scope["company_id"] = {"$nin": licensee_comp_ids}
+        return {"$and": [base, platform_scope]} if base else platform_scope
 
     customer_id = str(getattr(current_user, "commercial_customer_id", "") or "").strip()
     license_id = str(getattr(current_user, "license_id", "") or "").strip()
