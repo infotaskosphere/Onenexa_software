@@ -35,6 +35,17 @@ _PRE_AUTH_CALLERS = frozenset({
 _SYSTEM_CALLERS = frozenset({
     "startup_event",
 })
+_PLATFORM_CUSTOMER_USER_CONTROL_CALLERS = frozenset({
+    "list_platform_company_users",
+    "create_platform_company_user",
+    "update_platform_company_user",
+    "list_platform_company_deleted_users",
+    "restore_platform_company_user",
+    "activate_platform_company_user",
+    "deactivate_platform_company_user",
+    "delete_platform_company_user",
+    "_platform_change_user_status",
+})
 
 
 def _is_owner_context() -> bool:
@@ -84,6 +95,16 @@ def _is_internal_commercial_doc(document: Any) -> bool:
     )
 
 
+def _is_platform_customer_user_control_context() -> bool:
+    """Allow only explicit Platform Owner customer-user control-plane routes to cross tenant scope."""
+    for frame_info in inspect.stack(context=0):
+        if frame_info.function in _PLATFORM_CUSTOMER_USER_CONTROL_CALLERS:
+            module_name = str(frame_info.frame.f_globals.get("__name__") or "")
+            if module_name == "backend.commercial_master_data":
+                return True
+    return False
+
+
 def _is_trusted_pre_auth_context() -> bool:
     """Allow only known internal auth/bootstrap code before a tenant exists."""
     return _caller_matches(_PRE_AUTH_CALLERS)
@@ -130,6 +151,10 @@ def _user_company_id() -> str:
 
 
 def _scope_user_query(query: Any) -> dict[str, Any]:
+    # The Platform Owner's normal Users surface remains isolated. Only the
+    # explicit customer-user control-plane routes may cross that boundary.
+    if _is_owner_context() and not _is_platform_customer_user_control_context():
+        return _owner_user_query(query)
     if _is_commercial_control_context():
         return dict(query or {})
     if _is_owner_context():
