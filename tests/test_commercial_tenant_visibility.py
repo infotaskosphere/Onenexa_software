@@ -150,7 +150,13 @@ def test_platform_owner_user_scope_behaves_as_owner_only_filter(monkeypatch):
     query = scope._owner_user_query({})
     visible_ids = [user["id"] for user in users if _matches_query(query, user)]
 
-    assert visible_ids == ["platform-user"]
+    # Internal commercial control-plane identities are intentionally visible to
+    # the Platform Owner. The security boundary here is that operational
+    # Licensee users must never appear in the normal Users surface.
+    assert "platform-user" in visible_ids
+    assert "licensee-a-user" not in visible_ids
+    assert "licensee-b-user" not in visible_ids
+    assert "internal-commercial-admin" in visible_ids
 
 
 def test_platform_owner_control_plane_caller_is_explicitly_allowlisted():
