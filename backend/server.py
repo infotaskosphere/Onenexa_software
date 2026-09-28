@@ -19,8 +19,6 @@ import pandas as pd
 from datetime import datetime, date, timezone, timedelta, time as dtime
 from collections import Counter
 
-# --- FIXED ROUTER IMPORTS ---
-# Added 'backend.' to invoicing to match the others
 from backend.quickcompany_trademark_router import router as qc_trademark_router
 from backend.whatsapp_hub import router as whatsapp_hub_router
 from backend.compliance import router as compliance_router, create_compliance_indexes
@@ -69,17 +67,6 @@ from backend.telegram import router as telegram_router
 from backend.notifications import router as notification_router, create_notification, notify_admins_leave
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Task-assigned popup helper
-# Inserts a manual reminder with remind_at = now so the assignee gets an
-# immediate on-screen popup the next time the frontend polls
-# GET /api/reminders/due-popups.
-#
-# NOTE: This previously lived in backend/reminders_router.py, which became an
-# accidental duplicate of this file and caused a circular-import crash on
-# boot. It now lives here and reminders_router.py is a thin shim.
-# ─────────────────────────────────────────────────────────────────────────────
-
 from backend.email_integration import router as email_router
 from backend.trademark_sphere import router as trademark_sphere_router
 from backend.trademark_portals_router import router as trademark_portals_router
@@ -114,11 +101,9 @@ from typing import List, Optional, Dict, Any
 from dateutil import parser
 from contextlib import asynccontextmanager
 
-# Single logger definition
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
-# FastAPI
 from fastapi import (
     FastAPI,
     APIRouter,
@@ -139,7 +124,6 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.middleware.gzip import GZipMiddleware
 from passlib.context import CryptContext
 
-# Validation
 from pydantic import (
     BaseModel,
     EmailStr,
@@ -212,11 +196,9 @@ from backend.dependencies import (
     personal_birthday_candidates,
 )
 
-# External Services
 from fpdf import FPDF
 from apscheduler.schedulers.background import BackgroundScheduler
 
-# ====================== CONFIG ======================
 # Single IST definition
 IST = pytz.timezone("Asia/Kolkata")
 india_tz = ZoneInfo("Asia/Kolkata")
