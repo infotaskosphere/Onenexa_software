@@ -1695,7 +1695,7 @@ async def get_companies(
         }
     tenant_company_id = str(getattr(current_user, "company_id", "") or "").strip()
     tenant_customer_id = str(getattr(current_user, "commercial_customer_id", "") or "").strip()
-    if tenant_company_id and str(getattr(current_user, "role", "") or "").lower() == "admin":
+    if not is_platform_owner(current_user) and tenant_company_id and str(getattr(current_user, "role", "") or "").lower() == "admin":
         owned_filters: List[Dict[str, Any]] = [
             {"created_by": str(current_user.id)},
             {"id": tenant_company_id},
@@ -1753,6 +1753,11 @@ async def list_companies(current_user: User = Depends(get_current_user)):
         "logo_base64": 1,
         "tm_logo_base64": 1,
         "signature_base64": 1,
+        # Tenant markers are returned so client-side selectors can apply the
+        # same commercial isolation rule during rolling frontend deployments.
+        "source": 1,
+        "commercial_customer_id": 1,
+        "license_id": 1,
     }
     # Licensed (commercial) tenant admins always own their tenant's operational
     # company record, which is created by license generation and therefore has
@@ -1774,7 +1779,8 @@ async def list_companies(current_user: User = Depends(get_current_user)):
         }
     tenant_company_id = str(getattr(current_user, "company_id", "") or "").strip()
     if (
-        tenant_company_id
+        not is_platform_owner(current_user)
+        and tenant_company_id
         and str(getattr(current_user, "role", "") or "").lower() == "admin"
         and getattr(current_user, "commercial_customer_id", None)
     ):
