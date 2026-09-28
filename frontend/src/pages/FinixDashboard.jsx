@@ -23,6 +23,7 @@ import RequestAccessGate from '@/components/RequestAccessGate.jsx';
 import { runVerifyAndFix, describeValidationResult } from '@/lib/verifyAndFixLedger';
 import { useAuth } from '@/contexts/AuthContext.jsx';
 import { isCommercialTenant } from '@/lib/commercialPermissionMatrix';
+import FinixAICommandCenter from '@/components/finix/FinixAICommandCenter.jsx';
 
 const fmtC = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
@@ -1061,13 +1062,6 @@ function FinixDashboardInner() {
         <div className="flex items-center gap-2 shrink-0">
           <Button
             size="sm"
-            onClick={() => navigate('/finix-ai-workspace')}
-            className="h-8 rounded-xl text-xs font-bold gap-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white shadow-sm"
-          >
-            <Sparkles className="w-3.5 h-3.5" /> AI Accounting Studio
-          </Button>
-          <Button
-            size="sm"
             variant="ghost"
             onClick={() => navigate('/accounting-reports')}
             className="h-8 rounded-xl text-xs font-medium gap-1 text-slate-500 hover:text-slate-900 dark:hover:text-slate-100"
@@ -1076,6 +1070,10 @@ function FinixDashboardInner() {
           </Button>
         </div>
       </div>
+
+      {!loading && companyId && companyId !== ALL_COMPANIES_ID && (
+        <FinixAICommandCenter companyId={companyId} isDark={isDark} />
+      )}
 
       {companyId === ALL_COMPANIES_ID && !loading && (
         <div className={`mb-6 flex items-center gap-2 text-xs font-semibold px-4 py-2.5 rounded-2xl border ${isDark ? 'bg-blue-500/10 border-blue-500/20 text-blue-300' : 'bg-blue-50 border-blue-100 text-blue-700'}`}>
