@@ -1711,10 +1711,19 @@ async def get_companies(
         )
         list_filter = {
             "created_by": str(current_user.id),
-            "$nor": [
-                {"source": {"$in": ["commercial-license", "commercial", "license"]}},
-                {"commercial_customer_id": {"$nin": [None, "", "platform-owner"]}},
-                {"license_id": {"$nin": [None, "", "platform-owner-license"]}},
+            "$and": [
+                {"$or": [
+                    {"source": {"$exists": False}},
+                    {"source": {"$nin": ["commercial-license", "commercial", "license"]}},
+                ]},
+                {"$or": [
+                    {"commercial_customer_id": {"$exists": False}},
+                    {"commercial_customer_id": {"$in": [None, "", "platform-owner"]}},
+                ]},
+                {"$or": [
+                    {"license_id": {"$exists": False}},
+                    {"license_id": {"$in": [None, "", "platform-owner-license"]}},
+                ]},
             ],
         }
         if legacy_licensee_ids:
@@ -1819,10 +1828,19 @@ async def list_companies(current_user: User = Depends(get_current_user)):
         )
         list_filter = {
             "created_by": str(current_user.id),
-            "$nor": [
-                {"source": {"$in": ["commercial-license", "commercial", "license"]}},
-                {"commercial_customer_id": {"$nin": [None, "", "platform-owner"]}},
-                {"license_id": {"$nin": [None, "", "platform-owner-license"]}},
+            "$and": [
+                {"$or": [
+                    {"source": {"$exists": False}},
+                    {"source": {"$nin": ["commercial-license", "commercial", "license"]}},
+                ]},
+                {"$or": [
+                    {"commercial_customer_id": {"$exists": False}},
+                    {"commercial_customer_id": {"$in": [None, "", "platform-owner"]}},
+                ]},
+                {"$or": [
+                    {"license_id": {"$exists": False}},
+                    {"license_id": {"$in": [None, "", "platform-owner-license"]}},
+                ]},
             ],
         }
         if legacy_licensee_ids:
