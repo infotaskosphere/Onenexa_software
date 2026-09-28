@@ -28,8 +28,10 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
     if value is None or value == "":
         return default
     try:
+        if hasattr(value, "to_decimal"):
+            return float(value.to_decimal())
         return float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return default
 
 
