@@ -345,7 +345,7 @@ async def revoke_module_access(user_id: str, module: str, current_user: User = D
     mod = GOVERNED_MODULES.get(module)
     if not mod:
         raise HTTPException(status_code=400, detail="Unknown module.")
-    await _apply_flag(user_id, mod["flag"], False)
+    await _apply_flag(user_id, mod["flag"], False, current_user)
     return {"success": True}
 
 
