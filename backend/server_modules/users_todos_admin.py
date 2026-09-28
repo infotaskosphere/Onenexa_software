@@ -313,6 +313,15 @@ async def reject_user(user_id: str, current_user: User = Depends(get_current_use
 # ============================================================
 # USER MANAGEMENT
 # =============================================================
+async def _get_scoped_user_for_mutation(current_user: User, user_id: str):
+    """Resolve a user through the same tenant boundary used by GET /users."""
+    scoped = await _scope_users_query_by_company(
+        current_user,
+        _make_user_id_query(user_id),
+    )
+    return await db.users.find_one(scoped)
+
+
 async def _scope_users_query_by_company(current_user: User, base_query: Optional[dict] = None) -> dict:
     """Return the authoritative visibility scope for the operational Users surface.
 
@@ -531,7 +540,10 @@ async def update_user(
         )
 
     lookup_email = current_user.email if is_own else None
-    existing = await db.users.find_one(_make_user_id_query(user_id, lookup_email))
+    if is_admin and not is_own:
+        existing = await _get_scoped_user_for_mutation(current_user, user_id)
+    else:
+        existing = await db.users.find_one(_make_user_id_query(user_id, lookup_email))
     if not existing:
         raise HTTPException(status_code=404, detail="User not found.")
 
@@ -659,7 +671,7 @@ async def delete_user(
     # Issue #8: fully permission-based (can_manage_users flag), admin always passes via check_module_permission
     if user_id == current_user.id:
         raise HTTPException(status_code=400, detail="Cannot delete yourself")
-    existing = await db.users.find_one(_make_user_id_query(user_id))
+    existing = await _get_scoped_user_for_mutation(current_user, user_id)
     if not existing:
         raise HTTPException(status_code=404, detail="User not found")
     await create_audit_log(
