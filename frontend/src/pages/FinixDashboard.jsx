@@ -43,7 +43,9 @@ const METRICS_CACHE_TTL_MS = 60_000;
 const ALL_COMPANIES_ID = '__all__';
 
 const SS_METRICS_PREFIX = 'finix:metrics:';
-const SS_COMPANIES_KEY = 'finix:companies';
+// Bump the cache namespace whenever company-visibility rules change so an
+// older browser session cannot retain a pre-isolation company list.
+const SS_COMPANIES_KEY = 'finix:companies:v2';
 
 function ssRead(key) {
   try {
