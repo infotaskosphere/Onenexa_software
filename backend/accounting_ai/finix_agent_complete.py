@@ -9,7 +9,7 @@ import csv
 import io
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, date, timezone, timedelta
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
@@ -21,6 +21,25 @@ from backend.accounting_ai.finix_learning import get_learning_context, record_le
 from backend.accounting_ai.finix_ai_router import _build_proposal, _can_post, _can_view, _date
 
 router = APIRouter(prefix="/finix/ai", tags=["Finix AI Agent"])
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    """Normalize legacy accounting values without letting one malformed field crash Finix."""
+    if value is None or value == "":
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _date_key(value: Any) -> str:
+    """Normalize Mongo/date/string due dates to YYYY-MM-DD for forecast comparisons."""
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    return str(value or "")[:10]
 
 
 def _company(user: User, company_id: str = "") -> str:
@@ -64,7 +83,7 @@ async def _party_history(company_id: str, party_name: str) -> dict:
     invoices = await db.invoices.find(q, {"_id": 0}).sort("invoice_date", -1).to_list(20)
     purchases = await db.purchase_invoices.find(q, {"_id": 0}).sort("invoice_date", -1).to_list(20)
     all_docs = invoices + purchases
-    return {"transactions": all_docs[:20], "invoice_count": len(all_docs), "outstanding": round(sum(float(d.get("amount_due") or 0) for d in all_docs), 2)}
+    return {"transactions": all_docs[:20], "invoice_count": len(all_docs), "outstanding": round(sum(_safe_float(d.get("amount_due")) for d in all_docs), 2)}
 
 
 async def _learning_and_history(result: dict, cid: str) -> dict:
@@ -220,27 +239,27 @@ async def agent_ask(payload: AskRequest, current_user: User = Depends(get_curren
         income = expense = 0.0
         for line in entries:
             acct = account_ids.get(line.get("account_id"), {})
-            if acct.get("type") == "income": income += float(line.get("credit") or 0) - float(line.get("debit") or 0)
-            elif acct.get("type") == "expense": expense += float(line.get("debit") or 0) - float(line.get("credit") or 0)
+            if acct.get("type") == "income": income += _safe_float(line.get("credit")) - _safe_float(line.get("debit"))
+            elif acct.get("type") == "expense": expense += _safe_float(line.get("debit")) - _safe_float(line.get("credit"))
         result.update({"income": round(income, 2), "expenses": round(expense, 2), "profit": round(income-expense, 2)})
     elif any(x in q for x in ("receivable", "customer outstanding", "debtors")):
         docs = await db.invoices.find({"company_id": cid}, {"_id": 0}).to_list(10000)
-        result.update({"receivables": round(sum(float(d.get("amount_due") or 0) for d in docs), 2), "invoice_count": len(docs)})
+        result.update({"receivables": round(sum(_safe_float(d.get("amount_due")) for d in docs), 2), "invoice_count": len(docs)})
     elif any(x in q for x in ("payable", "vendor outstanding", "creditors")):
         docs = await db.purchase_invoices.find({"company_id": cid}, {"_id": 0}).to_list(10000)
-        result.update({"payables": round(sum(float(d.get("amount_due") or 0) for d in docs), 2), "invoice_count": len(docs)})
+        result.update({"payables": round(sum(_safe_float(d.get("amount_due")) for d in docs), 2), "invoice_count": len(docs)})
     elif "gst" in q:
         lines = await db.journal_lines.find({"company_id": cid}, {"_id": 0}).to_list(100000)
         accounts = {a.get("id"): a for a in await db.chart_of_accounts.find({"company_id": cid, "code": {"$in": ["2100", "1200"]}}, {"_id": 0}).to_list(10)}
         output = input_tax = 0.0
         for line in lines:
             acct = accounts.get(line.get("account_id"), {})
-            if acct.get("code") == "2100": output += float(line.get("credit") or 0) - float(line.get("debit") or 0)
-            elif acct.get("code") == "1200": input_tax += float(line.get("debit") or 0) - float(line.get("credit") or 0)
+            if acct.get("code") == "2100": output += _safe_float(line.get("credit")) - _safe_float(line.get("debit"))
+            elif acct.get("code") == "1200": input_tax += _safe_float(line.get("debit")) - _safe_float(line.get("credit"))
         result.update({"output_gst": round(output, 2), "input_gst": round(input_tax, 2), "net_gst": round(output-input_tax, 2)})
     elif any(x in q for x in ("tds", "tax deducted")):
         purchases = await db.purchase_invoices.find({"company_id": cid}, {"_id": 0}).to_list(10000)
-        total_tds = sum(float(p.get("tds_amount") or 0) for p in purchases)
+        total_tds = sum(_safe_float(p.get("tds_amount")) for p in purchases)
         result.update({"total_tds_deducted": round(total_tds, 2), "challan_due": "7th of following month"})
     elif any(x in q for x in ("health", "score", "audit", "trial balance")):
         lines = await db.journal_lines.find({"company_id": cid}, {"_id": 0, "debit": 1, "credit": 1}).to_list(100000)
@@ -249,7 +268,7 @@ async def agent_ask(payload: AskRequest, current_user: User = Depends(get_curren
         result.update({"trial_balance_debits": round(dr, 2), "trial_balance_credits": round(cr, 2), "balanced": abs(dr - cr) < 0.05})
     elif any(x in q for x in ("cash flow", "forecast", "runway")):
         banks = await db.bank_accounts.find({"company_id": cid}, {"_id": 0, "current_balance": 1, "balance": 1}).to_list(100)
-        total_cash = sum(float(b.get("current_balance") or b.get("balance") or 0) for b in banks)
+        total_cash = sum(_safe_float(b.get("current_balance") if b.get("current_balance") not in (None, "") else b.get("balance")) for b in banks)
         result.update({"current_cash_bank": round(total_cash, 2), "status": "Available in Cashflow Forecast report"})
     else:
         result["message"] = "Finix can answer live accounting questions for profit/loss, receivables, payables, GST, TDS, trial balance and cash flow."
@@ -275,9 +294,9 @@ async def agent_health_score(company_id: str = "", current_user: User = Depends(
     purchases = await db.purchase_invoices.find({"company_id": cid}, {"_id": 0, "amount_due": 1, "total_amount": 1, "due_date": 1, "status": 1}).to_list(10000)
     banks = await db.bank_accounts.find({"company_id": cid}, {"_id": 0, "current_balance": 1, "balance": 1}).to_list(100)
 
-    total_bank_cash = sum(float(b.get("current_balance") or b.get("balance") or 0) for b in banks)
-    total_ar = sum(float(inv.get("amount_due") or 0) for inv in invoices)
-    total_ap = sum(float(pur.get("amount_due") or 0) for pur in purchases)
+    total_bank_cash = sum(_safe_float(b.get("current_balance") if b.get("current_balance") not in (None, "") else b.get("balance")) for b in banks)
+    total_ar = sum(_safe_float(inv.get("amount_due")) for inv in invoices)
+    total_ap = sum(_safe_float(pur.get("amount_due")) for pur in purchases)
 
     current_assets = total_bank_cash + total_ar
     current_liabilities = total_ap
@@ -298,8 +317,8 @@ async def agent_health_score(company_id: str = "", current_user: User = Depends(
     today_str = date.today().isoformat()
     overdue_60_amt = 0.0
     for inv in invoices:
-        due = str(inv.get("due_date") or "")[:10]
-        amt = float(inv.get("amount_due") or 0)
+        due = _date_key(inv.get("due_date"))
+        amt = _safe_float(inv.get("amount_due"))
         if amt > 0 and due and due < today_str:
             try:
                 d_obj = datetime.strptime(due, "%Y-%m-%d").date()
@@ -317,7 +336,7 @@ async def agent_health_score(company_id: str = "", current_user: User = Depends(
     statutory_score = 10 if abs(output_gst) >= 0 and abs(input_gst) >= 0 else 5
 
     # 6. Audit & Anomaly Cleanliness (10 pts)
-    negative_bank = any(float(b.get("current_balance") or b.get("balance") or 0) < 0 for b in banks)
+    negative_bank = any(_safe_float(b.get("current_balance") if b.get("current_balance") not in (None, "") else b.get("balance")) < 0 for b in banks)
     audit_score = 10 if not negative_bank and tb_balanced else 5
 
     total_score = min(100, tb_score + liquidity_score + profit_score + debtors_score + statutory_score + audit_score)
@@ -358,26 +377,26 @@ async def agent_statutory_summary(company_id: str = "", current_user: User = Dep
     purchases = await db.purchase_invoices.find({"company_id": cid}, {"_id": 0}).to_list(10000)
 
     # GST Calculation
-    outward_taxable = sum(float(i.get("taxable_value") or i.get("subtotal") or 0) for i in invoices)
-    outward_cgst = sum(float(i.get("cgst") or 0) for i in invoices)
-    outward_sgst = sum(float(i.get("sgst") or 0) for i in invoices)
-    outward_igst = sum(float(i.get("igst") or 0) for i in invoices)
-    total_outward_tax = sum(float(i.get("total_tax") or (outward_cgst + outward_sgst + outward_igst)) for i in invoices)
+    outward_taxable = sum(_safe_float(i.get("taxable_value") if i.get("taxable_value") not in (None, "") else i.get("subtotal")) for i in invoices)
+    outward_cgst = sum(_safe_float(i.get("cgst")) for i in invoices)
+    outward_sgst = sum(_safe_float(i.get("sgst")) for i in invoices)
+    outward_igst = sum(_safe_float(i.get("igst")) for i in invoices)
+    total_outward_tax = sum(_safe_float(i.get("total_tax")) if i.get("total_tax") not in (None, "") else (outward_cgst + outward_sgst + outward_igst) for i in invoices)
 
-    inward_taxable = sum(float(p.get("taxable_value") or p.get("subtotal") or 0) for p in purchases)
-    inward_cgst = sum(float(p.get("cgst") or 0) for p in purchases)
-    inward_sgst = sum(float(p.get("sgst") or 0) for p in purchases)
-    inward_igst = sum(float(p.get("igst") or 0) for p in purchases)
-    total_inward_itc = sum(float(p.get("total_tax") or (inward_cgst + inward_sgst + inward_igst)) for p in purchases)
+    inward_taxable = sum(_safe_float(p.get("taxable_value") if p.get("taxable_value") not in (None, "") else p.get("subtotal")) for p in purchases)
+    inward_cgst = sum(_safe_float(p.get("cgst")) for p in purchases)
+    inward_sgst = sum(_safe_float(p.get("sgst")) for p in purchases)
+    inward_igst = sum(_safe_float(p.get("igst")) for p in purchases)
+    total_inward_itc = sum(_safe_float(p.get("total_tax")) if p.get("total_tax") not in (None, "") else (inward_cgst + inward_sgst + inward_igst) for p in purchases)
 
     net_gst_liability = round(total_outward_tax - total_inward_itc, 2)
 
     # TDS Calculation
-    tds_194c = sum(float(p.get("tds_amount") or 0) for p in purchases if p.get("tds_section") == "194C")
-    tds_194j = sum(float(p.get("tds_amount") or 0) for p in purchases if p.get("tds_section") == "194J")
-    tds_194i = sum(float(p.get("tds_amount") or 0) for p in purchases if p.get("tds_section") == "194I")
-    tds_194h = sum(float(p.get("tds_amount") or 0) for p in purchases if p.get("tds_section") == "194H")
-    total_tds = sum(float(p.get("tds_amount") or 0) for p in purchases)
+    tds_194c = sum(_safe_float(p.get("tds_amount")) for p in purchases if p.get("tds_section") == "194C")
+    tds_194j = sum(_safe_float(p.get("tds_amount")) for p in purchases if p.get("tds_section") == "194J")
+    tds_194i = sum(_safe_float(p.get("tds_amount")) for p in purchases if p.get("tds_section") == "194I")
+    tds_194h = sum(_safe_float(p.get("tds_amount")) for p in purchases if p.get("tds_section") == "194H")
+    total_tds = sum(_safe_float(p.get("tds_amount")) for p in purchases)
 
     return {
         "company_id": cid,
@@ -436,7 +455,7 @@ async def agent_anomalies(company_id: str = "", current_user: User = Depends(get
     # Rule 2: Negative Bank Balances
     banks = await db.bank_accounts.find({"company_id": cid}, {"_id": 0, "bank_name": 1, "account_number": 1, "current_balance": 1, "balance": 1}).to_list(100)
     for b in banks:
-        bal = float(b.get("current_balance") or b.get("balance") or 0)
+        bal = _safe_float(b.get("current_balance") if b.get("current_balance") not in (None, "") else b.get("balance"))
         if bal < 0:
             anomalies.append({
                 "type": "NEGATIVE_BANK_BALANCE",
@@ -486,7 +505,7 @@ async def agent_cashflow_forecast(company_id: str = "", current_user: User = Dep
     cid = _company(current_user, company_id)
 
     banks = await db.bank_accounts.find({"company_id": cid}, {"_id": 0, "current_balance": 1, "balance": 1}).to_list(100)
-    current_cash = sum(float(b.get("current_balance") or b.get("balance") or 0) for b in banks)
+    current_cash = sum(_safe_float(b.get("current_balance") if b.get("current_balance") not in (None, "") else b.get("balance")) for b in banks)
 
     invoices = await db.invoices.find({"company_id": cid, "amount_due": {"$gt": 0}}, {"_id": 0, "amount_due": 1, "due_date": 1}).to_list(1000)
     purchases = await db.purchase_invoices.find({"company_id": cid, "amount_due": {"$gt": 0}}, {"_id": 0, "amount_due": 1, "due_date": 1}).to_list(1000)
@@ -497,13 +516,13 @@ async def agent_cashflow_forecast(company_id: str = "", current_user: User = Dep
     d60 = (today + timedelta(days=60)).isoformat()
     d90 = (today + timedelta(days=90)).isoformat()
 
-    inflow_30 = sum(float(i.get("amount_due") or 0) * 0.85 for i in invoices if (i.get("due_date") or "") <= d30)
-    inflow_60 = inflow_30 + sum(float(i.get("amount_due") or 0) * 0.75 for i in invoices if d30 < (i.get("due_date") or "") <= d60)
-    inflow_90 = inflow_60 + sum(float(i.get("amount_due") or 0) * 0.65 for i in invoices if d60 < (i.get("due_date") or "") <= d90)
+    inflow_30 = sum(float(i.get("amount_due") or 0) * 0.85 for i in invoices if _date_key(i.get("due_date")) <= d30)
+    inflow_60 = inflow_30 + sum(float(i.get("amount_due") or 0) * 0.75 for i in invoices if d30 < _date_key(i.get("due_date")) <= d60)
+    inflow_90 = inflow_60 + sum(float(i.get("amount_due") or 0) * 0.65 for i in invoices if d60 < _date_key(i.get("due_date")) <= d90)
 
-    outflow_30 = sum(float(p.get("amount_due") or 0) for p in purchases if (p.get("due_date") or "") <= d30)
-    outflow_60 = outflow_30 + sum(float(p.get("amount_due") or 0) for p in purchases if d30 < (p.get("due_date") or "") <= d60)
-    outflow_90 = outflow_60 + sum(float(p.get("amount_due") or 0) for p in purchases if d60 < (p.get("due_date") or "") <= d90)
+    outflow_30 = sum(_safe_float(p.get("amount_due")) for p in purchases if _date_key(p.get("due_date")) <= d30)
+    outflow_60 = outflow_30 + sum(_safe_float(p.get("amount_due")) for p in purchases if d30 < _date_key(p.get("due_date")) <= d60)
+    outflow_90 = outflow_60 + sum(_safe_float(p.get("amount_due")) for p in purchases if d60 < _date_key(p.get("due_date")) <= d90)
 
     proj_30 = round(current_cash + inflow_30 - outflow_30, 2)
     proj_60 = round(current_cash + inflow_60 - outflow_60, 2)
