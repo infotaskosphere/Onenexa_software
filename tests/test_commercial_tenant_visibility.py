@@ -37,6 +37,8 @@ def test_generic_user_scope_has_platform_owner_branch():
     assert "if is_platform_owner(current_user):" in source
     assert "async def _get_scoped_user_for_mutation(" in source
     assert "_scope_users_query_by_company(" in source
+    assert "old_user = await _get_scoped_user_for_mutation(current_user, user_id)" in source
+    assert "new_user = await _get_scoped_user_for_mutation(current_user, body.replacement_user_id)" in source
 
 
 def test_platform_customer_user_endpoint_exists_separately():
