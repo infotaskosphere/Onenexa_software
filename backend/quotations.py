@@ -1685,6 +1685,30 @@ async def get_companies(
     # Platform Owner operational dropdowns must never expose commercial-license
     # tenant companies. Those companies are managed through Commercial Console.
     if is_platform_owner(current_user):
+        # Legacy licensee records may pre-date the commercial marker fields.
+        # Resolve customer/license ownership as well, so they cannot leak into
+        # Platform Owner operational company selectors.
+        commercial_customers = await db.commercial_license_customers.find(
+            {}, {"_id": 0, "id": 1}
+        ).to_list(5000)
+        commercial_licenses = await db.commercial_licenses.find(
+            {}, {"_id": 0, "customer_id": 1, "company_id": 1}
+        ).to_list(5000)
+        legacy_licensee_ids = {
+            str(item.get("id")).strip()
+            for item in commercial_customers
+            if item.get("id")
+        }
+        legacy_licensee_ids.update(
+            str(item.get("company_id")).strip()
+            for item in commercial_licenses
+            if item.get("company_id")
+        )
+        legacy_licensee_ids.update(
+            str(item.get("customer_id")).strip()
+            for item in commercial_licenses
+            if item.get("customer_id")
+        )
         list_filter = {
             "created_by": str(current_user.id),
             "$nor": [
@@ -1693,6 +1717,8 @@ async def get_companies(
                 {"license_id": {"$nin": [None, "", "platform-owner-license"]}},
             ],
         }
+        if legacy_licensee_ids:
+            list_filter["id"] = {"$nin": sorted(legacy_licensee_ids)}
     tenant_company_id = str(getattr(current_user, "company_id", "") or "").strip()
     tenant_customer_id = str(getattr(current_user, "commercial_customer_id", "") or "").strip()
     if not is_platform_owner(current_user) and tenant_company_id and str(getattr(current_user, "role", "") or "").lower() == "admin":
@@ -1769,6 +1795,28 @@ async def list_companies(current_user: User = Depends(get_current_user)):
     # Platform Owner must receive only its own operational companies here.
     # Licensee companies remain available only through Commercial Console.
     if is_platform_owner(current_user):
+        # Legacy licensee records may pre-date the commercial marker fields.
+        commercial_customers = await db.commercial_license_customers.find(
+            {}, {"_id": 0, "id": 1}
+        ).to_list(5000)
+        commercial_licenses = await db.commercial_licenses.find(
+            {}, {"_id": 0, "customer_id": 1, "company_id": 1}
+        ).to_list(5000)
+        legacy_licensee_ids = {
+            str(item.get("id")).strip()
+            for item in commercial_customers
+            if item.get("id")
+        }
+        legacy_licensee_ids.update(
+            str(item.get("company_id")).strip()
+            for item in commercial_licenses
+            if item.get("company_id")
+        )
+        legacy_licensee_ids.update(
+            str(item.get("customer_id")).strip()
+            for item in commercial_licenses
+            if item.get("customer_id")
+        )
         list_filter = {
             "created_by": str(current_user.id),
             "$nor": [
@@ -1777,6 +1825,8 @@ async def list_companies(current_user: User = Depends(get_current_user)):
                 {"license_id": {"$nin": [None, "", "platform-owner-license"]}},
             ],
         }
+        if legacy_licensee_ids:
+            list_filter["id"] = {"$nin": sorted(legacy_licensee_ids)}
     tenant_company_id = str(getattr(current_user, "company_id", "") or "").strip()
     if (
         not is_platform_owner(current_user)
