@@ -60,9 +60,12 @@ def _is_commercial_control_context() -> bool:
     for frame_info in inspect.stack(context=0):
         module_name = str(frame_info.frame.f_globals.get("__name__") or "")
         if (
-            module_name.startswith("backend.commercial_")
-            or module_name.startswith("backend.licensing_")
-            or (module_name == "backend.invoicing" and frame_info.function in {"create_invoice", "_next_invoice_no", "recalculate_invoice_accounting"})
+            module_name != __name__
+            and (
+                module_name.startswith("backend.commercial_")
+                or module_name.startswith("backend.licensing_")
+                or (module_name == "backend.invoicing" and frame_info.function in {"create_invoice", "_next_invoice_no", "recalculate_invoice_accounting"})
+            )
         ):
             return True
     return False
