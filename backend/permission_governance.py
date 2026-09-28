@@ -33,6 +33,7 @@ from backend.dependencies import (
     get_team_user_ids,
     create_audit_log,
 )
+from backend.commercial_user_company_scope import _scope_user_query
 from backend.models import User, DEFAULT_ROLE_PERMISSIONS
 from backend.modules.people_matrix.permissions.catalog import MODULE_HIERARCHY
 from backend.governance_core import ALL_ACTIONS
@@ -268,8 +269,11 @@ async def list_access_requests(
     return items
 
 
-async def _apply_flag(user_id: str, flag: str, value: bool):
-    await db.users.update_one({"id": user_id}, {"$set": {f"permissions.{flag}": value}})
+async def _apply_flag(user_id: str, flag: str, value: bool, current_user: User | None = None):
+    user_query = {"id": user_id}
+    if current_user is not None:
+        user_query = _scope_user_query(user_query)
+    await db.users.update_one(user_query, {"$set": {f"permissions.{flag}": value}})
 
 
 @router.post("/permission-governance/requests/{request_id}/approve")
@@ -287,7 +291,13 @@ async def approve_access_request(
     if not module:
         raise HTTPException(status_code=400, detail="Unknown module on this request.")
 
-    await _apply_flag(reqdoc["user_id"], module["flag"], True)
+    scoped_target = await db.users.find_one(
+        _scope_user_query({"id": reqdoc["user_id"]}),
+        {"_id": 0, "id": 1},
+    )
+    if not scoped_target:
+        raise HTTPException(status_code=404, detail="Requested user is outside your tenant scope.")
+    await _apply_flag(reqdoc["user_id"], module["flag"], True, current_user)
     now = datetime.now(timezone.utc).isoformat()
     await db.access_requests.update_one(
         {"id": request_id},
@@ -348,7 +358,7 @@ async def list_current_grants(current_user: User = Depends(get_current_user)):
     projection = {"_id": 0, "id": 1, "full_name": 1, "email": 1, "role": 1}
     for f in flags:
         projection[f"permissions.{f}"] = 1
-    users = await db.users.find({}, projection).to_list(2000)
+    users = await db.users.find(_scope_user_query({}), projection).to_list(2000)
     return users
 
 
@@ -434,7 +444,10 @@ async def get_permissions(
     """
     # Admin always allowed
     if current_user.role == "admin":
-        user = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
+        user = await db.users.find_one(
+            _scope_user_query({"id": user_id}),
+            {"_id": 0, "password": 0},
+        )
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
         return _normalize_permissions(user)["permissions"]
@@ -480,7 +493,10 @@ async def update_user_permissions(
     """
     # ── Admin path ────────────────────────────────────────────────────────────
     if current_user.role == "admin":
-        existing = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
+        existing = await db.users.find_one(
+            _scope_user_query({"id": user_id}),
+            {"_id": 0, "password": 0},
+        )
         if not existing:
             raise HTTPException(status_code=404, detail="User not found")
         old_permissions = existing.get("permissions", {})
@@ -489,7 +505,8 @@ async def update_user_permissions(
         permissions = _enforce_module_hierarchy(permissions)
         permissions = _cap_permissions_to_license(permissions, current_user)
         await db.users.update_one(
-            {"id": user_id}, {"$set": {"permissions": permissions}}
+            _scope_user_query({"id": user_id}),
+            {"$set": {"permissions": permissions}},
         )
         await create_audit_log(
             current_user,
