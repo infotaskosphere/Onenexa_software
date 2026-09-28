@@ -116,9 +116,7 @@ def _is_trusted_system_context() -> bool:
 
 
 def _owner_user_query(query: Any) -> dict[str, Any]:
-    """Restrict the Platform Owner's Users surface to owner identities only."""
-    if _is_commercial_control_context():
-        return dict(query or {})
+    """Restrict the Platform Owner's normal Users surface to owner identities only."""
     base = dict(query or {})
     requested_email = base.get("email")
     owner_emails = _owner_emails()
