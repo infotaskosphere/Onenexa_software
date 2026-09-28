@@ -46,6 +46,18 @@ def _company_public(company: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+def _is_licensee_company(company: Dict[str, Any]) -> bool:
+    """Return True when a company record belongs to a commercial licensee."""
+    source = str(company.get("source") or "").strip().lower()
+    customer_id = str(company.get("commercial_customer_id") or "").strip().lower()
+    license_id = str(company.get("license_id") or "").strip().lower()
+    return (
+        source in {"commercial-license", "commercial", "license"}
+        or bool(customer_id and customer_id != "platform-owner")
+        or bool(license_id and license_id != "platform-owner-license")
+    )
+
+
 @router.get("/company-directory")
 async def company_directory(current_user: User = Depends(get_current_user)):
     """Return commercial customers and their legal-company relationships.
@@ -85,8 +97,15 @@ async def company_directory(current_user: User = Depends(get_current_user)):
             customer_id = str(company.get("id"))
         if customer_id in grouped:
             grouped[customer_id].append(_company_public(company))
-        else:
+        elif not _is_licensee_company(company):
+            # Never surface a licensee company as an "unlinked" platform company.
             unlinked.append(_company_public(company))
+
+    platform_companies = [
+        _company_public(company)
+        for company in companies
+        if not _is_licensee_company(company)
+    ]
 
     customer_rows = []
     for customer in customers:
@@ -113,7 +132,9 @@ async def company_directory(current_user: User = Depends(get_current_user)):
 
     return {
         "customers": customer_rows,
-        "companies": companies and [_company_public(c) for c in companies] or [],
+        # Keep the legacy response key, but it is now strictly platform-owned.
+        # Licensee companies are available only inside their customer row.
+        "companies": platform_companies,
         "unlinked_companies": unlinked,
         "platform_owner": True,
     }
