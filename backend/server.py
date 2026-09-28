@@ -45,6 +45,8 @@ from backend.website_tracking import router as website_tracking_router
 from backend.invoicing import router as invoicing_router
 from backend.accounting_core import router as accounting_router
 from backend.party_ledgers import router as party_ledgers_router
+from backend.accounting_ai.finix_ai_router import router as finix_ai_router
+from backend.accounting_ai.finix_complete_router import router as finix_complete_router
 from backend.accounting_extended import router as accounting_ext_router
 from backend.accounting_extended import create_accounting_extended_indexes
 from backend.bank_accounts import router as bank_accounts_router
@@ -354,6 +356,8 @@ register_legacy_router_mounts(
         invoicing_router,
         accounting_router,
         party_ledgers_router,
+        finix_ai_router,
+        finix_complete_router,
         accounting_ext_router,
         bank_accounts_router,
         permission_governance_router,
