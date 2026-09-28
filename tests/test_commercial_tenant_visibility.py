@@ -27,10 +27,16 @@ def test_company_master_directory_filters_licensee_companies():
 
 
 def test_generic_user_scope_has_platform_owner_branch():
-    from backend.server_modules.users_todos_admin import _scope_users_query_by_company
+    from backend.server_modules import users_todos_admin
 
-    # This helper is the authoritative tenant boundary used by GET/PUT/DELETE /users.
-    assert _scope_users_query_by_company.__name__ == "_scope_users_query_by_company"
+    source = users_todos_admin.SOURCE
+
+    # The module preserves the original route implementation inside SOURCE and
+    # registers it into the server namespace at application composition time.
+    assert "async def _scope_users_query_by_company(" in source
+    assert "if is_platform_owner(current_user):" in source
+    assert "async def _get_scoped_user_for_mutation(" in source
+    assert "_scope_users_query_by_company(" in source
 
 
 def test_platform_customer_user_endpoint_exists_separately():
