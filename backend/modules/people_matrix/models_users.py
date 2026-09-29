@@ -126,13 +126,13 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_view_tasks": True,            # GATE: access /tasks endpoint (scope handled server-side)
           "can_view_clients": True,          # GATE: access /clients endpoint (scope handled server-side)
           "can_view_all_tasks": False,       # SCOPE handled server-side by department query
-          "can_view_all_clients": False,     # ADMIN_GRANTED_ONLY
-          "can_view_all_dsc": False,         # ADMIN_GRANTED_ONLY
-          "can_view_documents": False,       # ADMIN_GRANTED_ONLY
+          "can_view_all_clients": True,      # Manager can view clients
+          "can_view_all_dsc": True,          # Manager can view DSCs
+          "can_view_documents": True,        # Records → VIEW (Own + Team)
           "can_view_all_duedates": True,     # Compliance Calendar → VIEW (Own + Team)
           "can_view_reports": True,          # Reports → VIEW (Own + Team)
           "can_view_attendance": True,       # Attendance → VIEW (Own + Team)
-          "can_view_all_leads": False,       # ADMIN_GRANTED_ONLY (Leads Pipeline not in default spec)
+          "can_view_all_leads": True,        # Proposals / Leads → VIEW
           "can_edit_tasks": True,            # Tasks → EDIT/UPDATE (Own + Team)
           "can_edit_clients": False,         # ADMIN_GRANTED_ONLY
           "can_approve_clients": False,      # ADMIN_GRANTED_ONLY
@@ -148,7 +148,12 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_view_staff_activity": False,  # Admin-only — not grantable to manager/staff
           "can_send_reminders": False,       # ADMIN_GRANTED_ONLY
           "can_receive_popup_reminders": False,  # ADMIN_GRANTED_ONLY — also requires cross visibility to be on
-          "can_view_user_page": False,       # ADMIN_GRANTED_ONLY
+          "can_view_user_page": True,        # People Matrix → VIEW
+          "can_view_leave": True,            # People Matrix → Leave VIEW
+          "can_view_payroll": True,          # People Matrix → Payroll VIEW
+          "can_view_hr": True,               # People Matrix → HR VIEW
+          "can_view_recruitment": True,      # People Matrix → Recruitment VIEW
+          "can_manage_recruitment": False,   # ADMIN_GRANTED_ONLY
           "can_view_audit_logs": False,      # ADMIN_GRANTED_ONLY
           "can_view_selected_users_reports": True,  # Reports → VIEW (Team scope)
           "can_view_todo_dashboard": True,   # To Do → VIEW (Own + Team)
@@ -163,16 +168,22 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_delete_tasks": False,         # ADMIN_GRANTED_ONLY
           "can_connect_email": True,         # Email Accounts → VIEW, CREATE, EDIT, UPDATE (Own + Team)
           "can_view_own_data": True,         # Dashboard → VIEW
-          "can_create_quotations": False,    # ADMIN_GRANTED_ONLY (Quotations not in default spec)
+          "can_create_quotations": True,     # Proposals → Create Quotations
+          "can_view_client_discussion": True, # Proposals → Client Discussion
           "can_manage_invoices": False,      # ADMIN_GRANTED_ONLY
-          "can_view_passwords": False,       # ADMIN_GRANTED_ONLY
+          "can_view_passwords": True,        # Records → Password Vault VIEW
           "can_edit_passwords": False,       # ADMIN_GRANTED_ONLY
           "view_password_departments": [],   # defaults to own departments
           "can_view_compliance": True,       # Compliance Tracker → VIEW (Own + Team)
           "can_manage_compliance": True,     # Compliance Tracker → CREATE, EDIT, UPDATE (Own + Team)
-          "can_view_mis_report": False,      # MIS Report — ADMIN_GRANTED_ONLY
+          "can_view_mis_report": True,       # MIS Report → VIEW
           "can_manage_mis_report": False,    # MIS Report — ADMIN_GRANTED_ONLY
-          "can_edit_attendance": False,      # Attendance correction is Admin-only
+          "can_view_salary_slips": True,     # Compliance → Salary Slips
+          "can_manage_salary_slips": False,  # ADMIN_GRANTED_ONLY
+          "can_view_gst_reconciliation": True, # Compliance → GST Reconciliation
+          "can_view_trademark_sphere": True, # Compliance → Trademark Sphere
+          "can_view_roc_sphere": True,       # Compliance → ROC Sphere
+          "can_edit_attendance": True,       # Attendance → EDIT/UPDATE (Own + Team)
           "can_view_all_visits": False,      # SCOPE handled server-side by department query
           "can_edit_visits": True,           # Client Visits → EDIT/UPDATE (Own + Team)
           "can_delete_visits": False,        # ADMIN_GRANTED_ONLY
@@ -183,28 +194,25 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "view_other_reports": [],
           "view_other_todos": [],
           "view_other_activity": [],
-                    "can_access_whatsapp_hub": False,     # ADMIN_GRANTED_ONLY
-          "can_view_recruitment": False,         # ADMIN_GRANTED_ONLY
-          "can_manage_recruitment": False,       # ADMIN_GRANTED_ONLY
+          "can_access_whatsapp_hub": False,     # ADMIN_GRANTED_ONLY
           "assigned_clients": [],
           # Accounts module governance — ADMIN_GRANTED_ONLY, request via Permission Governance
-          "can_view_purchase": False,
-          "can_view_sale": False,
-          "can_view_bank": False,
-          "can_view_chart_of_accounts": False,
+          "can_view_purchase": True,
+          "can_view_sale": True,
+          "can_view_bank": True,
+          "can_view_chart_of_accounts": True,
           "can_manage_chart_of_accounts": False,
-          "can_view_journal_entries": False,
+          "can_view_journal_entries": True,
           "can_post_journal_entries": False,
-          "can_view_accounting_reports": False,
+          "can_view_accounting_reports": True,
           "can_match_bank": True,          # Manager: Match / Edit Match / Unmatch by default (still gated by can_view_bank to reach the page)
-          # ── Main permission module hierarchy — Taskosphere always on, the
-          # other five are ADMIN_GRANTED_ONLY via the Permission Governance portal.
+          # ── Main permission module hierarchy — In commercial accounts, capped to license
           "can_access_taskosphere": True,
-          "can_access_finix": False,
-          "can_access_compliance": False,
-          "can_access_records": False,
-          "can_access_proposals": False,
-          "can_access_people_matrix": False,
+          "can_access_finix": True,
+          "can_access_compliance": True,
+          "can_access_records": True,
+          "can_access_proposals": True,
+          "can_access_people_matrix": True,
           "can_view_client_portal": False,   # ADMIN_GRANTED_ONLY
           "can_reset_client_passwords": False,   # ADMIN_GRANTED_ONLY
       },

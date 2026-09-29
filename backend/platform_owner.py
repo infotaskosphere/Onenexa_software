@@ -13,7 +13,7 @@ import os
 DEFAULT_PLATFORM_OWNER_EMAILS = {
     "info.taskosphere@gmail.com",
     "infotaskosphere@gmail.com",
-    "csmanthandesai@gmail.com",
+    "admin@taskosphere.com",
 }
 
 

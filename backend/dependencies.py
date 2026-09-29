@@ -279,6 +279,29 @@ async def get_current_user(credentials=Depends(security)):
             raise HTTPException(status_code=403,detail="Authenticated user is not associated with a company")
     set_authenticated_company(company_id)
     set_platform_owner(is_platform_owner(user))
+    if not is_platform_owner(user) and company_id:
+        try:
+            cust_id = getattr(user, "commercial_customer_id", None) or company_id
+            lic = await db.commercial_licenses.find_one(
+                {"$or": [{"customer_id": cust_id}, {"company_id": company_id}, {"id": str(getattr(user, "license_id", "") or "")}], "status": {"$in": ["active", "trial"]}},
+                {"_id": 0},
+                sort=[("issued_at", -1)],
+            )
+            if not lic:
+                lic = await db.commercial_licenses.find_one(
+                    {"$or": [{"customer_id": cust_id}, {"company_id": company_id}, {"id": str(getattr(user, "license_id", "") or "")}]},
+                    {"_id": 0},
+                    sort=[("issued_at", -1)],
+                )
+            if lic:
+                u_data = user.model_dump()
+                u_data["licensed_modules"] = list(lic.get("modules") or lic.get("licensed_modules") or [])
+                u_data["selected_features"] = lic.get("selected_features") or {}
+                u_data["license_id"] = lic.get("id")
+                u_data["commercial_customer_id"] = lic.get("customer_id") or cust_id
+                user = User.model_validate(u_data)
+        except Exception as e:
+            logger.warning(f"Could not hydrate license modules in get_current_user: {e}")
     return user
 
 def check_permission(required_permission):

@@ -548,10 +548,7 @@ async def _commercial_license(
     return None
 
 
-def _hydrate_admin(user: User, license_doc: dict) -> User:
-    if not _is_admin_role(user):
-        return user
-
+def _hydrate_tenant_user(user: User, license_doc: dict) -> User:
     data = user.model_dump()
 
     data["commercial_customer_id"] = (
@@ -572,6 +569,9 @@ def _hydrate_admin(user: User, license_doc: dict) -> User:
         license_doc.get("selected_features")
         or {}
     )
+
+    if not _is_admin_role(user):
+        return User.model_validate(data)
 
     # Ordinary licensed modules remain role-granted to the tenant admin.
     # AIWeave is the exception: preserve only the administrator's previously
@@ -600,6 +600,10 @@ def _hydrate_admin(user: User, license_doc: dict) -> User:
     data["permissions"] = admin_permissions
 
     return User.model_validate(data)
+
+
+def _hydrate_admin(user: User, license_doc: dict) -> User:
+    return _hydrate_tenant_user(user, license_doc)
 
 
 def _licensed_module(module: str, license_doc: dict) -> bool:
@@ -750,30 +754,47 @@ def _permission_flag(
         if is_admin:
             return True
 
-        selected = _selected_license_features(
-            license_doc,
-            module,
-        )
+        # Non-admin licensee user: licensee admin has full control over user permissions
+        # for modules permitted by the commercial console license.
+        permissions = getattr(user, "permissions", None)
+        if hasattr(permissions, "model_dump"):
+            permissions = permissions.model_dump()
+        if not isinstance(permissions, dict):
+            return False
 
-        if flag not in selected:
-            # Client Discussion was introduced after the first commercial
-            # proposals licenses were issued. Those licenses selected Lead
-            # Management, while the persisted admin permissions and frontend
-            # still expose the discussion page. Keep that legacy entitlement
-            # coherent without opening the route for another module.
-            permissions = getattr(user, "permissions", None)
-            if hasattr(permissions, "model_dump"):
-                permissions = permissions.model_dump()
-            if not isinstance(permissions, dict):
-                permissions = {}
-            if not (
-                flag == "can_view_client_discussion"
-                and (
-                    "can_view_all_leads" in selected
-                    or permissions.get("can_view_all_leads") is True
-                )
-            ):
-                return False
+        module_flag_map = {
+            "taskosphere": "can_access_taskosphere",
+            "finix": "can_access_finix",
+            "compliance": "can_access_compliance",
+            "records": "can_access_records",
+            "proposals": "can_access_proposals",
+            "people_matrix": "can_access_people_matrix",
+        }
+        mod_flag = module_flag_map.get(module)
+        if mod_flag and permissions.get(mod_flag) is False:
+            return False
+
+        if flag in permissions and permissions.get(flag) is not None:
+            return bool(permissions.get(flag))
+
+        dashboard_flags = {
+            "taskosphere": "can_view_dashboard",
+            "finix": "can_view_accounting_reports",
+            "compliance": "can_view_compliance",
+            "records": "can_view_documents",
+            "proposals": "can_view_all_leads",
+            "people_matrix": "can_view_user_page",
+        }
+        if flag == dashboard_flags.get(module) and permissions.get(flag) is not False:
+            return True
+
+        if str(getattr(user, "role", "")).strip().lower() == "manager" and permissions.get(flag) is not False:
+            return True
+
+        if flag == "can_view_client_discussion" and permissions.get("can_view_all_leads") is True:
+            return True
+
+        return bool(permissions.get(flag, False))
 
     # The license ceiling above has passed. A tenant admin is governed by the
     # license alone, so do not additionally require a per-user permission dict.
@@ -781,12 +802,31 @@ def _permission_flag(
         return True
 
     permissions = getattr(user, "permissions", None)
-
     if hasattr(permissions, "model_dump"):
         permissions = permissions.model_dump()
 
     if not isinstance(permissions, dict):
         return False
+
+    if flag in permissions and permissions.get(flag) is not None:
+        return bool(permissions.get(flag))
+
+    dashboard_flags = {
+        "taskosphere": "can_view_dashboard",
+        "finix": "can_view_accounting_reports",
+        "compliance": "can_view_compliance",
+        "records": "can_view_documents",
+        "proposals": "can_view_all_leads",
+        "people_matrix": "can_view_user_page",
+    }
+    for m_id, d_flag in dashboard_flags.items():
+        if flag == d_flag:
+            m_flag = f"can_access_{m_id}"
+            if permissions.get(m_flag) is not False and permissions.get(flag) is not False:
+                return True
+
+    if str(getattr(user, "role", "")).strip().lower() == "manager" and permissions.get(flag) is not False:
+        return True
 
     return bool(
         permissions.get(

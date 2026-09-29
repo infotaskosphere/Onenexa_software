@@ -188,17 +188,11 @@ def _license_permissions(
     )
     if str(role or "").strip().lower() == "admin":
         return get_all_admin_permissions(license_doc)
-    if admin_user is not None:
-        return get_tenant_user_permissions(
-            admin_user,
-            license_doc,
-            role,
-            existing_permissions,
-        )
-    return _apply_feature_entitlements(
+    return get_tenant_user_permissions(
+        admin_user,
+        license_doc,
         role,
-        list(license_doc.get("modules") or []),
-        license_doc.get("selected_features") or {},
+        existing_permissions,
     )
 
 
@@ -633,13 +627,22 @@ async def create_company_user(payload: Dict[str, Any], current_user: User = Depe
 
     now = _now()
     user_id = str(uuid.uuid4())
+    custom_perms = payload.get("permissions")
+    if custom_perms and isinstance(custom_perms, dict):
+        from backend.permission_governance import _enforce_module_hierarchy, _cap_permissions_to_license
+        user_perms = _enforce_module_hierarchy(custom_perms)
+        user_perms = await _cap_permissions_to_license(user_perms, current_user)
+    else:
+        user_perms = _license_permissions(role, license_doc, current_user)
+
     doc = {
         "id": user_id,
         "email": email,
         "full_name": full_name,
         "role": role,
         "password": pwd_context.hash(password),
-        "permissions": _license_permissions(role, license_doc),
+        "permissions": user_perms,
+        "permissions_inherited_from_licensee_admin": False if custom_perms else True,
         "departments": list(payload.get("departments") or []),
         "phone": str(payload.get("phone") or "").strip() or None,
         "punch_in_time": str(payload.get("punch_in_time") or "10:30"),
@@ -717,7 +720,12 @@ async def update_company_user(user_id: str, payload: Dict[str, Any], current_use
     if role not in {"staff", "manager"}:
         role = "staff"
     updates["role"] = role
-    updates["permissions"] = _license_permissions(role, license_doc)
+    if "permissions" in payload and isinstance(payload["permissions"], dict):
+        updates["permissions"] = payload["permissions"]
+    elif existing.get("permissions"):
+        updates["permissions"] = existing.get("permissions")
+    else:
+        updates["permissions"] = _license_permissions(role, license_doc)
     updates["licensed_modules"] = list(license_doc.get("modules") or [])
     updates["selected_features"] = license_doc.get("selected_features") or {}
 

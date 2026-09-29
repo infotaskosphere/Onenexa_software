@@ -14,7 +14,7 @@ const getPlatformOwnerEmails = () => {
     configured.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean).forEach((e) => customSet.add(e));
     if (customSet.size > 0) return customSet;
   }
-  return new Set([PLATFORM_OWNER_EMAIL.toLowerCase(), "infotaskosphere@gmail.com", "admin@taskosphere.com", "csmanthandesai@gmail.com"]);
+  return new Set([PLATFORM_OWNER_EMAIL.toLowerCase(), "infotaskosphere@gmail.com", "admin@taskosphere.com"]);
 };
 
 export const MODULES = Object.freeze({
@@ -105,7 +105,35 @@ export function isCommercialTenant(user) { return Boolean(user) && !isPlatformOw
 export function moduleForPath(pathname) { const path = String(pathname || "").split("?", 1)[0]; const match = PAGE_MATRIX.filter(([, , prefix]) => path === prefix || path.startsWith(`${prefix}/`)).sort((a, b) => b[2].length - a[2].length)[0]; return match?.[0] || null; }
 export function pageFlagForPath(pathname) { const path = String(pathname || "").split("?", 1)[0]; const match = PAGE_MATRIX.filter(([, , prefix]) => path === prefix || path.startsWith(`${prefix}/`)).sort((a, b) => b[2].length - a[2].length)[0]; return match?.[1] || null; }
 
-export function hasModuleAccess(user, moduleId) { if (!user) return false; if (isPlatformOwner(user)) return true; if (moduleId === "aiweave") return user.permissions?.can_access_aiweave === true && user.permissions?.can_view_aiweave === true; if (!MODULES[moduleId]) return false; const modules = normalizeModules(user); if (modules.size > 0) return modules.has(moduleId); const selected = normalizedSelectedFeatures(user); return selected[moduleId]?.size > 0; }
+export function hasModuleAccess(user, moduleId) {
+  if (!user) return false;
+  if (isPlatformOwner(user)) return true;
+  if (moduleId === "aiweave") return user.permissions?.can_access_aiweave === true && user.permissions?.can_view_aiweave === true;
+  if (!MODULES[moduleId]) return false;
+  const modules = normalizeModules(user);
+  // Commercial license is the hard ceiling: unlicensed modules cannot be accessed by anyone in the company
+  if (modules.size > 0 && !modules.has(moduleId)) return false;
+  // Licensee admin gets all licensed modules
+  if (String(user.role || "").toLowerCase() === "admin") return true;
+
+  // Non-admin licensee user (manager, staff): licensee admin controls their module access via permission matrix
+  const def = MODULES[moduleId];
+  if (def?.flag && user.permissions?.[def.flag] !== undefined) {
+    return Boolean(user.permissions[def.flag]);
+  }
+  // Check if any page under this module is enabled
+  const allFlags = ALL_PAGE_FLAGS_BY_MODULE[moduleId] || [];
+  if (allFlags.some((flag) => user.permissions?.[flag] === true)) return true;
+
+  // For manager: if module is licensed and not explicitly revoked, manager has access
+  if (String(user.role || "").toLowerCase() === "manager" && modules.size > 0 && modules.has(moduleId)) {
+    return true;
+  }
+
+  if (modules.size > 0) return modules.has(moduleId);
+  const selected = normalizedSelectedFeatures(user);
+  return (selected[moduleId]?.size || 0) > 0;
+}
 
 export function hasPageLicense(user, pageFlag, moduleId = null) {
   if (!user || !pageFlag) return false;
@@ -116,16 +144,18 @@ export function hasPageLicense(user, pageFlag, moduleId = null) {
   if (pageFlag === "can_view_aiweave") {
     return user.permissions?.can_access_aiweave === true && user.permissions?.can_view_aiweave === true;
   }
-  const selected = normalizedSelectedFeatures(user);
-  const module = moduleId || Object.entries(MODULES).find(([id]) => selected[id]?.has(pageFlag))?.[0];
-  if (!module || !hasModuleAccess(user, module)) return false;
-  if (DASHBOARD_FLAG_BY_MODULE[module] === pageFlag) {
-    if (selected[module]?.has(pageFlag)) return true;
-    if (!selected[module] && user.permissions?.[pageFlag] === true) return true;
-    return false;
-  }
-  if (pageFlag === "can_view_client_discussion" && selected[module]?.has("can_view_all_leads")) return true;
-  return Boolean(selected[module]?.has(pageFlag));
+  const module = moduleId || Object.entries(MODULES).find(([id, def]) => {
+    return ALL_PAGE_FLAGS_BY_MODULE[id]?.includes(pageFlag);
+  })?.[0] || Object.entries(MODULES).find(([id]) => normalizedSelectedFeatures(user)[id]?.has(pageFlag))?.[0];
+
+  if (!module) return false;
+
+  // Hard ceiling: company must have the module on the commercial license
+  const modules = normalizeModules(user);
+  if (modules.size > 0 && !modules.has(module)) return false;
+
+  // If company is licensed for the module, licensee admin has full control over pages for tenant users
+  return true;
 }
 
 export function hasEffectivePermission(user, permission) {
@@ -134,17 +164,39 @@ export function hasEffectivePermission(user, permission) {
   if (permission === "can_access_aiweave") return user.permissions?.can_access_aiweave === true && user.permissions?.can_view_aiweave === true;
   if (permission === "can_view_aiweave") return user.permissions?.can_access_aiweave === true && user.permissions?.can_view_aiweave === true;
   if (!isCommercialTenant(user)) return typeof user.permissions?.[permission] === "boolean" ? user.permissions[permission] : String(user.role || "").toLowerCase() === "admin";
-  const moduleEntry = Object.entries(MODULES).find(([, def]) => def.flag === permission); if (moduleEntry) return hasModuleAccess(user, moduleEntry[0]);
+  const moduleEntry = Object.entries(MODULES).find(([, def]) => def.flag === permission);
+  if (moduleEntry) return hasModuleAccess(user, moduleEntry[0]);
   const pageEntry = PAGE_MATRIX.find(([, flag]) => flag === permission);
   if (pageEntry) {
     const [moduleId] = pageEntry;
     if (!hasPageLicense(user, permission, moduleId)) return false;
-    // Commercial licensee admins are governed by the selected license page, not a stale copied user flag.
-    // Backend enforcement remains the final authority; this keeps the frontend route/landing decision in sync.
+    // Commercial licensee admins are governed by the active license modules
     if (String(user.role || "").toLowerCase() === "admin") return true;
+    // For non-admin (manager, staff): verify parent module is accessible
+    const modDef = MODULES[moduleId];
+    if (modDef?.flag && user.permissions?.[modDef.flag] === false) return false;
+    if (!hasModuleAccess(user, moduleId)) return false;
+
+    // Explicit setting by licensee admin takes precedence
+    if (user.permissions?.[permission] !== undefined) {
+      return Boolean(user.permissions[permission]);
+    }
+
+    // Module dashboard landing flag is derived from module access:
+    // When module is permitted by licensee admin, its dashboard landing is accessible
+    const dashboardFlag = DASHBOARD_FLAG_BY_MODULE[moduleId];
+    if (dashboardFlag === permission) return true;
+
+    // For managers: when licensee admin grants module access, all pages in that module
+    // are accessible unless explicitly revoked (false) by licensee admin
+    if (String(user.role || "").toLowerCase() === "manager") return true;
+
     return user.permissions?.[permission] === true || (permission === "can_view_client_discussion" && user.permissions?.can_view_all_leads === true);
   }
-  const legacyToPage = { can_manage_invoices: "can_view_sale", can_create_quotations: "can_create_quotations", can_view_clients: "can_view_all_clients" }; const page = legacyToPage[permission]; if (page) return hasEffectivePermission(user, page) && user.permissions?.[permission] !== false; return user.permissions?.[permission] === true;
+  const legacyToPage = { can_manage_invoices: "can_view_sale", can_create_quotations: "can_create_quotations", can_view_clients: "can_view_all_clients" };
+  const page = legacyToPage[permission];
+  if (page) return hasEffectivePermission(user, page) && user.permissions?.[permission] !== false;
+  return user.permissions?.[permission] === true;
 }
 
 export function canAccessPath(user, pathname) { if (!user) return false; if (isPlatformOwner(user)) return true; const moduleId = moduleForPath(pathname); if (!moduleId) return true; const flag = pageFlagForPath(pathname); if (!flag) return false; return hasEffectivePermission(user, flag); }

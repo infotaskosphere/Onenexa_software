@@ -233,6 +233,15 @@ export default function AccessGovernancePanel({
           next[p.flag] = false;
           delete matrix[`${mod.module}.${p.flag}`];
         });
+      } else {
+        // Module ON: enable pages beneath the module so the user gets access
+        // to the permitted module (admin can still deselect individual pages).
+        (mod.pages || []).forEach((p) => {
+          next[p.flag] = true;
+          if (!Array.isArray(matrix[`${mod.module}.${p.flag}`])) {
+            matrix[`${mod.module}.${p.flag}`] = [...(p.actions || [])];
+          }
+        });
       }
       next.governance_matrix = matrix;
       return next;

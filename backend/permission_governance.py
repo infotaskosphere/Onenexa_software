@@ -91,20 +91,43 @@ def _commercial_actor(user: User) -> bool:
     )
 
 
-def _cap_permissions_to_license(permissions: dict, actor: User) -> dict:
-    """Licensee admins may only grant modules their active license contains.
-    Internal/platform admins are intentionally uncapped here."""
-    if not _commercial_actor(actor):
-        return dict(permissions or {})
-
+async def _resolve_actor_licensed_modules(actor: User) -> set[str]:
     raw = getattr(actor, "licensed_modules", None) or []
-    allowed = {
+    if not raw and _commercial_actor(actor):
+        cust_id = str(getattr(actor, "commercial_customer_id", None) or getattr(actor, "company_id", None) or "").strip()
+        if cust_id:
+            lic = await db.commercial_licenses.find_one(
+                {"$or": [{"customer_id": cust_id}, {"id": str(getattr(actor, "license_id", "") or "")}], "status": {"$in": ["active", "trial"]}},
+                {"_id": 0, "modules": 1, "licensed_modules": 1},
+                sort=[("issued_at", -1)],
+            )
+            if not lic:
+                lic = await db.commercial_licenses.find_one(
+                    {"$or": [{"customer_id": cust_id}, {"id": str(getattr(actor, "license_id", "") or "")}]},
+                    {"_id": 0, "modules": 1, "licensed_modules": 1},
+                    sort=[("issued_at", -1)],
+                )
+            if lic:
+                raw = lic.get("modules") or lic.get("licensed_modules") or []
+    return {
         LICENSE_MODULE_ALIASES.get(
             str(value).strip().lower().replace("-", "_"),
             str(value).strip().lower().replace("-", "_"),
         )
         for value in raw
     }
+
+
+async def _cap_permissions_to_license(permissions: dict, actor: User) -> dict:
+    """Licensee admins may only grant modules their active license contains.
+    Internal/platform admins are intentionally uncapped here."""
+    if not _commercial_actor(actor):
+        return dict(permissions or {})
+
+    allowed = await _resolve_actor_licensed_modules(actor)
+    if not allowed:
+        return dict(permissions or {})
+
     result = dict(permissions or {})
     matrix = dict(result.get("governance_matrix") or {})
     for module_id, module_def in MODULE_HIERARCHY.items():
@@ -165,16 +188,7 @@ async def get_module_hierarchy(current_user: User = Depends(get_current_user)):
     unaffected and keep seeing every module, exactly as before.
     """
     tree = [{"module": key, **value} for key, value in MODULE_HIERARCHY.items()]
-    raw_licensed = getattr(current_user, "licensed_modules", None) or []
-    # `licensed_modules` on the hydrated user is the raw list stored on the
-    # license (which may use an alias such as "hrms" or "invoicing" instead
-    # of the canonical module key) — normalize it the same way the license
-    # guard itself does, so this filter can never drift from what actually
-    # gates the underlying pages.
-    licensed_modules = {
-        LICENSE_MODULE_ALIASES.get(str(m).strip().lower(), str(m).strip().lower())
-        for m in raw_licensed
-    }
+    licensed_modules = await _resolve_actor_licensed_modules(current_user)
     if licensed_modules:
         tree = [m for m in tree if m["module"] == "admin" or m["module"] in licensed_modules]
     return tree
@@ -503,7 +517,7 @@ async def update_user_permissions(
         # Guarantee the module hierarchy holds even if the client sent a page
         # flag as True while its parent module flag is False.
         permissions = _enforce_module_hierarchy(permissions)
-        permissions = _cap_permissions_to_license(permissions, current_user)
+        permissions = await _cap_permissions_to_license(permissions, current_user)
         permission_update = {"permissions": permissions}
         # A deliberate Permission Matrix edit opts a non-admin user out of the
         # automatic tenant-admin inheritance. The license guard still remains

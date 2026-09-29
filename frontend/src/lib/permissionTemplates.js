@@ -44,16 +44,16 @@ export const DEFAULT_ROLE_PERMISSIONS = {
       can_view_tasks: true,           // GATE: access /tasks endpoint (scope handled server-side)
       can_view_clients: true,         // GATE: access /clients endpoint (scope handled server-side)
       can_view_all_tasks: false,      // scope handled server-side by department query
-      can_view_all_clients: false,    // admin-granted only
+      can_view_all_clients: true,     // Manager can view clients
       can_approve_clients: false,     // admin-granted only
       can_approve_whatsapp_wishes: false, // admin-granted only
       can_approve_email_wishes: false,    // admin-granted only
-      can_view_all_dsc: false,        // admin-granted only
-      can_view_documents: false,      // admin-granted only
+      can_view_all_dsc: true,         // Manager can view DSCs
+      can_view_documents: true,       // Records → VIEW (Own + Team)
       can_view_all_duedates: true,    // Compliance Tracker (Calendar panel) → VIEW (Own + Team)
       can_view_reports: true,         // Reports → VIEW (Own + Team)
       can_view_attendance: true,      // Attendance → VIEW (Own + Team)
-      can_view_all_leads: false,      // admin-granted only (Leads Pipeline not in default spec)
+      can_view_all_leads: true,       // Proposals / Leads → VIEW
       can_edit_tasks: true,           // Tasks → EDIT/UPDATE (Own + Team)
       can_edit_clients: false,        // admin-granted only
       can_edit_dsc: false,            // admin-granted only
@@ -68,42 +68,57 @@ export const DEFAULT_ROLE_PERMISSIONS = {
       can_view_staff_activity: false, // Staff Activity module removed
       can_send_reminders: false,      // admin-granted only
       can_receive_popup_reminders: false, // admin-granted only, also requires cross visibility on
-      can_view_user_page: false,      // admin-granted only
-      can_view_audit_logs: false,     // admin-granted only
-      can_view_recruitment: false,    // admin-granted only
+      can_view_user_page: true,       // People Matrix → VIEW
+      can_view_leave: true,           // People Matrix → Leave VIEW
+      can_view_payroll: true,         // People Matrix → Payroll VIEW
+      can_view_hr: true,              // People Matrix → HR VIEW
+      can_view_recruitment: true,     // People Matrix → Recruitment VIEW
       can_manage_recruitment: false,  // admin-granted only
+      can_view_audit_logs: false,     // admin-granted only
       can_view_selected_users_reports: true,  // Reports → VIEW (Team scope)
       can_view_todo_dashboard: true,  // To Do → VIEW (Own + Team)
       can_view_dashboard: true,       // Dashboard → VIEW
       can_view_reminders: true,       // Reminders → VIEW (Own + Team)
       can_view_action_center: true,   // Action Center → VIEW (Own + Team)
       can_view_client_visits: true,   // Client Visits → VIEW (Own + Team)
-      can_view_aiweave: false, // AIWeave → VIEW (Own + Team)
+      can_view_aiweave: false,        // AIWeave → separately governed
       can_use_chat: false,            // admin-granted only
       can_view_staff_rankings: false, // admin-granted only
       can_delete_data: false,         // admin-granted only
       can_delete_tasks: false,        // admin-granted only
       can_connect_email: true,        // Email Accounts → VIEW, CREATE, EDIT, UPDATE (Own + Team)
       can_view_own_data: true,        // Dashboard → VIEW
-      can_create_quotations: false,   // admin-granted only (Quotations not in default spec)
+      can_create_quotations: true,    // Proposals → Create Quotations
+      can_view_client_discussion: true, // Proposals → Client Discussion
       can_manage_invoices: false,     // admin-granted only
-      can_view_passwords: false,      // admin-granted only
+      can_view_accounting_reports: true, // Finix → VIEW
+      can_view_sale: true,            // Finix → Sales VIEW
+      can_view_purchase: true,        // Finix → Purchase VIEW
+      can_view_bank: true,            // Finix → Bank Accounts VIEW
+      can_view_chart_of_accounts: true, // Finix → Chart of Accounts VIEW
+      can_view_journal_entries: true, // Finix → Journal Entries VIEW
+      can_match_bank: true,           // Finix → Bank Matching
+      can_view_passwords: true,       // Records → Password Vault VIEW
       can_edit_passwords: false,      // admin-granted only
       can_view_compliance: true,      // Compliance Tracker → VIEW (Own + Team)
       can_manage_compliance: true,    // Compliance Tracker → CREATE, EDIT, UPDATE (Own + Team)
       can_edit_attendance: true,      // Attendance → EDIT/UPDATE (Own + Team)
-      can_view_gst_reconciliation: false, // admin-granted only (GST dept users)
-      can_view_mis_report: false,     // admin-granted only
+      can_view_gst_reconciliation: true, // Compliance → GST Reconciliation
+      can_view_trademark_sphere: true, // Compliance → Trademark Sphere
+      can_view_roc_sphere: true,      // Compliance → ROC Sphere
+      can_view_mis_report: true,      // Compliance → MIS Report
       can_manage_mis_report: false,   // admin-granted only
+      can_view_salary_slips: true,    // Compliance → Salary Slips
+      can_manage_salary_slips: false, // admin-granted only
       can_view_all_visits: false,     // own + team visits scoped server-side via department query
       can_edit_visits: true,          // Client Visits → EDIT/UPDATE (Own + Team)
       can_delete_visits: false,       // admin-granted only
       can_delete_own_visits: true,    // always allowed for own records
       can_manage_whatsapp: false,     // admin-granted only
-      can_access_whatsapp_hub: false,  // ADMIN_GRANTED_ONLY
-      can_view_client_portal: false,   // admin-granted only
-      can_reset_client_passwords: false,   // admin-granted only
-      can_access_taskosphere: true, can_access_finix: false, can_access_compliance: true,
+      can_access_whatsapp_hub: false, // ADMIN_GRANTED_ONLY
+      can_view_client_portal: false,  // admin-granted only
+      can_reset_client_passwords: false, // admin-granted only
+      can_access_taskosphere: true, can_access_finix: true, can_access_compliance: true,
       can_access_records: true, can_access_proposals: true, can_access_people_matrix: true,
       view_password_departments: [], assigned_clients: [], view_other_tasks: [],
       view_other_attendance: [], view_other_reports: [], view_other_todos: [],

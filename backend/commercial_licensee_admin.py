@@ -264,7 +264,12 @@ async def sync_user_to_licensee_admin(
         {"_id": 0, "permissions_inherited_from_licensee_admin": 1},
     )
     if stored and stored.get("permissions_inherited_from_licensee_admin") is False:
-        return user
+        data = user.model_dump()
+        data["licensed_modules"] = list(
+            license_doc.get("modules") or license_doc.get("licensed_modules") or []
+        )
+        data["selected_features"] = license_doc.get("selected_features") or {}
+        return User.model_validate(data)
 
     permissions = get_tenant_user_permissions(
         None,
