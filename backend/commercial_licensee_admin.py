@@ -172,6 +172,78 @@ def get_all_admin_permissions(license_doc: Optional[Dict[str, Any]] = None) -> D
     return permissions
 
 
+def get_tenant_user_permissions(
+    admin_user: Optional[User],
+    license_doc: Dict[str, Any],
+    role: str,
+    existing_permissions: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Build a tenant user's permissions from the licensee admin's effective access.
+
+    Commercial tenant users may never exceed the tenant administrator. A newly
+    created user inherits the admin's effective licensed module/page access;
+    an existing user keeps their explicit grants but is capped to whatever the
+    admin currently has. Admin/control-plane permissions are NOT copied.
+    """
+    base = dict(DEFAULT_ROLE_PERMISSIONS.get(str(role or "staff").lower(), DEFAULT_ROLE_PERMISSIONS["staff"]))
+    current = dict(existing_permissions or {})
+    admin_perms = {}
+    if admin_user is not None:
+        raw = getattr(admin_user, "permissions", {}) or {}
+        admin_perms = raw.model_dump() if hasattr(raw, "model_dump") else dict(raw)
+
+    licensed = resolve_license_modules(license_doc)
+    has_existing = existing_permissions is not None
+    matrix = dict(current.get("governance_matrix") or {}) if has_existing else {}
+    admin_matrix = dict(admin_perms.get("governance_matrix") or {})
+
+    for module_id, module_def in MODULE_HIERARCHY.items():
+        if module_id == "admin":
+            continue
+        module_flag = module_def.get("flag")
+        module_allowed = module_id in licensed
+        if module_id == "aiweave":
+            module_allowed = module_allowed and bool(admin_perms.get("can_access_aiweave", False))
+        admin_module_on = bool(admin_perms.get(module_flag, False)) if module_flag else False
+        user_module_on = bool(current.get(module_flag, False)) if has_existing and module_flag else admin_module_on
+        effective_module_on = bool(module_allowed and admin_module_on and (user_module_on if has_existing else True))
+        if module_flag:
+            base[module_flag] = effective_module_on
+
+        for page in module_def.get("pages", []) or []:
+            flag = page.get("flag")
+            if not flag:
+                continue
+            admin_page_on = bool(admin_perms.get(flag, False))
+            user_page_on = bool(current.get(flag, False)) if has_existing else admin_page_on
+            base[flag] = bool(effective_module_on and admin_page_on and (user_page_on if has_existing else True))
+
+            key = f"{module_id}.{flag}"
+            if not base[flag]:
+                matrix.pop(key, None)
+            elif has_existing:
+                existing_actions = current.get("governance_matrix", {}).get(key)
+                admin_actions = admin_matrix.get(key)
+                if isinstance(existing_actions, list) and isinstance(admin_actions, list):
+                    matrix[key] = [a for a in existing_actions if a in admin_actions]
+                elif isinstance(existing_actions, list):
+                    matrix[key] = list(existing_actions)
+                elif isinstance(admin_actions, list):
+                    matrix[key] = list(admin_actions)
+            elif isinstance(admin_matrix.get(key), list):
+                matrix[key] = list(admin_matrix[key])
+
+    # Legacy commercial flags are still consumed by older endpoints. They are
+    # capped to the admin in exactly the same way as the canonical page flags.
+    for flag in COMMERCIAL_LEGACY_PAGE_FLAGS:
+        admin_on = bool(admin_perms.get(flag, False))
+        user_on = bool(current.get(flag, False)) if has_existing else admin_on
+        base[flag] = bool(admin_on and (user_on if has_existing else True))
+
+    base["governance_matrix"] = matrix
+    return base
+
+
 async def ensure_licensee_admin(
     customer: Dict[str, Any],
     license_doc: Dict[str, Any],
