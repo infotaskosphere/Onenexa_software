@@ -194,3 +194,23 @@ def test_matrix_commercial_console_directory_still_reaches_licensee_companies():
     from backend.commercial_company_master import _is_licensee_company
     assert _is_licensee_company({"id": "cust-1", "source": "commercial-license",
                                  "commercial_customer_id": "cust-1"})
+
+
+def test_owner_created_company_visible_even_if_owner_login_is_stamped(q):
+    """Owner's own login record may carry customer/licence stamps; companies the
+    owner created must still show in the owner's Master Data."""
+    db = q._tenant_raw_db()
+    for u in db.users.rows:
+        if u["id"] == "owner-1":
+            u["commercial_customer_id"] = "cust-x"
+            u["email"] = "info.taskosphere@gmail.com"
+    db.companies.rows.append({"id": "own-new", "name": "Just Added", "created_by": "owner-1"})
+    rows = names(asyncio.run(q.get_companies(OWNER)))
+    assert "own-new" in rows and "own-a" in rows
+    assert "cust-1" not in rows and "legacy-1" not in rows and "cust-2" not in rows
+
+
+def test_owner_created_company_appears_in_dropdown_list_too(q):
+    db = q._tenant_raw_db()
+    db.companies.rows.append({"id": "own-new", "name": "Just Added", "created_by": "owner-1"})
+    assert "own-new" in names(asyncio.run(q.list_companies(OWNER)))
