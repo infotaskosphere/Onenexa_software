@@ -827,6 +827,17 @@ async def get_current_user_with_commercial_guard(
         commercial,
     )
 
+    # Commercial tenant users inherit the licensed tenant administrator's
+    # effective module/page access. This also repairs legacy users created
+    # before inheritance was introduced; explicit Permission Matrix edits can
+    # opt a user out by marking the account as independently governed.
+    if not _is_admin_role(user):
+        try:
+            from backend.commercial_licensee_admin import sync_user_to_licensee_admin
+            user = await sync_user_to_licensee_admin(user, commercial)
+        except Exception as exc:
+            logger.warning("Tenant user permission inheritance skipped: %s", exc)
+
     module = module_for_path(
         request.url.path,
         request.method,
