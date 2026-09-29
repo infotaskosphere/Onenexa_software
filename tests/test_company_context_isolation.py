@@ -139,3 +139,58 @@ def test_owner_marker_companies_stay_visible_to_owner(q):
     )
     assert "own-c" in names(asyncio.run(q.get_companies(OWNER)))
     assert "own-c" not in names(asyncio.run(q.get_companies(LIC_ADMIN)))
+
+
+# ---- one test per row of the agreed visibility matrix -------------------
+
+def test_matrix_licensee_user_sees_only_attached_company_even_if_creator(q):
+    q._tenant_raw_db().companies.rows.append(
+        {"id": "mgr-made", "name": "Made by manager", "created_by": "u-mgr",
+         "commercial_customer_id": "cust-1"}
+    )
+    assert names(asyncio.run(q.get_companies(LIC_USER))) == ["cust-1"]
+    assert names(asyncio.run(q.list_companies(LIC_USER))) == ["cust-1"]
+
+
+def test_matrix_admin_includes_auto_generated_license_company(q):
+    assert "cust-1" in names(asyncio.run(q.get_companies(LIC_ADMIN)))
+
+
+def test_matrix_licensee_blocked_from_other_licensee_and_owner_companies(q):
+    from fastapi import HTTPException
+    for cid in ("cust-2", "own-a", "own-b"):
+        for user in (LIC_ADMIN, LIC_USER):
+            with pytest.raises(HTTPException):
+                asyncio.run(q.get_company(cid, user))
+    listed = names(asyncio.run(q.get_companies(LIC_ADMIN)))
+    assert not ({"cust-2", "own-a", "own-b"} & set(listed))
+
+
+def test_matrix_licensee_cannot_edit_or_delete_foreign_company(q):
+    from fastapi import HTTPException
+    for cid in ("cust-2", "own-a"):
+        with pytest.raises(HTTPException):
+            asyncio.run(q.update_company(cid, {"name": "x"}, LIC_ADMIN))
+        with pytest.raises(HTTPException):
+            asyncio.run(q.delete_company(cid, LIC_ADMIN))
+
+
+def test_matrix_owner_cannot_edit_or_delete_licensee_company_from_operational_api(q):
+    from fastapi import HTTPException
+    for cid in ("cust-1", "cust-2"):
+        with pytest.raises(HTTPException):
+            asyncio.run(q.update_company(cid, {"name": "x"}, OWNER))
+        with pytest.raises(HTTPException):
+            asyncio.run(q.delete_company(cid, OWNER))
+
+
+def test_matrix_user_without_tenant_link_fails_closed(q):
+    stray = SimpleNamespace(id="stray", email="x@y.z", role="manager",
+                            company_id="", commercial_customer_id="", license_id="")
+    assert names(asyncio.run(q.get_companies(stray))) == []
+
+
+def test_matrix_commercial_console_directory_still_reaches_licensee_companies():
+    from backend.commercial_company_master import _is_licensee_company
+    assert _is_licensee_company({"id": "cust-1", "source": "commercial-license",
+                                 "commercial_customer_id": "cust-1"})
