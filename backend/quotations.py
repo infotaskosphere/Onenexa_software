@@ -1599,6 +1599,22 @@ def _norm_id(value: Any) -> str:
     return str(value or "").strip()
 
 
+def _is_owner_user_doc(doc: Dict[str, Any], owner_id: str = "") -> bool:
+    """True for platform-owner identities (never treated as licensee users)."""
+    from backend.platform_owner import platform_owner_emails
+    uid = _norm_id(doc.get("id"))
+    email = _norm_id(doc.get("email")).lower()
+    role = _norm_id(doc.get("role")).lower()
+    return bool(
+        (owner_id and uid == owner_id)
+        or email in platform_owner_emails()
+        or role in {"platform_owner", "superadmin", "saas_admin"}
+        or doc.get("is_platform_owner")
+        or doc.get("isPlatformOwner")
+        or _norm_id(doc.get("company_id")).lower().startswith("platform-owner-")
+    )
+
+
 def _is_licensee_company_record(
     company: Dict[str, Any],
     licensee_user_ids: set,
@@ -1623,12 +1639,15 @@ def _is_licensee_company_record(
         return True
     # Legacy records created by a licensee's own admin/users before tenant
     # stamping existed carry no marker except the creator.
+    # (Owner identities are already excluded from `licensee_user_ids`, so a
+    # company the Platform Owner created is never classified as a licensee's
+    # by this heuristic, even if the owner's own login record carries stamps.)
     if created_by and created_by in licensee_user_ids:
         return True
     return False
 
 
-async def _licensee_identity_sets() -> Dict[str, set]:
+async def _licensee_identity_sets(owner_id: str = "") -> Dict[str, set]:
     raw = _tenant_raw_db()
     license_rows = await raw.commercial_licenses.find(
         {}, {"_id": 0, "id": 1, "customer_id": 1, "company_id": 1}
@@ -1641,9 +1660,14 @@ async def _licensee_identity_sets() -> Dict[str, set]:
 
     user_rows = await raw.users.find(
         {"commercial_customer_id": {"$nin": [None, "", "platform-owner"]}},
-        {"_id": 0, "id": 1},
+        {"_id": 0, "id": 1, "email": 1, "role": 1, "company_id": 1,
+         "is_platform_owner": 1, "isPlatformOwner": 1},
     ).to_list(20000)
-    licensee_user_ids = {_norm_id(r.get("id")) for r in user_rows if r.get("id")}
+    licensee_user_ids = {
+        _norm_id(r.get("id"))
+        for r in user_rows
+        if r.get("id") and not _is_owner_user_doc(r, owner_id)
+    }
     return {
         "customer_ids": customer_ids,
         "license_ids": license_ids,
@@ -1674,7 +1698,8 @@ async def _platform_owner_operational_companies(current_user: User) -> List[Dict
         ).sort("name", 1).to_list(500)
 
     rows = await raw.companies.find({}, {"_id": 0}).sort("name", 1).to_list(5000)
-    ident = await _licensee_identity_sets()
+    owner_id = _norm_id(getattr(current_user, "id", ""))
+    ident = await _licensee_identity_sets(owner_id)
     return [
         company
         for company in rows
