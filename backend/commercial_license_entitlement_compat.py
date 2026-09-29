@@ -251,10 +251,7 @@ async def _active_license(
 
 
 async def _hydrate(user: Any):
-    if (
-        is_platform_owner(user)
-        or not _is_admin_role(user)
-    ):
+    if is_platform_owner(user):
         return user
 
     customer_id = await _resolve_customer_id(
@@ -320,6 +317,9 @@ async def _hydrate(user: Any):
     if not license_doc:
         return user
 
+    from backend.commercial_licensee_admin import resolve_license_modules
+    from backend.modules.people_matrix.permissions.catalog import MODULE_HIERARCHY
+
     modules = list(
         license_doc.get("modules")
         or license_doc.get("licensed_modules")
@@ -346,9 +346,25 @@ async def _hydrate(user: Any):
         or {}
     )
 
-    data["permissions"] = get_all_admin_permissions(
-        license_doc
-    )
+    if _is_admin_role(user):
+        data["permissions"] = get_all_admin_permissions(
+            license_doc
+        )
+    else:
+        # Non-admin user: preserve explicit permissions permitted by the licensee admin,
+        # capping only to modules present in the commercial license.
+        current_perms = dict(data.get("permissions") or {})
+        licensed_mods = resolve_license_modules(license_doc)
+        for mod_key, mod_def in MODULE_HIERARCHY.items():
+            if mod_key != "admin" and mod_key not in licensed_mods:
+                mod_flag = mod_def.get("flag")
+                if mod_flag:
+                    current_perms[mod_flag] = False
+                for p in mod_def.get("pages", []):
+                    p_flag = p.get("flag")
+                    if p_flag:
+                        current_perms[p_flag] = False
+        data["permissions"] = current_perms
 
     return type(user).model_validate(
         data

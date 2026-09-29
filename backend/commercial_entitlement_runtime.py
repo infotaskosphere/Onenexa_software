@@ -27,6 +27,8 @@ _MODULE_ALIASES = {
     "people-matrix": "people_matrix",
     "hrms": "people_matrix",
     "peoplematrix": "people_matrix",
+    "aiweave": "aiweave",
+    "ai-weave": "aiweave",
 }
 
 # The page flags mirror backend.models.MODULE_HIERARCHY. Keeping this small
@@ -98,6 +100,9 @@ _MODULE_PAGES = {
         "can_view_performance",
         "can_manage_performance",
     ),
+    "aiweave": (
+        "can_view_aiweave",
+    ),
 }
 
 _MODULE_FLAGS = {
@@ -107,6 +112,7 @@ _MODULE_FLAGS = {
     "records": "can_access_records",
     "proposals": "can_access_proposals",
     "people_matrix": "can_access_people_matrix",
+    "aiweave": "can_access_aiweave",
 }
 
 
