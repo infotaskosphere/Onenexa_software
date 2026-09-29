@@ -40,9 +40,11 @@ async def _latest_session_for_user(user_id: str, email: str = None):
         sessions = []
 
     norm_email = str(email or "").strip().lower()
+    # A session belongs to a concrete user identity. Do not merge identities
+    # merely because legacy records share an email address.
     matching = [
         s for s in sessions
-        if str(s.get("user_id")) == str(user_id) or (norm_email and str(s.get("email", "")).strip().lower() == norm_email)
+        if str(s.get("user_id")) == str(user_id)
     ]
     if not matching:
         return None
@@ -114,9 +116,9 @@ async def _session_was_replaced(user, bearer_token: str) -> bool:
     except Exception:
         return False
 
+    # For JWT-backed sessions, compare by canonical user id only. Email fallback
+    # could incorrectly mark another identity as replaced when legacy duplicates exist.
     user_or_filters = [{"user_id": user_id}, {"user_id": str(user_id)}]
-    if user_email:
-        user_or_filters.append({"email": user_email})
 
     if sid:
         # Check explicit session doc
@@ -268,9 +270,9 @@ class SessionManager:
         now_dt = datetime.now(timezone.utc)
 
         if not is_owner:
+            # Replace sessions for this exact user only. Email is metadata,
+            # not an account identity, and must never evict another user's session.
             query_filters = [{"user_id": str(user_id)}]
-            if norm_email:
-                query_filters.append({"email": norm_email})
 
             replace_query = {"$or": query_filters, "status": "active"}
             replacement_update = {
