@@ -252,10 +252,15 @@ async def sync_user_to_licensee_admin(
     """Repair legacy commercial users so they inherit tenant-admin access once."""
     if str(getattr(user, "role", "") or "").strip().lower() == "admin":
         return user
-    if getattr(user, "permissions_inherited_from_licensee_admin", None) is False:
-        return user
 
     raw_db = _raw_db()
+    stored = await raw_db.users.find_one(
+        {"id": str(user.id)},
+        {"_id": 0, "permissions_inherited_from_licensee_admin": 1},
+    )
+    if stored and stored.get("permissions_inherited_from_licensee_admin") is False:
+        return user
+
     permissions = get_tenant_user_permissions(
         user,
         license_doc,
