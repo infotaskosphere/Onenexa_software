@@ -504,9 +504,15 @@ async def update_user_permissions(
         # flag as True while its parent module flag is False.
         permissions = _enforce_module_hierarchy(permissions)
         permissions = _cap_permissions_to_license(permissions, current_user)
+        permission_update = {"permissions": permissions}
+        # A deliberate Permission Matrix edit opts a non-admin user out of the
+        # automatic tenant-admin inheritance. The license guard still remains
+        # the hard ceiling, so this can never grant an unlicensed module.
+        if str(existing.get("role", "")).strip().lower() != "admin":
+            permission_update["permissions_inherited_from_licensee_admin"] = False
         await db.users.update_one(
             _scope_user_query({"id": user_id}),
-            {"$set": {"permissions": permissions}},
+            {"$set": permission_update},
         )
         await create_audit_log(
             current_user,
