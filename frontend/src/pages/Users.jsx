@@ -2564,6 +2564,13 @@ export default function Users() {
   const [companies,            setCompanies]            = useState([]);
   const [searchQuery,          setSearchQuery]          = useState('');
   const [activeTab,            setActiveTab]            = useState('all');
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('tab') === 'pending') {
+      setActiveTab('pending');
+      window.setTimeout(() => document.getElementById('pending-approvals')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
+    }
+  }, []);
   const [dialogOpen,           setDialogOpen]           = useState(false);
   const [permDialogOpen,       setPermDialogOpen]       = useState(false);
   const [selectedUser,         setSelectedUser]         = useState(null);
@@ -3007,6 +3014,7 @@ export default function Users() {
 
   const tabs = [
     { id: 'all',      label: 'All',      count: users.length },
+    { id: 'pending',  label: 'Pending',  count: pendingUsers.length },
     { id: 'admin',    label: 'Admins',   count: users.filter(u => u.role === 'admin').length },
     { id: 'manager',  label: 'Managers', count: users.filter(u => u.role === 'manager').length },
     { id: 'staff',    label: 'Staff',    count: users.filter(u => u.role === 'staff').length },
