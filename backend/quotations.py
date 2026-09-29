@@ -1736,8 +1736,8 @@ async def _tenant_company_scope(current_user: User) -> Dict[str, Any]:
             ids = [_norm_id(u.get("id")) for u in tenant_users if u.get("id")]
             if ids:
                 clauses.append({"created_by": {"$in": ids}})
-    elif uid:
-        clauses.append({"created_by": uid})
+    # Non-admin licensee users: ONLY the company attached to them (the
+    # `id` clause above). No created_by widening.
 
     if not clauses:
         # Fail closed: an identity with no tenant link sees nothing.
