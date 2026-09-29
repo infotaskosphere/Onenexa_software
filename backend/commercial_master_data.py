@@ -170,6 +170,13 @@ def _date_value(value):
 
 
 def _license_permissions(role: str, license_doc: Dict[str, Any]) -> Dict[str, Any]:
+    # A tenant administrator is the license holder's control-plane identity.
+    # Admin rights are therefore capped by the licensed MODULES, but are not
+    # reduced to the feature subset selected for ordinary users. Staff and
+    # managers continue to receive the granular selected_features entitlement.
+    if str(role or "").strip().lower() == "admin":
+        from backend.commercial_licensee_admin import get_all_admin_permissions
+        return get_all_admin_permissions(license_doc)
     return _apply_feature_entitlements(
         role,
         list(license_doc.get("modules") or []),
