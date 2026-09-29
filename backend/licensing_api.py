@@ -1,3 +1,4 @@
+import logging
 import os
 import secrets
 import string
@@ -9,6 +10,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from backend.dependencies import db, get_current_user, require_admin
 
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/licensing", tags=["commercial-licensing"])
 
