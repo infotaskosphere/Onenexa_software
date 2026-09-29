@@ -339,15 +339,8 @@ def module_for_path(path: str, method: str = "GET") -> Optional[str]:
         normalized = normalized[4:] or "/"
 
     if method == "GET":
-        if normalized == "/users" or (
-            normalized.startswith("/users/")
-            and not any(
-                sub in normalized
-                for sub in ("/salary-report", "/offboard")
-            )
-        ):
-            return None
-
+        # User Directory is a People Matrix page for commercial tenants.
+        # Keep the route entitlement consistent for GET and mutation endpoints.
         if normalized in ("/clients", "/clients/search"):
             return None
 
@@ -367,16 +360,15 @@ def feature_for_path(
     if normalized.startswith("/api"):
         normalized = normalized[4:] or "/"
 
-    if method == "GET":
-        if normalized == "/users" or (
-            normalized.startswith("/users/")
-            and not any(
-                sub in normalized
-                for sub in ("/salary-report", "/offboard")
-            )
-        ):
-            return None
+    # All User Directory APIs, including approve/reject/edit/delete/permissions,
+    # are actions of the People Matrix User Directory page. This prevents a
+    # mutation endpoint such as POST /users/{id}/approve from falling through
+    # to the module-only branch and incorrectly producing:
+    # "does not include a selected page for people_matrix".
+    if normalized == "/users" or normalized.startswith("/users/"):
+        return "people_matrix", "can_view_user_page"
 
+    if method == "GET":
         if normalized in ("/clients", "/clients/search"):
             return None
 
