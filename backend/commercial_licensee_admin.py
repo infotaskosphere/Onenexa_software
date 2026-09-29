@@ -187,10 +187,15 @@ def get_tenant_user_permissions(
     """
     base = dict(DEFAULT_ROLE_PERMISSIONS.get(str(role or "staff").lower(), DEFAULT_ROLE_PERMISSIONS["staff"]))
     current = dict(existing_permissions or {})
-    admin_perms = {}
     if admin_user is not None:
         raw = getattr(admin_user, "permissions", {}) or {}
         admin_perms = raw.model_dump() if hasattr(raw, "model_dump") else dict(raw)
+    else:
+        # When repairing a legacy user during authentication, the canonical
+        # tenant-admin entitlement is the license itself: the licensee admin
+        # receives every page in each purchased module (AIWeave remains its
+        # separately governed exception).
+        admin_perms = get_all_admin_permissions(license_doc)
 
     licensed = resolve_license_modules(license_doc)
     has_existing = existing_permissions is not None
@@ -262,7 +267,7 @@ async def sync_user_to_licensee_admin(
         return user
 
     permissions = get_tenant_user_permissions(
-        user,
+        None,
         license_doc,
         str(getattr(user, "role", "staff") or "staff"),
         None,
