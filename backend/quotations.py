@@ -1578,66 +1578,224 @@ async def require_company_manage(current_user: User = Depends(get_current_user))
     )
 
 
-async def _platform_owner_operational_companies(current_user: User) -> List[Dict[str, Any]]:
-    """Return only companies in the Platform Owner operational master.
+_COMMERCIAL_SOURCES = {"commercial-license", "commercial", "license", "commercial-customer"}
+_OWNER_MARKERS = {"", "platform-owner", "platform-owner-license"}
 
-    The creator boundary is applied first. Commercial companies are removed
-    only when their own record or an actual commercial-license relationship
-    identifies them as a licensee. This avoids broad Mongo predicates on
-    missing fields that can hide legitimate owner companies.
+
+def _tenant_raw_db():
+    """Unscoped DB handle used ONLY for building identity-derived scopes.
+
+    The tenant-aware wrapper AND-s an extra customer filter onto every
+    `companies`/`users` read, which hides tenant companies that pre-date
+    `commercial_customer_id` stamping. The filters built below are derived
+    from the authenticated identity on the server (never from request input),
+    so they are safe to run against the raw handle.
     """
-    owner_id = str(getattr(current_user, "id", "") or "").strip()
+    from backend import dependencies as _dependencies
+    return getattr(_dependencies, "_raw_db", db)
+
+
+def _norm_id(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _is_licensee_company_record(
+    company: Dict[str, Any],
+    licensee_user_ids: set,
+    license_ids: set,
+    legacy_company_ids: set,
+) -> bool:
+    """True when a company record belongs to a commercial licensee tenant."""
+    source = _norm_id(company.get("source")).lower()
+    customer_id = _norm_id(company.get("commercial_customer_id"))
+    license_id = _norm_id(company.get("license_id"))
+    company_id = _norm_id(company.get("id"))
+    created_by = _norm_id(company.get("created_by"))
+    if source in _COMMERCIAL_SOURCES:
+        return True
+    if customer_id and customer_id.lower() not in _OWNER_MARKERS:
+        return True
+    if license_id and license_id.lower() not in _OWNER_MARKERS:
+        return True
+    if license_id and license_id in license_ids:
+        return True
+    if company_id and company_id in legacy_company_ids:
+        return True
+    # Legacy records created by a licensee's own admin/users before tenant
+    # stamping existed carry no marker except the creator.
+    if created_by and created_by in licensee_user_ids:
+        return True
+    return False
+
+
+async def _licensee_identity_sets() -> Dict[str, set]:
+    raw = _tenant_raw_db()
+    license_rows = await raw.commercial_licenses.find(
+        {}, {"_id": 0, "id": 1, "customer_id": 1, "company_id": 1}
+    ).to_list(5000)
+    customer_ids = {_norm_id(r.get("customer_id")) for r in license_rows if r.get("customer_id")}
+    license_ids = {_norm_id(r.get("id")) for r in license_rows if r.get("id")}
+    legacy_company_ids = {_norm_id(r.get("company_id")) for r in license_rows if r.get("company_id")}
+    # Legacy license-generated companies used the customer id as company id.
+    legacy_company_ids |= customer_ids
+
+    user_rows = await raw.users.find(
+        {"commercial_customer_id": {"$nin": [None, "", "platform-owner"]}},
+        {"_id": 0, "id": 1},
+    ).to_list(20000)
+    licensee_user_ids = {_norm_id(r.get("id")) for r in user_rows if r.get("id")}
+    return {
+        "customer_ids": customer_ids,
+        "license_ids": license_ids,
+        "legacy_company_ids": legacy_company_ids,
+        "licensee_user_ids": licensee_user_ids,
+    }
+
+
+async def _platform_owner_operational_companies(current_user: User) -> List[Dict[str, Any]]:
+    """Companies shown in the Platform Owner's OWN operational selectors.
+
+    Context matrix
+      * Platform Owner (operational)  -> owner companies only (this function)
+      * Licensee admin/user           -> their licensed tenant only (see
+                                         `_tenant_company_scope`)
+      * Platform Owner Commercial Console -> licensee companies are reached
+                                         through /commercial-master-data and
+                                         the license registry, never here.
+
+    Every record that identifies as a licensee company (marker fields, a
+    licence relationship, or creation by a licensee user) is removed.
+    """
+    raw = _tenant_raw_db()
     if not is_platform_owner(current_user):
-        return await db.companies.find(
-            {"created_by": owner_id},
+        return await raw.companies.find(
+            {"created_by": _norm_id(getattr(current_user, "id", ""))},
             {"_id": 0},
         ).sort("name", 1).to_list(500)
 
-    # Platform Owner is the control-plane owner. Historical company-master
-    # records were not always stamped with the current owner's user id, so a
-    # created_by-only query can incorrectly return zero companies. Read the
-    # company master and explicitly remove licensee records below.
-    rows = await db.companies.find(
-        {},
-        {"_id": 0},
+    rows = await raw.companies.find({}, {"_id": 0}).sort("name", 1).to_list(5000)
+    ident = await _licensee_identity_sets()
+    return [
+        company
+        for company in rows
+        if not _is_licensee_company_record(
+            company,
+            ident["licensee_user_ids"],
+            ident["license_ids"],
+            ident["legacy_company_ids"],
+        )
+    ][:500]
+
+
+def _is_tenant_user(user: User) -> bool:
+    return (not is_platform_owner(user)) and bool(
+        _norm_id(getattr(user, "company_id", ""))
+        or _norm_id(getattr(user, "commercial_customer_id", ""))
+        or _norm_id(getattr(user, "license_id", ""))
+    )
+
+
+async def _tenant_company_scope(current_user: User) -> Dict[str, Any]:
+    """Mongo filter for the companies a licensee admin/user may see.
+
+    Admin -> every legal company under their own commercial customer/licence.
+    User  -> only the company they are attached to.
+    Built from the authenticated identity only; never from request input.
+    """
+    uid = _norm_id(getattr(current_user, "id", ""))
+    company_id = _norm_id(getattr(current_user, "company_id", ""))
+    customer_id = _norm_id(getattr(current_user, "commercial_customer_id", ""))
+    license_id = _norm_id(getattr(current_user, "license_id", ""))
+    is_admin = _norm_id(getattr(current_user, "role", "")).lower() == "admin"
+
+    if not customer_id and company_id:
+        # Recover the customer from the tenant company itself (legacy users).
+        row = await _tenant_raw_db().companies.find_one(
+            {"id": company_id}, {"_id": 0, "commercial_customer_id": 1, "license_id": 1}
+        )
+        customer_id = _norm_id((row or {}).get("commercial_customer_id"))
+        license_id = license_id or _norm_id((row or {}).get("license_id"))
+
+    clauses: List[Dict[str, Any]] = []
+    if company_id:
+        clauses.append({"id": company_id})
+    if is_admin:
+        if customer_id:
+            clauses.append({"commercial_customer_id": customer_id})
+            # Legacy companies used the customer id as the company id.
+            clauses.append({"id": customer_id})
+        if license_id:
+            clauses.append({"license_id": license_id})
+        if uid:
+            clauses.append({"created_by": uid})
+        # Legacy records created by any user of the same tenant.
+        if customer_id:
+            tenant_users = await _tenant_raw_db().users.find(
+                {"commercial_customer_id": customer_id}, {"_id": 0, "id": 1}
+            ).to_list(5000)
+            ids = [_norm_id(u.get("id")) for u in tenant_users if u.get("id")]
+            if ids:
+                clauses.append({"created_by": {"$in": ids}})
+    elif uid:
+        clauses.append({"created_by": uid})
+
+    if not clauses:
+        # Fail closed: an identity with no tenant link sees nothing.
+        return {"id": "__no_tenant_scope__"}
+    return {"$or": clauses}
+
+
+async def _heal_tenant_company_markers(current_user: User, companies: List[Dict[str, Any]]) -> None:
+    """Stamp commercial markers on legacy tenant companies (idempotent).
+
+    Companies created by a licensee's users before tenant stamping existed
+    have no `commercial_customer_id`. Stamping them makes the isolation
+    permanent, so they stay out of every Platform Owner selector.
+    """
+    customer_id = _norm_id(getattr(current_user, "commercial_customer_id", ""))
+    if not customer_id:
+        return
+    license_id = _norm_id(getattr(current_user, "license_id", ""))
+    raw = _tenant_raw_db()
+    for company in companies:
+        if _norm_id(company.get("commercial_customer_id")):
+            continue
+        patch = {"commercial_customer_id": customer_id}
+        if license_id and not _norm_id(company.get("license_id")):
+            patch["license_id"] = license_id
+        try:
+            await raw.companies.update_one(
+                {"id": company.get("id"), "commercial_customer_id": {"$in": [None, ""]}},
+                {"$set": patch},
+            )
+            company.update(patch)
+        except Exception:
+            logging.getLogger(__name__).warning("Could not stamp tenant marker on company %s", company.get("id"))
+
+
+async def _tenant_visible_companies(current_user: User, projection: Optional[Dict[str, int]] = None) -> List[Dict[str, Any]]:
+    scope = await _tenant_company_scope(current_user)
+    rows = await _tenant_raw_db().companies.find(
+        scope, projection or {"_id": 0}
     ).sort("name", 1).to_list(500)
+    if not projection:
+        await _heal_tenant_company_markers(current_user, rows)
+    return rows
 
-    license_rows = await db.commercial_licenses.find(
-        {},
-        {"_id": 0, "id": 1, "customer_id": 1, "company_id": 1},
-    ).to_list(5000)
-    customer_ids = {
-        str(row.get("customer_id")).strip()
-        for row in license_rows
-        if row.get("customer_id")
-    }
-    license_ids = {
-        str(row.get("id")).strip()
-        for row in license_rows
-        if row.get("id")
-    }
-    legacy_company_ids = {
-        str(row.get("company_id")).strip()
-        for row in license_rows
-        if row.get("company_id")
-    }
 
-    filtered = []
-    for company in rows:
-        source = str(company.get("source") or "").strip().lower()
-        customer_id = str(company.get("commercial_customer_id") or "").strip()
-        license_id = str(company.get("license_id") or "").strip()
-        company_id = str(company.get("id") or "").strip()
-        if source in {"commercial-license", "commercial", "license"}:
-            continue
-        if customer_id and customer_id in customer_ids:
-            continue
-        if license_id and license_id in license_ids:
-            continue
-        if company_id and company_id in legacy_company_ids:
-            continue
-        filtered.append(company)
-    return filtered
+async def _company_access_scope(current_user: User, company_id: str) -> Dict[str, Any]:
+    """Scope used by get/update/delete of a single company record."""
+    if is_platform_owner(current_user):
+        # Owner may manage only its own operational companies here; licensee
+        # companies are managed through the Commercial Console.
+        owned = {_norm_id(c.get("id")) for c in await _platform_owner_operational_companies(current_user)}
+        if _norm_id(company_id) not in owned:
+            return {"id": "__not_permitted__"}
+        return {"id": company_id}
+    if _is_tenant_user(current_user):
+        return {"$and": [{"id": company_id}, await _tenant_company_scope(current_user)]}
+    return {"id": company_id, "created_by": _norm_id(getattr(current_user, "id", ""))}
+
 
 def _scrub_company(company: dict, user: User) -> dict:
     if company and not _can_manage_companies(user):
@@ -1727,6 +1885,21 @@ async def create_company(
     }
     if not doc["name"]:
         raise HTTPException(400, "Company name is required")
+    if _is_tenant_user(current_user):
+        # Stamp tenant ownership at creation so a licensee company can never
+        # surface in a Platform Owner selector or go missing for its licensee.
+        tenant_customer_id = _norm_id(getattr(current_user, "commercial_customer_id", ""))
+        if not tenant_customer_id:
+            scope_row = await _tenant_raw_db().companies.find_one(
+                {"id": _norm_id(getattr(current_user, "company_id", ""))},
+                {"_id": 0, "commercial_customer_id": 1, "license_id": 1},
+            )
+            tenant_customer_id = _norm_id((scope_row or {}).get("commercial_customer_id"))
+        if tenant_customer_id:
+            doc["commercial_customer_id"] = tenant_customer_id
+        tenant_license_id = _norm_id(getattr(current_user, "license_id", ""))
+        if tenant_license_id:
+            doc["license_id"] = tenant_license_id
     await db.companies.insert_one(doc)
     doc.pop("_id", None)
     return doc
@@ -1738,36 +1911,24 @@ async def get_companies(
     current_user: User = Depends(get_current_user),
 ):
     """
-    Full company master records, scoped to companies created by the current user.
-    Company master records are private creator-owned data; cross-user visibility
-    is not permitted.
+    Full company master records for the caller's own context only:
+
+      * Platform Owner -> the Platform Owner's operational companies
+        (licensee companies are never returned; they belong to Commercial Console)
+      * Licensee admin -> every legal company of their licensed tenant
+      * Licensee user  -> only the company they are attached to
     """
-    list_filter: Dict[str, Any] = {"created_by": str(current_user.id)}
-    # Platform Owner operational dropdowns must never expose commercial-license
-    # tenant companies. Those companies are managed through Commercial Console.
     if is_platform_owner(current_user):
         companies = await _platform_owner_operational_companies(current_user)
-        for company in companies:
-            await _hydrate_company_bank(company)
-            _scrub_company(company, current_user)
-        return companies
-
-    tenant_company_id = str(getattr(current_user, "company_id", "") or "").strip()
-    tenant_customer_id = str(getattr(current_user, "commercial_customer_id", "") or "").strip()
-    if not is_platform_owner(current_user) and tenant_company_id and str(getattr(current_user, "role", "") or "").lower() == "admin":
-        owned_filters: List[Dict[str, Any]] = [
-            {"created_by": str(current_user.id)},
-            {"id": tenant_company_id},
-        ]
-        if tenant_customer_id:
-            owned_filters.append({"commercial_customer_id": tenant_customer_id})
-        list_filter = {"$or": owned_filters}
-    companies = await db.companies.find(
-        list_filter, {"_id": 0}
-    ).sort("name", 1).to_list(500)
-    for c in companies:
-        await _hydrate_company_bank(c)
-        _scrub_company(c, current_user)
+    elif _is_tenant_user(current_user):
+        companies = await _tenant_visible_companies(current_user)
+    else:
+        companies = await _tenant_raw_db().companies.find(
+            {"created_by": _norm_id(getattr(current_user, "id", ""))}, {"_id": 0}
+        ).sort("name", 1).to_list(500)
+    for company in companies:
+        await _hydrate_company_bank(company)
+        _scrub_company(company, current_user)
     return companies
 
 
@@ -1818,15 +1979,7 @@ async def list_companies(current_user: User = Depends(get_current_user)):
         "commercial_customer_id": 1,
         "license_id": 1,
     }
-    # Licensed (commercial) tenant admins always own their tenant's operational
-    # company record, which is created by license generation and therefore has
-    # no `created_by` matching the admin. Without this clause a licensee admin
-    # gets an empty list (or, worse, a stale list cached from another session),
-    # and every report call is then sent with a company_id that the tenant
-    # guard rejects with 403 "Cross-company access is not permitted".
-    list_filter: Dict[str, Any] = {"created_by": str(current_user.id)}
-    # Platform Owner must receive only its own operational companies here.
-    # Licensee companies remain available only through Commercial Console.
+    # Same context rules as GET /companies (see get_companies).
     if is_platform_owner(current_user):
         companies = await _platform_owner_operational_companies(current_user)
         for company in companies:
@@ -1836,15 +1989,12 @@ async def list_companies(current_user: User = Depends(get_current_user)):
             for company in companies
         ]
 
-    tenant_company_id = str(getattr(current_user, "company_id", "") or "").strip()
-    if (
-        not is_platform_owner(current_user)
-        and tenant_company_id
-        and str(getattr(current_user, "role", "") or "").lower() == "admin"
-        and getattr(current_user, "commercial_customer_id", None)
-    ):
-        list_filter = {"$or": [{"created_by": str(current_user.id)}, {"id": tenant_company_id}]}
-    companies = await db.companies.find(list_filter, projection).sort("name", 1).to_list(500)
+    if _is_tenant_user(current_user):
+        companies = await _tenant_visible_companies(current_user, projection)
+    else:
+        companies = await _tenant_raw_db().companies.find(
+            {"created_by": _norm_id(getattr(current_user, "id", ""))}, projection
+        ).sort("name", 1).to_list(500)
     for c in companies:
         await _hydrate_company_bank(c)
     return companies
@@ -1853,30 +2003,8 @@ async def list_companies(current_user: User = Depends(get_current_user)):
 @router.get("/companies/{company_id}")
 async def get_company(company_id: str, current_user: User = Depends(get_current_user)):
     """Single company record — used by pages that only know a company_id."""
-    owner_scope = {"id": company_id, "created_by": str(current_user.id)}
-    if (
-        not is_platform_owner(current_user)
-        and str(getattr(current_user, "role", "") or "").lower() == "admin"
-        and str(getattr(current_user, "company_id", "") or "").strip()
-    ):
-        tenant_company_id = str(getattr(current_user, "company_id") or "").strip()
-        tenant_customer_id = str(getattr(current_user, "commercial_customer_id") or "").strip()
-        owned_filters: List[Dict[str, Any]] = [
-            {"created_by": str(current_user.id)},
-            {"id": tenant_company_id},
-        ]
-        if tenant_customer_id:
-            owned_filters.append({"commercial_customer_id": tenant_customer_id})
-        owner_scope = {"id": company_id, "$or": owned_filters}
-    if is_platform_owner(current_user):
-        # Platform Owner manages its own operational Company Master records.
-        # Commercial-license companies remain isolated in the Commercial Console.
-        owner_scope = {
-            "id": company_id,
-            "source": {"$nin": ["commercial-license", "commercial", "license"]},
-            "commercial_customer_id": {"$in": [None, ""]},
-        }
-    company = await db.companies.find_one(owner_scope, {"_id": 0})
+    company_scope = await _company_access_scope(current_user, company_id)
+    company = await _tenant_raw_db().companies.find_one(company_scope, {"_id": 0})
     if not company:
         raise HTTPException(404, "Company not found")
     await _hydrate_company_bank(company)
@@ -1889,30 +2017,8 @@ async def update_company(
     data: dict,
     current_user: User = Depends(require_company_manage),
 ):
-    company_scope = {"id": company_id, "created_by": str(current_user.id)}
-    if (
-        not is_platform_owner(current_user)
-        and str(getattr(current_user, "role", "") or "").lower() == "admin"
-        and str(getattr(current_user, "company_id", "") or "").strip()
-    ):
-        tenant_company_id = str(getattr(current_user, "company_id") or "").strip()
-        tenant_customer_id = str(getattr(current_user, "commercial_customer_id") or "").strip()
-        owned_filters: List[Dict[str, Any]] = [
-            {"created_by": str(current_user.id)},
-            {"id": tenant_company_id},
-        ]
-        if tenant_customer_id:
-            owned_filters.append({"commercial_customer_id": tenant_customer_id})
-        company_scope = {"id": company_id, "$or": owned_filters}
-    if is_platform_owner(current_user):
-        # Platform Owner Company Master is separate from commercial license
-        # tenants. Allow editing only non-commercial operational companies.
-        company_scope = {
-            "id": company_id,
-            "source": {"$nin": ["commercial-license", "commercial", "license"]},
-            "commercial_customer_id": {"$in": [None, ""]},
-        }
-    existing = await db.companies.find_one(company_scope, {"_id": 0})
+    company_scope = await _company_access_scope(current_user, company_id)
+    existing = await _tenant_raw_db().companies.find_one(company_scope, {"_id": 0})
     if not existing:
         raise HTTPException(404, "Company not found")
     allowed = [
@@ -1961,8 +2067,8 @@ async def update_company(
         if resolved:
             update["state"] = resolved.get("state") or ""
             update["state_code"] = resolved.get("state_code") or ""
-    await db.companies.update_one(company_scope, {"$set": update})
-    updated = await db.companies.find_one(company_scope, {"_id": 0})
+    await _tenant_raw_db().companies.update_one(company_scope, {"$set": update})
+    updated = await _tenant_raw_db().companies.find_one(company_scope, {"_id": 0})
     # Keep the Bank Accounts page in sync: mirror the company's primary
     # bank details into the bank_accounts collection whenever they change
     # here (Invoice/Quotation settings both save through this endpoint).
@@ -1979,31 +2085,11 @@ async def delete_company(
     company_id: str,
     current_user: User = Depends(require_company_manage),
 ):
-    company_scope = {"id": company_id, "created_by": str(current_user.id)}
-    if (
-        not is_platform_owner(current_user)
-        and str(getattr(current_user, "role", "") or "").lower() == "admin"
-        and str(getattr(current_user, "company_id", "") or "").strip()
-    ):
-        tenant_company_id = str(getattr(current_user, "company_id") or "").strip()
-        tenant_customer_id = str(getattr(current_user, "commercial_customer_id") or "").strip()
-        owned_filters: List[Dict[str, Any]] = [
-            {"created_by": str(current_user.id)},
-            {"id": tenant_company_id},
-        ]
-        if tenant_customer_id:
-            owned_filters.append({"commercial_customer_id": tenant_customer_id})
-        company_scope = {"id": company_id, "$or": owned_filters}
-    if is_platform_owner(current_user):
-        company_scope = {
-            "id": company_id,
-            "source": {"$nin": ["commercial-license", "commercial", "license"]},
-            "commercial_customer_id": {"$in": [None, ""]},
-        }
-    existing = await db.companies.find_one(company_scope, {"_id": 0})
+    company_scope = await _company_access_scope(current_user, company_id)
+    existing = await _tenant_raw_db().companies.find_one(company_scope, {"_id": 0})
     if not existing:
         raise HTTPException(404, "Company not found")
-    await db.companies.delete_one(company_scope)
+    await _tenant_raw_db().companies.delete_one(company_scope)
     return {"message": "Company deleted"}
 
 
