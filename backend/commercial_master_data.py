@@ -169,14 +169,32 @@ def _date_value(value):
     return value.isoformat() if hasattr(value, "isoformat") else str(value)
 
 
-def _license_permissions(role: str, license_doc: Dict[str, Any]) -> Dict[str, Any]:
-    # A tenant administrator is the license holder's control-plane identity.
-    # Admin rights are therefore capped by the licensed MODULES, but are not
-    # reduced to the feature subset selected for ordinary users. Staff and
-    # managers continue to receive the granular selected_features entitlement.
+def _license_permissions(
+    role: str,
+    license_doc: Dict[str, Any],
+    admin_user: Optional[User] = None,
+    existing_permissions: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Resolve a company user's effective access from the licensee admin.
+
+    The license defines the commercial ceiling; the licensee administrator's
+    current permissions define what that administrator has enabled for the
+    tenant. New staff/managers inherit that enabled access, while existing
+    explicit user grants remain editable but are capped to the administrator.
+    """
+    from backend.commercial_licensee_admin import (
+        get_all_admin_permissions,
+        get_tenant_user_permissions,
+    )
     if str(role or "").strip().lower() == "admin":
-        from backend.commercial_licensee_admin import get_all_admin_permissions
         return get_all_admin_permissions(license_doc)
+    if admin_user is not None:
+        return get_tenant_user_permissions(
+            admin_user,
+            license_doc,
+            role,
+            existing_permissions,
+        )
     return _apply_feature_entitlements(
         role,
         list(license_doc.get("modules") or []),
@@ -363,13 +381,17 @@ async def create_platform_company_user(payload: Dict[str, Any], current_user: Us
         role = "staff"
     now = _now()
     user_id = str(uuid.uuid4())
+    # Resolve the creator as the tenant administrator. The creator's effective
+    # permissions are the source for inherited module/page access; the active
+    # license remains the hard commercial ceiling.
+    creator_admin = current_user if str(getattr(current_user, "role", "")).strip().lower() == "admin" else None
     doc = {
         "id": user_id,
         "email": email,
         "full_name": full_name,
         "role": role,
         "password": pwd_context.hash(password),
-        "permissions": _license_permissions(role, license_doc),
+        "permissions": _license_permissions(role, license_doc, creator_admin),
         "departments": list(payload.get("departments") or []),
         "phone": str(payload.get("phone") or "").strip() or None,
         "is_active": True,
@@ -454,7 +476,16 @@ async def update_platform_company_user(
     if role not in {"staff", "manager", "admin"}:
         role = "staff"
     updates["role"] = role
-    updates["permissions"] = _license_permissions(role, license_doc)
+    # Re-cap edited users to the current tenant administrator. This prevents a
+    # stale permission document from retaining access after the admin changes
+    # the tenant's allowed modules/pages.
+    admin_user = current_user if str(getattr(current_user, "role", "")).strip().lower() == "admin" else None
+    updates["permissions"] = _license_permissions(
+        role,
+        license_doc,
+        admin_user,
+        existing.get("permissions") or {},
+    )
     updates["licensed_modules"] = list(license_doc.get("modules") or [])
     updates["selected_features"] = license_doc.get("selected_features") or {}
 
