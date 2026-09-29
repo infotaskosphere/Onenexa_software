@@ -5,7 +5,7 @@ import { useActivityTracker } from '@/hooks/useActivityTracker';
 import { canAccessPath, hasModuleAccess, isCommercialTenant } from '@/lib/commercialPermissionMatrix';
 import {
   LayoutDashboard, CheckSquare, FileText, Clock, BarChart3,
-  Users, LogOut, Menu, Activity, ChevronDown, Clock,
+  Users, LogOut, Menu, Activity, ChevronDown,
   PanelLeftClose, PanelLeftOpen, Target, Sun, Moon, MapPin,
   Settings, Mail, Receipt, X, KeyRound, BrainCircuit,
   CreditCard, Fingerprint, Bell, Shield, ShieldCheck, ArrowLeftRight, MessageCircle,
