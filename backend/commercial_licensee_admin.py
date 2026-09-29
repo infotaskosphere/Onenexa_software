@@ -244,6 +244,43 @@ def get_tenant_user_permissions(
     return base
 
 
+
+async def sync_user_to_licensee_admin(
+    user: User,
+    license_doc: Dict[str, Any],
+) -> User:
+    """Repair legacy commercial users so they inherit tenant-admin access once."""
+    if str(getattr(user, "role", "") or "").strip().lower() == "admin":
+        return user
+    if getattr(user, "permissions_inherited_from_licensee_admin", None) is False:
+        return user
+
+    raw_db = _raw_db()
+    permissions = get_tenant_user_permissions(
+        user,
+        license_doc,
+        str(getattr(user, "role", "staff") or "staff"),
+        None,
+    )
+    data = user.model_dump()
+    data["permissions"] = permissions
+    data["permissions_inherited_from_licensee_admin"] = True
+    data["licensed_modules"] = list(
+        license_doc.get("modules") or license_doc.get("licensed_modules") or []
+    )
+    data["selected_features"] = license_doc.get("selected_features") or {}
+    await raw_db.users.update_one(
+        {"id": str(user.id)},
+        {"$set": {
+            "permissions": permissions,
+            "permissions_inherited_from_licensee_admin": True,
+            "licensed_modules": data["licensed_modules"],
+            "selected_features": data["selected_features"],
+        }},
+    )
+    return User.model_validate(data)
+
+
 async def ensure_licensee_admin(
     customer: Dict[str, Any],
     license_doc: Dict[str, Any],
@@ -341,6 +378,7 @@ async def ensure_licensee_admin(
         "license_key": license_key,
         "licensed_modules": licensed_modules,
         "selected_features": selected_features,
+        "permissions_inherited_from_licensee_admin": True,
     }
     try:
         await raw_db.users.insert_one(user_doc)
