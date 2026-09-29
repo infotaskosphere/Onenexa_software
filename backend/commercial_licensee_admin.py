@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from passlib.context import CryptContext
+from fastapi import HTTPException
 
 from backend import dependencies as _dependencies
 from backend.models import DEFAULT_ROLE_PERMISSIONS, User
@@ -193,6 +194,37 @@ async def ensure_licensee_admin(
     now_iso = datetime.now(timezone.utc).isoformat()
 
     existing_user = await raw_db.users.find_one({"email": email})
+
+    # Never re-purpose an existing account merely because a commercial license
+    # carries the same email address. This was a serious tenant-isolation edge
+    # case: if a Platform Owner or another company's user used that email, the
+    # old code silently moved that account into the new licensee tenant. It also
+    # made the two identities share the same single-session key, so logging into
+    # one could legitimately replace the other session.
+    if existing_user:
+        existing_company = str(existing_user.get("company_id") or "").strip()
+        existing_customer = str(existing_user.get("commercial_customer_id") or "").strip()
+        existing_is_owner = False
+        try:
+            existing_is_owner = is_platform_owner(existing_user)
+        except Exception:
+            existing_is_owner = False
+        same_tenant = (
+            not existing_is_owner
+            and (
+                (existing_company and existing_company == company_id)
+                or (existing_customer and existing_customer == customer_id)
+            )
+        )
+        if not same_tenant:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "The license administrator email already belongs to another account. "
+                    "Use a unique administrator email for this licensed company."
+                ),
+            )
+
     update_fields = {
         "role": "admin",
         "company_id": company_id,
