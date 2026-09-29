@@ -30,14 +30,15 @@ function useAdminFacts() {
       const companies = c.status === 'fulfilled' ? list(c.value.data) : [];
       const roles = r.status === 'fulfilled' ? list(r.value.data) : [];
       const user = me.status === 'fulfilled' ? me.value.data : null;
-      const activeUsers = users.filter(x => x?.is_active !== false && x?.status !== 'inactive').length;
+      const pendingUsers = users.filter(x => x?.status === 'pending_approval');
+       const activeUsers = users.filter(x => x?.is_active !== false && x?.status !== 'inactive').length;
       const customRoles = roles.filter(x => x?.is_builtin === false).length;
       const licensedModules = [
         ['can_access_taskosphere', 'Taskosphere'], ['can_access_finix', 'Finix'], ['can_access_compliance', 'CompliGenie'],
         ['can_access_records', 'Records'], ['can_access_proposals', 'LeadSense'], ['can_access_people_matrix', 'People Matrix'],
       ].filter(([flag]) => user?.permissions?.[flag] === true).map(([, label]) => label);
       return {
-        users, companies, roles, user, activeUsers, customRoles, licensedModules,
+        users, companies, roles, user, pendingUsers, activeUsers, customRoles, licensedModules,
         companiesCount: c.status === 'fulfilled' ? count(c.value.data) : null,
         auditCount: a.status === 'fulfilled' ? count(a.value.data) : null,
       };
