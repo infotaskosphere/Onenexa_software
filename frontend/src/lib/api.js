@@ -74,9 +74,11 @@ const TOKEN_KEY = "token";
  * make the application think the user is logged out.
  */
 export const getToken = () => {
+  // The current tab owns the active credential in sessionStorage. localStorage
+  // is only a durable fallback for a browser restart.
   return (
-    localStorage.getItem(TOKEN_KEY) ||
     sessionStorage.getItem(TOKEN_KEY) ||
+    localStorage.getItem(TOKEN_KEY) ||
     null
   );
 };
@@ -93,11 +95,13 @@ export const getToken = () => {
 export const setToken = (tok, rememberMe = true) => {
   if (!tok) return;
 
+  sessionStorage.setItem(TOKEN_KEY, tok);
+
+  // Keep a durable copy only when explicitly requested. An open tab will
+  // continue using its own sessionStorage token.
   if (rememberMe) {
     localStorage.setItem(TOKEN_KEY, tok);
-    sessionStorage.removeItem(TOKEN_KEY);
-  } else {
-    sessionStorage.setItem(TOKEN_KEY, tok);
+  } else if (localStorage.getItem(TOKEN_KEY) === tok) {
     localStorage.removeItem(TOKEN_KEY);
   }
 };
@@ -105,9 +109,14 @@ export const setToken = (tok, rememberMe = true) => {
 /**
  * Remove authentication token from BOTH storages.
  */
-export const clearToken = () => {
-  localStorage.removeItem(TOKEN_KEY);
+export const clearToken = (ownedToken = null) => {
   sessionStorage.removeItem(TOKEN_KEY);
+
+  // localStorage is shared between tabs; never remove another account's
+  // durable token.
+  if (ownedToken && localStorage.getItem(TOKEN_KEY) === ownedToken) {
+    localStorage.removeItem(TOKEN_KEY);
+  }
 };
 
 export const SESSION_REPLACED_DETAIL = "SESSION_REPLACED";
@@ -684,10 +693,21 @@ api.interceptors.response.use(
     // ─────────────────────────────────────────────────────────
 
     if (error.response?.status === 401) {
-      clearToken();
+      const authHeader =
+        error.config?.headers?.Authorization ||
+        error.config?.headers?.authorization ||
+        "";
+      const failedToken = String(authHeader).replace(/^Bearer\\s+/i, "").trim() || null;
 
-      localStorage.removeItem("user");
+      clearToken(failedToken);
       sessionStorage.removeItem("user");
+
+      try {
+        if (failedToken && localStorage.getItem(TOKEN_KEY) === failedToken) {
+          localStorage.removeItem("user");
+          localStorage.removeItem("session_token");
+        }
+      } catch {}
 
       if (
         typeof window !== "undefined" &&
