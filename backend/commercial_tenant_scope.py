@@ -209,16 +209,20 @@ async def _resolve_customer_id(user: Any) -> str | None:
 
 
 async def _apply_live_license_permissions(user: Any, customer_id: str | None):
-    """Cap the user's effective permissions by the active commercial license.
-    Licensee admins have full rights by default for their company and license.
+    """Apply the active commercial license as a hard ceiling without
+    overwriting the licensee admin's Permission Matrix grants.
+
+    Commercial license = maximum entitlement.
+    Licensee admin Permission Matrix = actual Manager/Staff entitlement.
     """
     if not customer_id or is_platform_owner(user):
         return user
     try:
         raw_db = getattr(_dependencies, "_raw_db", _dependencies.db)
         license_docs = await raw_db.commercial_licenses.find(
-            {"customer_id": customer_id, "status": "active"}, {"_id": 0}
-        ).sort("issued_at", -1).limit(10).to_list(10)
+            {"customer_id": customer_id, "status": {"$in": ["active", "trial"]}},
+            {"_id": 0},
+        ).sort("issued_at", -1).limit(20).to_list(20)
         if not license_docs:
             return user
 
@@ -227,9 +231,7 @@ async def _apply_live_license_permissions(user: Any, customer_id: str | None):
         if not active:
             return user
 
-        role = str(getattr(user, "role", "staff") or "staff")
-        modules = list(active.get("modules") or active.get("licensed_modules") or [])
-        selected_features = active.get("selected_features") or {}
+        role = str(getattr(user, "role", "staff") or "staff").lower()
 
         current = getattr(user, "permissions", None)
         if hasattr(current, "model_dump"):
@@ -237,18 +239,36 @@ async def _apply_live_license_permissions(user: Any, customer_id: str | None):
         if not isinstance(current, dict):
             current = {}
 
-        if role == "admin":
-            from backend.commercial_licensee_admin import get_all_admin_permissions
-            license_permissions = get_all_admin_permissions()
-        else:
-            from backend.commercial_onboarding_extensions import _apply_feature_entitlements
-            license_permissions = _apply_feature_entitlements(role, modules, selected_features)
+        from backend.commercial_licensee_admin import (
+            get_all_admin_permissions,
+            get_tenant_user_permissions,
+            normalize_license_selected_features,
+        )
 
-        effective = {**current, **license_permissions}
+        if role == "admin":
+            # Licensee admin gets full control inside the modules actually
+            # purchased by the Platform Owner. AIWeave remains explicitly
+            # governed and is never auto-enabled merely by purchase.
+            license_permissions = get_all_admin_permissions(active)
+        else:
+            # IMPORTANT: do NOT rebuild Manager/Staff permissions from
+            # selected_features. That was the bug: it replaced the actual
+            # Permission Matrix grants on every authenticated request.
+            # Preserve the user's stored grants, then cap them against the
+            # licensee admin's effective licensed permissions.
+            license_permissions = get_tenant_user_permissions(
+                None,
+                active,
+                role,
+                current,
+            )
+
         data = user.model_dump()
-        data["permissions"] = effective
-        data["licensed_modules"] = modules
-        data["selected_features"] = selected_features
+        data["permissions"] = license_permissions
+        data["licensed_modules"] = list(
+            active.get("modules") or active.get("licensed_modules") or []
+        )
+        data["selected_features"] = normalize_license_selected_features(active)
         data["license_id"] = active.get("id")
         data["license_key"] = active.get("license_key")
         data["commercial_customer_id"] = customer_id
