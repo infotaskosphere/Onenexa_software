@@ -170,8 +170,11 @@ export function hasEffectivePermission(user, permission) {
   if (pageEntry) {
     const [moduleId] = pageEntry;
     if (!hasPageLicense(user, permission, moduleId)) return false;
-    // Commercial licensee admins are governed by the active license modules
-    if (String(user.role || "").toLowerCase() === "admin") return true;
+    // Commercial licensee admins are governed by the active commercial
+    // module + selected-page ceiling. Platform Owner is handled above.
+    if (String(user.role || "").toLowerCase() === "admin") {
+      return normalizedSelectedFeatures(user)[moduleId]?.has(permission) === true;
+    }
     // For non-admin (manager, staff): verify parent module is accessible
     const modDef = MODULES[moduleId];
     if (modDef?.flag && user.permissions?.[modDef.flag] === false) return false;
