@@ -188,10 +188,6 @@ export function hasEffectivePermission(user, permission) {
     const dashboardFlag = DASHBOARD_FLAG_BY_MODULE[moduleId];
     if (dashboardFlag === permission) return true;
 
-    // For managers: when licensee admin grants module access, all pages in that module
-    // are accessible unless explicitly revoked (false) by licensee admin
-    if (String(user.role || "").toLowerCase() === "manager") return true;
-
     return user.permissions?.[permission] === true || (permission === "can_view_client_discussion" && user.permissions?.can_view_all_leads === true);
   }
   const legacyToPage = { can_manage_invoices: "can_view_sale", can_create_quotations: "can_create_quotations", can_view_clients: "can_view_all_clients" };
