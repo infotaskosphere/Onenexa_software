@@ -233,9 +233,20 @@ async def _apply_live_license_permissions(user: Any, customer_id: str | None):
 
         role = str(getattr(user, "role", "staff") or "staff").lower()
 
-        current = getattr(user, "permissions", None)
+        # Read the raw stored Permission Matrix first. User model
+        # normalization adds role defaults for legacy compatibility, but those
+        # defaults must never masquerade as an explicit commercial grant.
+        stored_doc = await raw_db.users.find_one(
+            {"id": str(getattr(user, "id", ""))},
+            {"_id": 0, "permissions": 1},
+        )
+        current = (stored_doc or {}).get("permissions")
         if hasattr(current, "model_dump"):
             current = current.model_dump()
+        if not isinstance(current, dict):
+            current = getattr(user, "permissions", None)
+            if hasattr(current, "model_dump"):
+                current = current.model_dump()
         if not isinstance(current, dict):
             current = {}
 
