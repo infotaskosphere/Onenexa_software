@@ -342,23 +342,51 @@ async def sync_user_to_licensee_admin(
     user: User,
     license_doc: Dict[str, Any],
 ) -> User:
-    """Repair legacy commercial users so they inherit tenant-admin access once."""
+    """Apply the current commercial license ceiling without overwriting
+    explicit Licensee Admin Permission Matrix decisions."""
     if str(getattr(user, "role", "") or "").strip().lower() == "admin":
         return user
 
     raw_db = _raw_db()
     stored = await raw_db.users.find_one(
         {"id": str(user.id)},
-        {"_id": 0, "permissions_inherited_from_licensee_admin": 1},
+        {
+            "_id": 0,
+            "permissions": 1,
+            "permissions_inherited_from_licensee_admin": 1,
+        },
     )
-    if stored and stored.get("permissions_inherited_from_licensee_admin") is False:
+
+    stored_permissions = (stored or {}).get("permissions")
+    if hasattr(stored_permissions, "model_dump"):
+        stored_permissions = stored_permissions.model_dump()
+    if not isinstance(stored_permissions, dict):
+        stored_permissions = {}
+
+    marker = (stored or {}).get("permissions_inherited_from_licensee_admin")
+    has_explicit_matrix = bool(stored_permissions)
+
+    # Once the licensee admin has explicitly written a Permission Matrix
+    # payload, that payload is authoritative for Manager/Staff. Never replace it
+    # with role defaults or license-wide grants on login.
+    if has_explicit_matrix:
+        effective = get_tenant_user_permissions(
+            None,
+            license_doc,
+            str(getattr(user, "role", "staff") or "staff"),
+            stored_permissions,
+        )
         data = user.model_dump()
+        data["permissions"] = effective
+        data["permissions_inherited_from_licensee_admin"] = False
         data["licensed_modules"] = list(
             license_doc.get("modules") or license_doc.get("licensed_modules") or []
         )
-        data["selected_features"] = license_doc.get("selected_features") or {}
+        data["selected_features"] = normalize_license_selected_features(license_doc)
         return User.model_validate(data)
 
+    # True legacy records with no stored permission map are initialized once
+    # from the licensee administrator's effective licensed access.
     permissions = get_tenant_user_permissions(
         None,
         license_doc,
@@ -371,7 +399,7 @@ async def sync_user_to_licensee_admin(
     data["licensed_modules"] = list(
         license_doc.get("modules") or license_doc.get("licensed_modules") or []
     )
-    data["selected_features"] = license_doc.get("selected_features") or {}
+    data["selected_features"] = normalize_license_selected_features(license_doc)
     await raw_db.users.update_one(
         {"id": str(user.id)},
         {"$set": {
