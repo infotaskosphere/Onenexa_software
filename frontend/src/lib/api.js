@@ -692,6 +692,16 @@ api.interceptors.response.use(
     // 401 — AUTHENTICATION
     // ─────────────────────────────────────────────────────────
 
+    // Ignore stale 401/403 responses from requests that were already in
+    // flight when the user intentionally logged out.
+    if (
+      typeof window !== "undefined" &&
+      window.__TASKO_LOGOUT_IN_PROGRESS__ &&
+      [401, 403].includes(error.response?.status)
+    ) {
+      return Promise.reject(error);
+    }
+
     if (error.response?.status === 401) {
       const authHeader =
         error.config?.headers?.Authorization ||
