@@ -286,20 +286,14 @@ export const AuthProvider = ({ children }) => {
           if (!prev) return prev;
           const modules = updatedLicense.modules || updatedLicense.licensed_modules || [];
           const normModules = modules.map((m) => String(m).toLowerCase().replace(/-/g, "_"));
-          const updatedPerms = {
-            ...(prev.permissions || {}),
-            can_access_taskosphere: normModules.some((m) => m === "taskosphere" || m === "tasks"),
-            can_access_finix: normModules.some((m) => m === "finix" || m === "invoicing" || m === "accounting"),
-            can_access_compliance: normModules.some((m) => m === "compliance"),
-            can_access_records: normModules.some((m) => m === "records"),
-            can_access_proposals: normModules.some((m) => m === "proposals" || m === "client_proposals"),
-            can_access_people_matrix: normModules.some((m) => m === "people_matrix" || m === "hrms" || m === "peoplematrix"),
-          };
           const nextUser = {
             ...prev,
             licensed_modules: modules,
             selected_features: updatedLicense.selected_features || prev.selected_features || {},
-            permissions: updatedPerms,
+            // Do not synthesize Manager/Staff permissions from the license
+            // event. The server remains the source of truth for the Permission
+            // Matrix; refreshUser() below fetches the effective grants.
+            permissions: prev.permissions || {},
           };
           const storage = localStorage.getItem("token") ? localStorage : sessionStorage;
           storage.setItem("user", JSON.stringify(nextUser));
