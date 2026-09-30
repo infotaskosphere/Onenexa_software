@@ -401,7 +401,9 @@ async def ensure_licensee_admin(
     license_id = str(license_doc.get("id") or "").strip()
     license_key = str(license_doc.get("license_key") or "").strip()
     licensed_modules = list(license_doc.get("modules") or license_doc.get("licensed_modules") or [])
-    selected_features = license_doc.get("selected_features") or {}
+    selected_features = normalize_license_selected_features(
+        license_doc
+    )
     admin_permissions = get_all_admin_permissions(license_doc)
     now_iso = datetime.now(timezone.utc).isoformat()
 
