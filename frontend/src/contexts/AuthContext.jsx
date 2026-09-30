@@ -138,7 +138,35 @@ export const AuthProvider = ({ children }) => {
     const checkCurrentSession = async () => {
       const token = localStorage.getItem("token") || sessionStorage.getItem("token");
       if (!token || cancelled || window.__TASKO_LOGOUT_IN_PROGRESS__) return;
-      try { await api.get("/auth/me", { _silent: true, _skipReadyGate: true }); } catch (error) { if (cancelled) return; }
+      try {
+        const response = await api.get("/auth/me", { _silent: true, _skipReadyGate: true });
+        if (cancelled || window.__TASKO_LOGOUT_IN_PROGRESS__) return;
+        const freshUser = normalizeTenantContext(response?.data);
+        if (!freshUser || String(freshUser?.id || "") !== String(user?.id || "")) return;
+
+        const permissionsChanged =
+          JSON.stringify(freshUser?.permissions || {}) !== JSON.stringify(user?.permissions || {});
+        const licenseContextChanged =
+          JSON.stringify(freshUser?.licensed_modules || []) !== JSON.stringify(user?.licensed_modules || []) ||
+          JSON.stringify(freshUser?.selected_features || {}) !== JSON.stringify(user?.selected_features || {}) ||
+          String(freshUser?.license_id || "") !== String(user?.license_id || "");
+
+        if (!permissionsChanged && !licenseContextChanged) return;
+
+        const storage = localStorage.getItem("token") ? localStorage : sessionStorage;
+        storage.setItem("user", JSON.stringify(freshUser));
+        setUser(freshUser);
+
+        // Let route/layout consumers react immediately to a permission change
+        // without requiring logout/login or a full page reload.
+        try {
+          window.dispatchEvent(new CustomEvent("taskosphere:permissions-refreshed", {
+            detail: { user: freshUser }
+          }));
+        } catch {}
+      } catch (error) {
+        if (cancelled) return;
+      }
     };
     const interval = setInterval(checkCurrentSession, 4000);
     const handleVisibility = () => { if (document.visibilityState === "visible") checkCurrentSession(); };
