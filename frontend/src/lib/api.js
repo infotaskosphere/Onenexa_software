@@ -123,11 +123,14 @@ export const SESSION_REPLACED_DETAIL = "SESSION_REPLACED";
 export const SESSION_REPLACED_MESSAGE =
   "You were logged out because this account was signed in on another device or browser. Only one active login is allowed.";
 
-const emitSessionReplacement = () => {
+const emitSessionReplacement = (failedToken = null) => {
   if (typeof window === "undefined") return;
   window.dispatchEvent(
     new CustomEvent("taskosphere:session-replaced", {
-      detail: { message: SESSION_REPLACED_MESSAGE },
+      detail: {
+        message: SESSION_REPLACED_MESSAGE,
+        failedToken: failedToken || null,
+      },
     })
   );
 };
@@ -500,8 +503,27 @@ api.interceptors.response.use(
       error.response?.status === 401 &&
       error.response?.data?.detail === SESSION_REPLACED_DETAIL
     ) {
+      // During an intentional logout, this can only be an already-in-flight
+      // request from the session that is being closed. Never convert that stale
+      // response into a "signed in elsewhere" event.
+      if (
+        typeof window !== "undefined" &&
+        window.__TASKO_LOGOUT_IN_PROGRESS__
+      ) {
+        return Promise.reject(error);
+      }
+
+      const failedAuthHeader =
+        error.config?.headers?.Authorization ||
+        error.config?.headers?.authorization ||
+        "";
+      const failedToken =
+        String(failedAuthHeader).replace(/^Bearer\s+/i, "").trim() || null;
+
       try {
-        const stored = typeof window !== "undefined" ? (localStorage.getItem("user") || sessionStorage.getItem("user")) : null;
+        const stored = typeof window !== "undefined"
+          ? (sessionStorage.getItem("user") || localStorage.getItem("user"))
+          : null;
         if (stored) {
           const u = JSON.parse(stored);
           if (isPlatformOwner(u)) {
@@ -509,7 +531,8 @@ api.interceptors.response.use(
           }
         }
       } catch {}
-      emitSessionReplacement();
+
+      emitSessionReplacement(failedToken);
       return Promise.reject(error);
     }
 
