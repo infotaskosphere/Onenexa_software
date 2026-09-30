@@ -116,23 +116,21 @@ export function hasModuleAccess(user, moduleId) {
   // Licensee admin gets all licensed modules
   if (String(user.role || "").toLowerCase() === "admin") return true;
 
-  // Non-admin licensee user (manager, staff): licensee admin controls their module access via permission matrix
+  // Non-admin licensee users (manager/staff) are governed by the
+  // licensee-admin Permission Matrix. The commercial license is only the
+  // maximum ceiling; it must never become an implicit grant.
   const def = MODULES[moduleId];
-  if (def?.flag && user.permissions?.[def.flag] !== undefined) {
-    return Boolean(user.permissions[def.flag]);
+  if (def?.flag) {
+    // Access is fail-closed when the module flag is absent. This is important
+    // after a Permission Matrix change: an unselected module must disappear
+    // immediately rather than falling back to the company's licensed modules.
+    return user.permissions?.[def.flag] === true;
   }
-  // Check if any page under this module is enabled
+
+  // Fallback only for legacy module definitions without a canonical module
+  // access flag: an explicitly granted page is enough to expose the module.
   const allFlags = ALL_PAGE_FLAGS_BY_MODULE[moduleId] || [];
-  if (allFlags.some((flag) => user.permissions?.[flag] === true)) return true;
-
-  // For manager: if module is licensed and not explicitly revoked, manager has access
-  if (String(user.role || "").toLowerCase() === "manager" && modules.size > 0 && modules.has(moduleId)) {
-    return true;
-  }
-
-  if (modules.size > 0) return modules.has(moduleId);
-  const selected = normalizedSelectedFeatures(user);
-  return (selected[moduleId]?.size || 0) > 0;
+  return allFlags.some((flag) => user.permissions?.[flag] === true);
 }
 
 export function hasPageLicense(user, pageFlag, moduleId = null) {
