@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useAuth } from '@/contexts/AuthContext.jsx';
 import { format, parseISO } from 'date-fns';
 import { toast } from 'sonner';
 import { NotebookPen, Plus, RefreshCw, Trash2, X, CheckSquare, Square, XCircle, Building2, ChevronLeft, ChevronRight, Pencil, AlertTriangle, ShieldCheck, FileDown, FileSpreadsheet, FileText } from 'lucide-react';
@@ -27,6 +28,10 @@ function emptyLine(defaultType = 'Dr') { return { account_id: '', account_name: 
 
 function JournalEntriesInner() {
   const isDark = useDark();
+  const { hasPermission } = useAuth();
+  const canViewChartOfAccounts =
+    hasPermission('can_view_chart_of_accounts') ||
+    hasPermission('can_manage_chart_of_accounts');
   const [loading, setLoading] = useState(true);
   const [entries, setEntries] = useState([]);
   const [accounts, setAccounts] = useState([]);
@@ -78,10 +83,16 @@ function JournalEntriesInner() {
     const size = opts.pageSize !== undefined ? opts.pageSize : pageSize;
     setLoading(true);
     try {
-      const [entriesR, accountsR] = await Promise.allSettled([
+      const requests = [
         api.get('/journal-entries', { params: { company_id: cid, page: pg, page_size: size } }),
-        api.get('/chart-of-accounts'),
-      ]);
+      ];
+      // Chart of Accounts is a separately governed Finix page. A user who can
+      // view Journal Entries but has not been granted Chart of Accounts access
+      // must not receive a predictable 403 in the browser console.
+      if (canViewChartOfAccounts) {
+        requests.push(api.get('/chart-of-accounts'));
+      }
+      const [entriesR, accountsR] = await Promise.allSettled(requests);
       if (entriesR.status === 'fulfilled') {
         const d = entriesR.value.data || {};
         setEntries(d.entries || []);
@@ -90,7 +101,11 @@ function JournalEntriesInner() {
       } else {
         setEntries([]); setTotal(0); setTotalPages(1);
       }
-      setAccounts(accountsR.status === 'fulfilled' ? (accountsR.value.data || []) : []);
+      setAccounts(
+        canViewChartOfAccounts && accountsR?.status === 'fulfilled'
+          ? (accountsR.value.data || [])
+          : []
+      );
     } catch {
       toast.error('Failed to load journal entries');
     } finally {
@@ -122,7 +137,7 @@ function JournalEntriesInner() {
       await fetchAll({ companyId: '', page: 1, pageSize });
       fetchFlagged('');
     })();
-  }, []);
+  }, [canViewChartOfAccounts]);
 
   const onCompanyChange = (cid) => {
     const val = cid === '__all__' ? '' : cid;
@@ -573,7 +588,13 @@ function JournalEntriesInner() {
               <ShieldCheck className="h-4 w-4" /> Existing records
             </Button>
 
-            <Button onClick={() => setShowNew(true)} variant="outline" className="h-11 w-full bg-emerald-400/25 border-emerald-300/40 text-white hover:bg-emerald-400/35 rounded-xl text-xs sm:text-sm font-semibold backdrop-blur-sm transition-all gap-1.5">
+            <Button
+              onClick={() => setShowNew(true)}
+              disabled={!canViewChartOfAccounts}
+              title={!canViewChartOfAccounts ? 'Chart of Accounts access is required to create a manual journal entry.' : 'Create a manual journal entry'}
+              variant="outline"
+              className="h-11 w-full bg-emerald-400/25 border-emerald-300/40 text-white hover:bg-emerald-400/35 rounded-xl text-xs sm:text-sm font-semibold backdrop-blur-sm transition-all gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
               <Plus className="h-4 w-4" /> New entry
             </Button>
 
