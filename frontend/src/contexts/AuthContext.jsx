@@ -168,7 +168,9 @@ export const AuthProvider = ({ children }) => {
         if (cancelled) return;
       }
     };
-    const interval = setInterval(checkCurrentSession, 4000);
+    // Permission changes are security-sensitive; keep the active session
+    // synchronized quickly without requiring logout/login.
+    const interval = setInterval(checkCurrentSession, 2000);
     const handleVisibility = () => { if (document.visibilityState === "visible") checkCurrentSession(); };
     document.addEventListener("visibilitychange", handleVisibility);
     return () => { cancelled = true; clearInterval(interval); document.removeEventListener("visibilitychange", handleVisibility); };
