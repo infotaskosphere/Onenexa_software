@@ -51,6 +51,7 @@ function JournalEntriesInner() {
   const [loading, setLoading] = useState(true);
   const [entries, setEntries] = useState([]);
   const [accounts, setAccounts] = useState([]);
+  const [accountsLoading, setAccountsLoading] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [entryDate, setEntryDate] = useState(new Date().toISOString().slice(0, 10));
   const [narration, setNarration] = useState('');
@@ -612,8 +613,8 @@ function JournalEntriesInner() {
                   toast.error('Chart of Accounts access is required to create a manual journal entry.');
                   return;
                 }
+                setAccountsLoading(true);
                 setShowNew(true);
-                setLoading(true);
                 try {
                   const { data } = await api.get('/chart-of-accounts', {
                     params: companyId ? { company_id: companyId } : {},
@@ -624,7 +625,7 @@ function JournalEntriesInner() {
                   setShowNew(false);
                   toast.error(err?.response?.data?.detail || 'Chart of Accounts access is required.');
                 } finally {
-                  setLoading(false);
+                  setAccountsLoading(false);
                 }
               }}
               disabled={!canPostJournalEntries || !canViewChartOfAccounts}
