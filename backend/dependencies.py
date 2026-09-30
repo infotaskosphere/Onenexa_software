@@ -131,10 +131,55 @@ def _get_perm(user,key,default=False):
     return default
 def _normalize_permissions(d):
     from backend.models import DEFAULT_ROLE_PERMISSIONS
-    role=d.get("role","staff");template=DEFAULT_ROLE_PERMISSIONS.get(role,{});perms=d.get("permissions",{})
+    role=d.get("role","staff")
+    template=DEFAULT_ROLE_PERMISSIONS.get(role,{})
+    perms=d.get("permissions",{})
     if hasattr(perms,"model_dump"):perms=perms.model_dump()
     elif not isinstance(perms,dict):perms={}
-    d["permissions"]={**template,**perms};return d
+
+    # Commercial tenant Manager/Staff permissions are explicit Permission Matrix
+    # state. Do NOT back-fill commercial module/page flags from the generic role
+    # template: doing so turns a licensed module into an implicit user grant and
+    # is exactly what caused /chart-of-accounts to be requested for users whose
+    # Finix permissions had been cleared by the licensee admin.
+    commercial_user = bool(
+        d.get("company_id")
+        or d.get("license_id")
+        or d.get("commercial_customer_id")
+        or d.get("licensed_modules")
+        or d.get("selected_features")
+    )
+    normalized={**template,**perms}
+    if commercial_user and str(role).lower() in ("manager","staff"):
+        try:
+            from backend.modules.people_matrix.permissions.catalog import MODULE_HIERARCHY
+            governed_flags=set()
+            for module in MODULE_HIERARCHY.values():
+                module_flag=module.get("flag")
+                if module_flag:
+                    governed_flags.add(module_flag)
+                for page in module.get("pages",[]) or []:
+                    if page.get("flag"):
+                        governed_flags.add(page["flag"])
+            for flag in governed_flags:
+                normalized[flag]=bool(perms.get(flag,False))
+
+            # Normalize legacy standalone Finix flags too. They are represented
+            # as pages in the current hierarchy, but keeping these explicit
+            # prevents old records/templates from recreating them.
+            for flag in (
+                "can_view_purchase","can_view_sale","can_view_bank",
+                "can_view_chart_of_accounts","can_manage_chart_of_accounts",
+                "can_view_journal_entries","can_post_journal_entries",
+                "can_view_accounting_reports","can_match_bank",
+            ):
+                normalized[flag]=bool(perms.get(flag,False))
+        except Exception:
+            # Permission normalization must never prevent login. The stored
+            # explicit map remains authoritative if the catalog cannot load.
+            pass
+    d["permissions"]=normalized
+    return d
 
 async def _get_saas_session_user(token: str):
     """Resolve the opaque SaaS session token created by saas-auth-runtime.cjs."""
