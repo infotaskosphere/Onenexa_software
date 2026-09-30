@@ -752,7 +752,8 @@ def _permission_flag(
             )
 
         if is_admin:
-            return True
+            selected = _selected_license_features(license_doc, module)
+            return flag in selected
 
         # Non-admin licensee user: licensee admin has full control over user permissions
         # for modules permitted by the commercial console license.
