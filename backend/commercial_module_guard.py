@@ -789,9 +789,6 @@ def _permission_flag(
         if flag == dashboard_flags.get(module) and permissions.get(flag) is not False:
             return True
 
-        if str(getattr(user, "role", "")).strip().lower() == "manager" and permissions.get(flag) is not False:
-            return True
-
         if flag == "can_view_client_discussion" and permissions.get("can_view_all_leads") is True:
             return True
 
