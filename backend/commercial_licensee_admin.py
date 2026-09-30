@@ -187,9 +187,9 @@ def get_all_admin_permissions(license_doc: Optional[Dict[str, Any]] = None) -> D
 
     permissions = dict(DEFAULT_ROLE_PERMISSIONS.get("admin", {}))
     licensed_modules = resolve_license_modules(license_doc)
-    selected_features = license_doc.get("selected_features")
-    if not isinstance(selected_features, dict):
-        selected_features = {}
+    selected_features = normalize_license_selected_features(
+        license_doc
+    )
 
     # Start from the internal admin template, then hard-cap every commercial
     # operational page. This preserves tenant-admin control-plane privileges
