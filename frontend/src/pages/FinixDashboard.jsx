@@ -17,6 +17,7 @@ import {
   PieChart, Pie, Cell, Legend, BarChart, Bar
 } from 'recharts';
 import api from '@/lib/api';
+import { createJournalEntry } from '@/lib/journalEntriesApi';
 import { normalizeCompanies } from "@/lib/companies";
 import { useDark } from '@/hooks/useDark';
 import RequestAccessGate from '@/components/RequestAccessGate.jsx';
@@ -231,12 +232,26 @@ function FinixDashboardInner() {
 
   const loadAccountsForVoucher = async (cid) => {
     if (!cid || cid === ALL_COMPANIES_ID) return;
+    // Do not request Chart of Accounts merely because the dashboard is open.
+    // It is separately governed from the Journal Entries page. This prevents
+    // a legitimate dashboard/metrics load from generating a 403 for users who
+    // can see Finix but were not granted Chart of Accounts access.
+    const permissions = user?.permissions && typeof user.permissions === 'object' ? user.permissions : {};
+    const canViewCOA = user?.role === 'admin' ||
+      permissions.can_view_chart_of_accounts === true ||
+      permissions.can_manage_chart_of_accounts === true;
+    const canPostJournal = user?.role === 'admin' || permissions.can_post_journal_entries === true;
+    if (!canViewCOA || !canPostJournal) {
+      setAccountsList([]);
+      return;
+    }
     try {
       const res = await api.get('/chart-of-accounts', { params: { company_id: cid } });
       const list = res?.data?.accounts || res?.data || [];
       if (Array.isArray(list)) setAccountsList(list);
     } catch (e) {
       console.warn('Failed to load chart of accounts for quick voucher:', e);
+      setAccountsList([]);
     }
   };
 
@@ -923,7 +938,7 @@ function FinixDashboardInner() {
         defaultNarration = voucherForm.narration || `Journal Entry: ${fmtC(amt)}`;
       }
 
-      await api.post('/journal-entries', {
+      await createJournalEntry({
         company_id: companyId,
         entry_date: voucherForm.date,
         narration: defaultNarration,
