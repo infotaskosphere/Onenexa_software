@@ -227,7 +227,7 @@ def get_all_admin_permissions(license_doc: Optional[Dict[str, Any]] = None) -> D
         # invites under this tenant; see _permission_flag in
         # commercial_module_guard.py for that enforcement point.
         if module_allowed:
-            selected = {str(page.get("flag")).strip() for page in module_def.get("pages", []) or [] if page.get("flag")}
+            selected = set(selected_features.get(module_id) or [])
         else:
             selected = set()
         # AIWeave is intentionally different from the other modules: purchasing
