@@ -76,6 +76,94 @@ def resolve_license_modules(license_doc: Dict[str, Any]) -> set[str]:
     return resolved
 
 
+def normalize_license_selected_features(
+    license_doc: Optional[Dict[str, Any]],
+) -> Dict[str, list[str]]:
+    """Normalize commercial feature selections, including legacy numeric counts.
+
+    Older license documents stored the number of selected pages per module
+    instead of the actual page-flag list. Those counts in the current data are
+    full-module counts (for example 9/9, 10/10, 4/4). Rehydrate such records
+    to the canonical page-flag representation so authentication, API guards
+    and the frontend all evaluate the same entitlement.
+    """
+    if not isinstance(license_doc, dict):
+        return {}
+
+    licensed_modules = resolve_license_modules(license_doc)
+    raw = license_doc.get("selected_features")
+    if not isinstance(raw, dict):
+        raw = {}
+
+    aliases = {
+        "taskosphere": {"taskosphere", "tasks"},
+        "finix": {"finix", "invoicing", "accounting"},
+        "compliance": {"compliance"},
+        "records": {"records"},
+        "proposals": {"proposals", "client_proposals", "client-proposals", "leadsense"},
+        "people_matrix": {"people_matrix", "people-matrix", "hrms", "peoplematrix"},
+        "aiweave": {"aiweave", "ai-weave"},
+    }
+
+    normalized: Dict[str, list[str]] = {}
+
+    for module_id in licensed_modules:
+        module_def = MODULE_HIERARCHY.get(module_id, {})
+        all_flags = [
+            str(page.get("flag")).strip()
+            for page in module_def.get("pages", []) or []
+            if page.get("flag")
+        ]
+
+        values = raw.get(module_id)
+        if values is None:
+            accepted = {
+                str(alias).strip().lower().replace("-", "_")
+                for alias in aliases.get(module_id, {module_id})
+            }
+            for raw_key, candidate in raw.items():
+                if str(raw_key).strip().lower().replace("-", "_") in accepted:
+                    values = candidate
+                    break
+
+        # Legacy module-only licenses and empty feature lists mean the entire
+        # licensed module remains available.
+        if values is None or (
+            isinstance(values, (list, tuple, set)) and len(values) == 0
+        ):
+            normalized[module_id] = list(all_flags)
+            continue
+
+        # Legacy commercial records sometimes persisted only the selected-page
+        # count. A count equal to the module's complete page count is safely
+        # equivalent to selecting every page. A smaller count cannot identify
+        # which pages were selected, so fail closed for that module.
+        if isinstance(values, (int, float)) and not isinstance(values, bool):
+            count = int(values)
+            normalized[module_id] = list(all_flags) if count >= len(all_flags) else []
+            continue
+
+        if isinstance(values, str) and values.strip().isdigit():
+            count = int(values.strip())
+            normalized[module_id] = list(all_flags) if count >= len(all_flags) else []
+            continue
+
+        if not isinstance(values, (list, tuple, set)):
+            normalized[module_id] = []
+            continue
+
+        selected = []
+        allowed = set(all_flags)
+        for flag in values:
+            flag = str(flag).strip()
+            if flag in allowed and flag not in selected:
+                selected.append(flag)
+
+        normalized[module_id] = selected
+
+    return normalized
+
+
 def get_all_admin_permissions(license_doc: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Return admin rights capped by the commercial license's MODULE list only.
 
