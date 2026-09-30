@@ -28,10 +28,23 @@ function emptyLine(defaultType = 'Dr') { return { account_id: '', account_name: 
 
 function JournalEntriesInner() {
   const isDark = useDark();
-  const { hasPermission } = useAuth();
-  const canViewChartOfAccounts =
-    hasPermission('can_view_chart_of_accounts') ||
-    hasPermission('can_manage_chart_of_accounts');
+  const { user, hasPermission } = useAuth();
+  const explicitPermissions = user?.permissions && typeof user.permissions === 'object'
+    ? user.permissions
+    : {};
+  const isCommercialUser = Boolean(
+    user?.company_id || user?.license_id || user?.commercial_customer_id
+  );
+  const userHasExplicitCommercialPermission = isCommercialUser
+    ? (
+      explicitPermissions.can_view_chart_of_accounts === true ||
+      explicitPermissions.can_manage_chart_of_accounts === true
+    )
+    : (
+      hasPermission('can_view_chart_of_accounts') ||
+      hasPermission('can_manage_chart_of_accounts')
+    );
+  const canViewChartOfAccounts = userHasExplicitCommercialPermission;
   const [loading, setLoading] = useState(true);
   const [entries, setEntries] = useState([]);
   const [accounts, setAccounts] = useState([]);
