@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
 import api from '@/lib/api';
+import { createJournalEntry } from '@/lib/journalEntriesApi';
 import { normalizeCompanies } from "@/lib/companies";
 import { useDark } from '@/hooks/useDark';
 import RequestAccessGate from '@/components/RequestAccessGate.jsx';
@@ -35,7 +36,7 @@ function JournalEntriesInner() {
   const isCommercialUser = Boolean(
     user?.company_id || user?.license_id || user?.commercial_customer_id
   );
-  const userHasExplicitCommercialPermission = isCommercialUser
+  const canViewChartOfAccounts = isCommercialUser
     ? (
       explicitPermissions.can_view_chart_of_accounts === true ||
       explicitPermissions.can_manage_chart_of_accounts === true
@@ -44,7 +45,9 @@ function JournalEntriesInner() {
       hasPermission('can_view_chart_of_accounts') ||
       hasPermission('can_manage_chart_of_accounts')
     );
-  const canViewChartOfAccounts = userHasExplicitCommercialPermission;
+  const canPostJournalEntries = isCommercialUser
+    ? explicitPermissions.can_post_journal_entries === true
+    : hasPermission('can_post_journal_entries');
   const [loading, setLoading] = useState(true);
   const [entries, setEntries] = useState([]);
   const [accounts, setAccounts] = useState([]);
@@ -96,16 +99,11 @@ function JournalEntriesInner() {
     const size = opts.pageSize !== undefined ? opts.pageSize : pageSize;
     setLoading(true);
     try {
-      const requests = [
+      // Journal Entries and Chart of Accounts are separate permissions.
+      // Never load Chart of Accounts just because Journal Entries is visible.
+      const [entriesR] = await Promise.allSettled([
         api.get('/journal-entries', { params: { company_id: cid, page: pg, page_size: size } }),
-      ];
-      // Chart of Accounts is a separately governed Finix page. A user who can
-      // view Journal Entries but has not been granted Chart of Accounts access
-      // must not receive a predictable 403 in the browser console.
-      if (canViewChartOfAccounts) {
-        requests.push(api.get('/chart-of-accounts'));
-      }
-      const [entriesR, accountsR] = await Promise.allSettled(requests);
+      ]);
       if (entriesR.status === 'fulfilled') {
         const d = entriesR.value.data || {};
         setEntries(d.entries || []);
@@ -114,11 +112,9 @@ function JournalEntriesInner() {
       } else {
         setEntries([]); setTotal(0); setTotalPages(1);
       }
-      setAccounts(
-        canViewChartOfAccounts && accountsR?.status === 'fulfilled'
-          ? (accountsR.value.data || [])
-          : []
-      );
+      // Accounts are loaded lazily only when the Journal Entry
+      // composer is opened and the user has explicit Chart of Accounts access.
+      setAccounts([]);
     } catch {
       toast.error('Failed to load journal entries');
     } finally {
@@ -259,7 +255,12 @@ function JournalEntriesInner() {
     if (!totals.balanced) { toast.error('Debit total must equal credit total'); return; }
     setSaving(true);
     try {
-      await api.post('/journal-entries', { company_id: companyId, entry_date: entryDate, narration, lines: validLines });
+      await createJournalEntry({
+        company_id: companyId,
+        entry_date: entryDate,
+        narration,
+        lines: validLines,
+      });
       toast.success('Journal entry posted');
       setShowNew(false);
       setNarration('');
@@ -602,9 +603,38 @@ function JournalEntriesInner() {
             </Button>
 
             <Button
-              onClick={() => setShowNew(true)}
-              disabled={!canViewChartOfAccounts}
-              title={!canViewChartOfAccounts ? 'Chart of Accounts access is required to create a manual journal entry.' : 'Create a manual journal entry'}
+              onClick={async () => {
+                if (!canPostJournalEntries) {
+                  toast.error('Journal Entry posting access has not been granted by your admin.');
+                  return;
+                }
+                if (!canViewChartOfAccounts) {
+                  toast.error('Chart of Accounts access is required to create a manual journal entry.');
+                  return;
+                }
+                setShowNew(true);
+                setLoading(true);
+                try {
+                  const { data } = await api.get('/chart-of-accounts', {
+                    params: companyId ? { company_id: companyId } : {},
+                  });
+                  setAccounts(Array.isArray(data) ? data : []);
+                } catch (err) {
+                  setAccounts([]);
+                  setShowNew(false);
+                  toast.error(err?.response?.data?.detail || 'Chart of Accounts access is required.');
+                } finally {
+                  setLoading(false);
+                }
+              }}
+              disabled={!canPostJournalEntries || !canViewChartOfAccounts}
+              title={
+                !canPostJournalEntries
+                  ? 'Journal Entry posting access is required.'
+                  : !canViewChartOfAccounts
+                    ? 'Chart of Accounts access is required to create a manual journal entry.'
+                    : 'Create a manual journal entry'
+              }
               variant="outline"
               className="h-11 w-full bg-emerald-400/25 border-emerald-300/40 text-white hover:bg-emerald-400/35 rounded-xl text-xs sm:text-sm font-semibold backdrop-blur-sm transition-all gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
             >
