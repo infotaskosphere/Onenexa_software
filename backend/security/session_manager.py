@@ -333,22 +333,44 @@ class SessionManager:
         return session_token
 
     @staticmethod
-    async def revoke_session(session_token: str) -> bool:
+    async def revoke_session(session_token: str, expected_user_id: str | None = None) -> bool:
+        """Revoke only the session belonging to expected_user_id.
+
+        The logout endpoint is authenticated separately, but the submitted
+        session_token is client-provided. Binding the revoke operation to the
+        authenticated user prevents a stale/shared-browser token from ever
+        revoking another user's Manager/Staff/Admin session.
+        """
         now = datetime.now(timezone.utc).isoformat()
         raw_db = _raw_db()
+        user_filter = {}
+        if expected_user_id is not None:
+            user_filter = {"user_id": str(expected_user_id)}
+
         result = await raw_db.session_manager.update_one(
-            {"session_token": session_token},
-            {"$set": {"status": "revoked", "logout_at": now}},
+            {"session_token": session_token, **user_filter},
+            {"$set": {"status": "revoked", "logout_at": now, "revoked_reason": "logout"}},
         )
         if result.modified_count > 0:
             return True
 
-        # Commercial SaaS sessions store only a SHA-256 token hash in the
-        # `sessions` collection. Support explicit logout for those sessions
-        # as well as replacement-triggered logout.
+        # Commercial SaaS sessions store the token hash in the sessions
+        # collection.
         token_hash = hashlib.sha256(session_token.encode("utf-8")).hexdigest()
+        query = (
+            {
+                "$and": [
+                    {"$or": [{"token_hash": token_hash}, {"session_token": session_token}]},
+                    user_filter,
+                ]
+            }
+            if user_filter
+            else {
+                "$or": [{"token_hash": token_hash}, {"session_token": session_token}]
+            }
+        )
         result = await raw_db.sessions.update_one(
-            {"$or": [{"token_hash": token_hash}, {"session_token": session_token}]},
+            query,
             {"$set": {"status": "revoked", "logout_at": now, "revoked_reason": "logout"}},
         )
         return result.modified_count > 0
