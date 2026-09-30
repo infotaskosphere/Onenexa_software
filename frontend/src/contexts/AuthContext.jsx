@@ -155,8 +155,20 @@ export const AuthProvider = ({ children }) => {
   }, [user, isPlatformOwnerAccount]);
 
   useEffect(() => {
-    const handleSessionReplacement = () => {
+    const handleSessionReplacement = (event) => {
       if (isPlatformOwnerAccount(user)) return;
+      if (window.__TASKO_LOGOUT_IN_PROGRESS__) return;
+
+      // Only the session whose bearer token actually received SESSION_REPLACED
+      // may be logged out. A stale request belonging to a previous account in
+      // this tab must never terminate the newly authenticated account.
+      const eventToken = event?.detail?.failedToken || null;
+      const currentToken =
+        sessionStorage.getItem("token") ||
+        localStorage.getItem("token") ||
+        null;
+      if (eventToken && currentToken && eventToken !== currentToken) return;
+
       forceLogoutForReplacement();
     };
     window.addEventListener("taskosphere:session-replaced", handleSessionReplacement);
@@ -168,7 +180,7 @@ export const AuthProvider = ({ children }) => {
     if (isPlatformOwnerAccount(user)) return undefined;
     let cancelled = false;
     const checkCurrentSession = async () => {
-      const token = localStorage.getItem("token") || sessionStorage.getItem("token");
+      const token = sessionStorage.getItem("token") || localStorage.getItem("token");
       if (!token || cancelled || window.__TASKO_LOGOUT_IN_PROGRESS__) return;
       try {
         const response = await api.get("/auth/me", { _silent: true, _skipReadyGate: true });
@@ -261,7 +273,7 @@ export const AuthProvider = ({ children }) => {
         const currentToken = sessionStorage.getItem("token") || localStorage.getItem("token");
         if (currentToken !== token) return;
         const freshUser = normalizeTenantContext(meRes.data);
-        const storage = localStorage.getItem("token") ? localStorage : sessionStorage;
+        const storage = sessionStorage.getItem("token") ? sessionStorage : localStorage;
         storage.setItem("user", JSON.stringify(freshUser));
         setUser(freshUser);
         autoAuthenticateAgent(token, freshUser.id).catch(() => {});
