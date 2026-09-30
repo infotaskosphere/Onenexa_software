@@ -57,38 +57,68 @@ export const AuthProvider = ({ children }) => {
     };
   };
   const getStoredAuth = () => ({
-    token: localStorage.getItem("token") || sessionStorage.getItem("token"),
-    storedUser: localStorage.getItem("user") || sessionStorage.getItem("user"),
-    sessionToken: localStorage.getItem("session_token") || sessionStorage.getItem("session_token"),
+    token: sessionStorage.getItem("token") || localStorage.getItem("token"),
+    storedUser: sessionStorage.getItem("user") || localStorage.getItem("user"),
+    sessionToken: sessionStorage.getItem("session_token") || localStorage.getItem("session_token"),
   });
   const persistAuth = (token, userData, rememberMe = false, sessionToken = null) => {
-    const storage = rememberMe ? localStorage : sessionStorage;
-    storage.setItem("token", token);
-    storage.setItem("user", JSON.stringify(normalizeTenantContext(userData)));
-    if (sessionToken) {
-      storage.setItem("session_token", sessionToken);
-      localStorage.setItem("session_token", sessionToken);
-      const isOwner = matrixIsPlatformOwner(userData);
-      if (!isOwner) {
-        localStorage.setItem("taskosphere_active_session_token", sessionToken);
-        const sessionEmail = String(userData?.email || "").trim().toLowerCase();
-        if (sessionEmail) localStorage.setItem("taskosphere_active_session_email", sessionEmail);
+    const normalizedUser = normalizeTenantContext(userData);
+    const serializedUser = JSON.stringify(normalizedUser);
+
+    // Every browser tab owns its live auth state in sessionStorage. localStorage
+    // is only a durable fallback for browser restart.
+    sessionStorage.setItem("token", token);
+    sessionStorage.setItem("user", serializedUser);
+    if (sessionToken) sessionStorage.setItem("session_token", sessionToken);
+
+    if (rememberMe) {
+      localStorage.setItem("token", token);
+      localStorage.setItem("user", serializedUser);
+      if (sessionToken) localStorage.setItem("session_token", sessionToken);
+    }
+
+    // Scope single-session signalling to the concrete user identity so a
+    // different account logging in/out in another tab cannot affect this tab.
+    if (sessionToken && !matrixIsPlatformOwner(normalizedUser)) {
+      const userId = String(normalizedUser?.id || "").trim();
+      if (userId) {
+        localStorage.setItem("taskosphere_active_session_token:" + userId, sessionToken);
       }
     }
+
     api.defaults.headers.common["Authorization"] = `Bearer ${token}`;
   };
-  const clearStorage = () => {
-    [
-      "token",
-      "user",
-      "session_token",
-      "taskosphere_last_active",
-      "taskosphere_tab_closed",
-      "taskosphere_keep_signed_in",
-      "taskosphere_active_session_token",
-      "taskosphere_active_session_email",
-    ].forEach((key) => localStorage.removeItem(key));
+  const clearStorage = (ownedToken = null, ownedUserId = null) => {
     ["token", "user", "session_token"].forEach((key) => sessionStorage.removeItem(key));
+
+    // localStorage is shared across tabs. Remove its auth copy only if it is
+    // the exact token owned by this tab/user.
+    try {
+      const localToken = localStorage.getItem("token");
+      if (ownedToken && localToken === ownedToken) {
+        ["token", "user", "session_token"].forEach((key) => localStorage.removeItem(key));
+      }
+    } catch {}
+
+    if (ownedUserId) {
+      try {
+        localStorage.removeItem(
+          "taskosphere_active_session_token:" + String(ownedUserId).trim()
+        );
+      } catch {}
+    }
+
+    try {
+      if (
+        ownedToken &&
+        localStorage.getItem("taskosphere_active_session_token") === ownedToken
+      ) {
+        localStorage.removeItem("taskosphere_active_session_token");
+        localStorage.removeItem("taskosphere_active_session_email");
+      }
+    } catch {}
+
+    localStorage.removeItem("taskosphere_tab_closed");
     purgeCompanyScopedCaches();
     delete api.defaults.headers.common["Authorization"];
   };
@@ -114,7 +144,9 @@ export const AuthProvider = ({ children }) => {
     if (window.__TASKO_SESSION_REPLACEMENT_LOGGED_OUT__) return;
     window.__TASKO_SESSION_REPLACEMENT_LOGGED_OUT__ = true;
     authGenerationRef.current += 1;
-    clearStorage();
+    const ownedToken = sessionStorage.getItem("token") || localStorage.getItem("token");
+    const ownedUserId = String(user?.id || "").trim();
+    clearStorage(ownedToken, ownedUserId);
     resetAgentAuth();
     window.__STOP_ACTIVITY__ = true;
     setUser(null);
@@ -153,7 +185,7 @@ export const AuthProvider = ({ children }) => {
 
         if (!permissionsChanged && !licenseContextChanged) return;
 
-        const storage = localStorage.getItem("token") ? localStorage : sessionStorage;
+        const storage = sessionStorage.getItem("token") ? sessionStorage : localStorage;
         storage.setItem("user", JSON.stringify(freshUser));
         setUser(freshUser);
 
@@ -179,12 +211,16 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     const handleStorageChange = (e) => {
       if (isPlatformOwnerAccount(user)) return;
-      if (e.key === "taskosphere_active_session_token") {
+      const myUserId = String(user?.id || "").trim();
+      const scopedKey = myUserId
+        ? "taskosphere_active_session_token:" + myUserId
+        : "";
+      if (scopedKey && e.key === scopedKey) {
         const newSession = e.newValue;
-        const currentSession = localStorage.getItem("session_token") || sessionStorage.getItem("session_token");
-        const activeEmail = localStorage.getItem("taskosphere_active_session_email");
-        const myEmail = String(user?.email || "").trim().toLowerCase();
-        if (newSession && currentSession && newSession !== currentSession && (!activeEmail || activeEmail === myEmail)) {
+        const currentSession =
+          sessionStorage.getItem("session_token") ||
+          localStorage.getItem("session_token");
+        if (newSession && currentSession && newSession !== currentSession) {
           forceLogoutForReplacement();
         }
       }
@@ -222,7 +258,7 @@ export const AuthProvider = ({ children }) => {
         api.defaults.headers.common["Authorization"] = `Bearer ${token}`;
         const meRes = await api.get("/auth/me");
         if (cancelled || generation !== authGenerationRef.current || window.__TASKO_LOGOUT_IN_PROGRESS__) return;
-        const currentToken = localStorage.getItem("token") || sessionStorage.getItem("token");
+        const currentToken = sessionStorage.getItem("token") || localStorage.getItem("token");
         if (currentToken !== token) return;
         const freshUser = normalizeTenantContext(meRes.data);
         const storage = localStorage.getItem("token") ? localStorage : sessionStorage;
@@ -233,7 +269,11 @@ export const AuthProvider = ({ children }) => {
       catch (error) {
         if (cancelled || generation !== authGenerationRef.current || window.__TASKO_LOGOUT_IN_PROGRESS__) return;
         if (error.message === "Network Error") setUser(normalizeTenantContext(JSON.parse(storedUser)));
-        else if (error.response && [401, 403].includes(error.response.status)) { clearStorage(); setUser(null); }
+        else if (error.response && [401, 403].includes(error.response.status)) {
+          const ownedUserId = JSON.parse(storedUser || "{}")?.id || "";
+          clearStorage(token, ownedUserId);
+          setUser(null);
+        }
         else console.error("Session restore error:", error);
       }
       finally { if (!cancelled) setLoading(false); }
@@ -244,8 +284,9 @@ export const AuthProvider = ({ children }) => {
 
   const login = (responseData, rememberMe = false) => { const token = responseData?.access_token || responseData?.token; const userData = responseData?.user || responseData?.data?.user; const sessionToken = responseData?.session_token || responseData?.data?.session_token || null; if (!token || !userData) { console.error("Invalid login response:", responseData); return false; } const normalizedUser = normalizeTenantContext(userData); purgeCompanyScopedCaches(); authGenerationRef.current += 1; window.__TASKO_SESSION_REPLACEMENT_LOGGED_OUT__ = false; window.__TASKO_LOGOUT_IN_PROGRESS__ = false; persistAuth(token, normalizedUser, rememberMe, sessionToken); setUser(normalizedUser); window.__STOP_ACTIVITY__ = false; autoAuthenticateAgent(token, normalizedUser.id).catch(() => {}); return true; };
   const logout = async () => {
-    const token = localStorage.getItem("token") || sessionStorage.getItem("token");
-    const sessionToken = localStorage.getItem("session_token") || sessionStorage.getItem("session_token");
+    const token = sessionStorage.getItem("token") || localStorage.getItem("token");
+    const sessionToken = sessionStorage.getItem("session_token") || localStorage.getItem("session_token");
+    const ownedUserId = String(user?.id || "").trim();
     authGenerationRef.current += 1;
     window.__TASKO_LOGOUT_IN_PROGRESS__ = true;
     window.__STOP_ACTIVITY__ = true;
@@ -253,7 +294,7 @@ export const AuthProvider = ({ children }) => {
 
     // Invalidate the client session before the server revoke so protected
     // components unmount immediately and stale auth responses cannot restore it.
-    clearStorage();
+    clearStorage(token, ownedUserId);
     setUser(null);
 
     try {
