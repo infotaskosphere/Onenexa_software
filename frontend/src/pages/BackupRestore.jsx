@@ -88,7 +88,6 @@ export default function BackupRestore() {
 
       const response = await api.post('/app-backup/create', form, {
         responseType: 'blob',
-        headers: { 'Content-Type': 'multipart/form-data' },
       });
 
       const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
@@ -123,9 +122,7 @@ export default function BackupRestore() {
       form.append('backup', restoreFile);
       form.append('password', restorePassword);
       form.append('confirmation', restoreConfirm);
-      const { data } = await api.post('/app-backup/restore', form, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
+      const { data } = await api.post('/app-backup/restore', form);
       toast.success('Restore completed: ' + (data.restored_documents || 0) + ' documents restored.');
       setRestoreFile(null);
       setRestorePassword('');
