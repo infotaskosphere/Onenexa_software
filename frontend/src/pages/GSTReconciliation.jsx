@@ -584,6 +584,9 @@ const _gstinInFlight = new Map();
 
 const GSTIN_PATTERN = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
 
+/** Module-scope portalNameMap fallback to guarantee portalNameMap is always defined in all scopes */
+const portalNameMap = {};
+
 /**
  * Main entry point. Returns { tradeName, legalName, state, stateCode, entityType, source }.
  * Always resolves (never rejects). Falls through all sources silently.
@@ -6077,6 +6080,28 @@ export default function GSTReconciliation() {
   const [company,         setCompany]          = useState(EMPTY_COMPANY);
   const [loading,         setLoading]          = useState(false);
   const [results,         setResults]          = useState(null);
+
+  // Map portal trade names from active reconciliation results for fast lookup across the component
+  const portalNameMap = React.useMemo(() => {
+    const map = {};
+    if (!results) return map;
+    const all = [
+      ...(results.matched || []),
+      ...(results.mismatch || []),
+      ...(results.portalOnly || []),
+      ...(results.booksOnly || []),
+    ];
+    all.forEach(p => {
+      const pInv = p.portal?.portal || p.portal;
+      const g = pInv?.gstin;
+      const name = pInv?.tradeOrLegalName;
+      if (g && name) {
+        map[g.toUpperCase()] = name;
+      }
+    });
+    return map;
+  }, [results]);
+
   const [activeTab,       setActiveTab]        = useState('matched');
   const [showCo,          setShowCo]           = useState(true);
   const [itcModal,        setItcModal]         = useState(null); // null | 'claimable' | 'toBook' | 'atRisk'
@@ -6419,7 +6444,7 @@ export default function GSTReconciliation() {
       }
     });
 
-    const missing = [...uniqueGstins].filter(g => !manualTradeNames[g] && !portalNames[g]);
+    const missing = [...uniqueGstins].filter(g => !manualTradeNames[g] && !portalNames[g] && !(portalNameMap && portalNameMap[g]));
     if (!missing.length) {
       toast.success('All supplier company names are already resolved in the report!');
       return;
@@ -6474,7 +6499,7 @@ export default function GSTReconciliation() {
       setAutofetchingSuppliers(false);
       setSupplierFetchProgress(null);
     }
-  }, [results, manualTradeNames]);
+  }, [results, manualTradeNames, portalNameMap]);
 
   // Auto-save the original (pre-edit) baseline of an opened history session.
   // Returns a Promise that resolves when the snapshot is safely persisted.
