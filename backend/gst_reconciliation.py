@@ -798,6 +798,96 @@ async def list_clients_for_gst(current_user: User=Depends(get_current_user)):
     return {"clients": docs}
 
 
+@router.post("/auto-register-client")
+async def auto_register_gst_client(body: dict, current_user: User = Depends(get_current_user)):
+    """Automatically register or enrich a client from autofetched GSTIN details so it appears in client lists."""
+    gstin = (body.get("gstin") or "").upper().strip()
+    company_name = (body.get("company_name") or body.get("name") or "").strip()
+    if not gstin or not company_name:
+        return {"status": "skipped", "message": "Missing GSTIN or company name"}
+
+    now_iso = _now()
+    # Check if client with this GSTIN or company name already exists
+    existing = await db.clients.find_one({
+        "$or": [
+            {"gstin": gstin},
+            {"company_name": {"$regex": f"^{re.escape(company_name)}$", "$options": "i"}}
+        ]
+    })
+    if existing:
+        updates = {}
+        if not existing.get("gstin"):
+            updates["gstin"] = gstin
+        if not existing.get("address") and body.get("address"):
+            updates["address"] = body.get("address")
+        if not existing.get("pan") and body.get("pan"):
+            updates["pan"] = body.get("pan")
+        if updates:
+            await db.clients.update_one({"id": existing["id"]}, {"$set": updates})
+        # Keep trade names in sync
+        await db.gst_trade_names.update_one(
+            {"gstin": gstin},
+            {"$set": {"gstin": gstin, "name": company_name, "updated_at": now_iso, "updated_by": current_user.id}},
+            upsert=True
+        )
+        return {
+            "status": "exists",
+            "client": {
+                "id": existing["id"],
+                "company_name": existing.get("company_name") or company_name,
+                "gstin": gstin,
+                "pan": existing.get("pan") or body.get("pan"),
+                "address": existing.get("address") or body.get("address")
+            }
+        }
+
+    # Determine client type from 4th character of PAN (pos 6 in GSTIN)
+    pan = body.get("pan") or (gstin[2:12] if len(gstin) >= 12 else "")
+    c_letter = pan[3] if len(pan) >= 4 else ""
+    type_map = {
+        "C": "pvt_ltd", "P": "proprietor", "F": "partnership",
+        "L": "llp", "H": "huf", "T": "trust", "A": "other", "B": "other", "G": "other"
+    }
+    client_type = type_map.get(c_letter, "proprietor")
+
+    cid = str(uuid.uuid4())
+    new_doc = {
+        "_id": cid,
+        "id": cid,
+        "company_name": company_name,
+        "gstin": gstin,
+        "pan": pan,
+        "client_type": client_type,
+        "address": body.get("address") or None,
+        "city": body.get("city") or None,
+        "state": body.get("state") or None,
+        "phone": body.get("phone") or None,
+        "email": body.get("email") or None,
+        "status": "active",
+        "approval_status": "approved",
+        "created_by": current_user.id,
+        "created_at": now_iso,
+    }
+    await db.clients.insert_one(new_doc)
+    # Also save to shared trade names
+    await db.gst_trade_names.update_one(
+        {"gstin": gstin},
+        {"$set": {"gstin": gstin, "name": company_name, "updated_at": now_iso, "updated_by": current_user.id}},
+        upsert=True
+    )
+    return {
+        "status": "created",
+        "client": {
+            "id": cid,
+            "company_name": company_name,
+            "gstin": gstin,
+            "pan": pan,
+            "client_type": client_type,
+            "address": new_doc["address"]
+        }
+    }
+
+
 @router.post("/save-session")
 async def save_session_from_frontend(body: SessionSaveBody, current_user: User=Depends(get_current_user)):
     """Persist a reconciliation session run in browser."""
@@ -1160,16 +1250,59 @@ async def gstin_name_lookup(gstin: str, current_user: User = Depends(get_current
 
 @router.post("/gstin-lookup-batch")
 async def gstin_name_lookup_batch(body: GSTINBatchBody, current_user: User = Depends(get_current_user)):
-    """Batch GSTIN lookup. Returns {gstin: {trade_name, legal_name, ...}} for up to 50 GSTINs."""
+    """Batch GSTIN lookup. Returns {gstin: {trade_name, legal_name, ...}} for up to 50 GSTINs.
+    Checks local database and shared trade names first for instant sub-second responses."""
     items = [g.upper().strip() for g in (body.gstins or []) if g and len(g.strip()) == 15][:50]
     if not items:
         return {"results": {}, "count": 0}
-    import asyncio as _asyncio
-    out = await _asyncio.gather(*[_scrape_gstin_name(g) for g in items], return_exceptions=True)
+
     results = {}
-    for r in out:
-        if isinstance(r, dict) and r.get("gstin"):
-            results[r["gstin"]] = r
+    # 1. Fast cache check from db.gst_trade_names and db.clients
+    try:
+        trade_docs = await db.gst_trade_names.find({"gstin": {"$in": items}}, {"_id": 0, "gstin": 1, "name": 1}).to_list(100)
+        for doc in trade_docs:
+            if doc.get("gstin") and doc.get("name"):
+                results[doc["gstin"]] = {
+                    "gstin": doc["gstin"],
+                    "trade_name": doc["name"],
+                    "legal_name": doc["name"],
+                    "state": "",
+                    "source": "db_trade_names",
+                }
+
+        client_docs = await db.clients.find({"gstin": {"$in": items}}, {"_id": 0, "gstin": 1, "company_name": 1, "state": 1}).to_list(100)
+        for doc in client_docs:
+            g = doc.get("gstin")
+            if g and doc.get("company_name") and g not in results:
+                results[g] = {
+                    "gstin": g,
+                    "trade_name": doc["company_name"],
+                    "legal_name": doc["company_name"],
+                    "state": doc.get("state") or "",
+                    "source": "db_clients",
+                }
+    except Exception as exc:
+        logger.debug("DB batch trade lookup skipped: %s", exc)
+
+    pending = [g for g in items if g not in results]
+    if pending:
+        import asyncio as _asyncio
+        out = await _asyncio.gather(*[_scrape_gstin_name(g) for g in pending], return_exceptions=True)
+        for r in out:
+            if isinstance(r, dict) and r.get("gstin"):
+                g = r["gstin"]
+                results[g] = r
+                tn = (r.get("trade_name") or r.get("legal_name") or "").strip()
+                if tn:
+                    try:
+                        await db.gst_trade_names.update_one(
+                            {"gstin": g},
+                            {"$set": {"gstin": g, "name": tn, "updated_at": _now()}},
+                            upsert=True
+                        )
+                    except Exception:
+                        pass
+
     return {"results": results, "count": len(results)}
 
 

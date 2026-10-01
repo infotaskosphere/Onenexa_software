@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import AIFileInsights from '@/components/ui/AIFileInsights.jsx';
+import { lookupGSTIN, decodeGSTIN } from '@/lib/gstApi';
 
 /* ═══════════════════════════════════════════════════════════════════════════
    PARSING UTILITIES
@@ -600,108 +601,66 @@ async function clientGstinLookup(gstin) {
   const staticInfo = decodeGstin(g);
 
   const promise = (async () => {
-    // ── Source 1: GST portal public JSON API ──────────────────────────────
+    // ── Primary Source: Free GST API backend proxy (CORS-safe server-side) ──
     try {
-      const ctrl = new AbortController();
-      const tid  = setTimeout(() => ctrl.abort(), 6000);
-      const r = await fetch(
-        `https://services.gst.gov.in/services/api/public/gstin?gstin=${g}`,
-        { signal: ctrl.signal, headers: { Accept: 'application/json', 'Cache-Control': 'no-cache' } }
-      );
-      clearTimeout(tid);
-      if (r.ok) {
-        const d = await r.json();
-        const tn = ((d.tradeNam || d.tradeName || '')).trim();
-        const ln = ((d.lgnm    || d.legalName  || '')).trim();
-        if (tn || ln) {
-          const out = { tradeName:tn, legalName:ln, state:staticInfo.state,
-                        stateCode:staticInfo.stateCode, entityType:staticInfo.entityType,
-                        source:'gst_public_api' };
-          _gstinCache.set(g, out); _gstinInFlight.delete(g); return out;
+      const res = await lookupGSTIN(g);
+      if (res) {
+        const tn = (res.trade_name || res.tradeName || '').trim();
+        const ln = (res.legal_name || res.legalName || '').trim();
+        const name = tn || ln;
+        if (name && !name.includes('(') && !name.includes('Unverified')) {
+          const out = {
+            tradeName: tn || ln,
+            legalName: ln || tn,
+            state: res.state_name || res.state || staticInfo.state,
+            stateCode: res.state_code || staticInfo.stateCode,
+            entityType: res.entity_type || staticInfo.entityType,
+            pan: res.pan || staticInfo.pan,
+            address: res.principal_place_of_business?.address || '',
+            source: res.source || 'free_gst_api',
+            valid: true,
+          };
+          _gstinCache.set(g, out);
+          _gstinInFlight.delete(g);
+          return out;
         }
       }
-    } catch (_) { /* timed-out or CORS-blocked — continue */ }
+    } catch (_) { /* continue to next source */ }
 
-    // ── Source 2: GST taxpayer-details search API ─────────────────────────
+    // ── Secondary Source: Backend GSTIN lookup route ──────────────────────
     try {
-      const ctrl = new AbortController();
-      const tid  = setTimeout(() => ctrl.abort(), 6000);
-      const r = await fetch(
-        `https://services.gst.gov.in/services/api/search/taxpayerDetails?gstin=${g}`,
-        { signal: ctrl.signal, headers: { Accept: 'application/json' } }
-      );
-      clearTimeout(tid);
-      if (r.ok) {
-        const d = await r.json();
-        const tn = (d.tradeNam || '').trim();
-        const ln = (d.lgnm     || '').trim();
-        if (tn || ln) {
-          const out = { tradeName:tn, legalName:ln, state:staticInfo.state,
-                        stateCode:staticInfo.stateCode, entityType:staticInfo.entityType,
-                        source:'gst_taxpayer_api' };
-          _gstinCache.set(g, out); _gstinInFlight.delete(g); return out;
-        }
-      }
-    } catch (_) { /* continue */ }
-
-    // ── Source 3: CORS proxy → knowyourgst.com (HTML scrape) ─────────────
-    try {
-      const target   = `https://www.knowyourgst.com/gst-number-search/${g}/`;
-      const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(target)}`;
-      const ctrl = new AbortController();
-      const tid  = setTimeout(() => ctrl.abort(), 8000);
-      const r = await fetch(proxyUrl, { signal: ctrl.signal });
-      clearTimeout(tid);
-      if (r.ok) {
-        const d = await r.json();
-        const html = d.contents || '';
-        let tn = '', ln = '';
-        // knowyourgst HTML pattern: label cell → value cell
-        const tmMatch = html.match(/Trade\s*Name[^<]*<\/[^>]+>\s*<[^>]+>\s*([^<]{3,80})/i);
-        if (tmMatch) tn = tmMatch[1].trim();
-        const lnMatch = html.match(/Legal\s*Name[^<]*<\/[^>]+>\s*<[^>]+>\s*([^<]{3,80})/i);
-        if (lnMatch) ln = lnMatch[1].trim();
-        // Fallback: title tag (knowyourgst includes business name in title)
-        if (!tn && !ln) {
-          const titleMatch = html.match(/<title>([^<]+)<\/title>/i);
-          if (titleMatch) {
-            let t = titleMatch[1].replace(/[\|\-].*KnowYourGST.*/i, '').trim();
-            if (t && !t.toUpperCase().includes(g)) tn = t;
-          }
-        }
-        if (tn || ln) {
-          const out = { tradeName:tn, legalName:ln, state:staticInfo.state,
-                        stateCode:staticInfo.stateCode, entityType:staticInfo.entityType,
-                        source:'knowyourgst_proxy' };
-          _gstinCache.set(g, out); _gstinInFlight.delete(g); return out;
-        }
-      }
-    } catch (_) { /* proxy down — continue */ }
-
-    // ── Source 4: Backend API (last resort, keeps old behaviour) ──────────
-    try {
-      const ctrl = new AbortController();
-      const tid  = setTimeout(() => ctrl.abort(), 8000);
-      const r = await fetch(`/api/gst-reconciliation/gstin-lookup/${g}`, {
-        signal: ctrl.signal,
-        headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}`, Accept: 'application/json' },
-      });
-      clearTimeout(tid);
-      if (r.ok) {
-        const d = await r.json();
+      const r = await api.get(`/gst-reconciliation/gstin-lookup/${g}`, { _silent: true });
+      if (r.data) {
+        const d = r.data;
         const tn = (d.trade_name || '').trim();
         const ln = (d.legal_name || '').trim();
         if (tn || ln) {
-          const out = { tradeName:tn, legalName:ln, state:staticInfo.state,
-                        stateCode:staticInfo.stateCode, entityType:staticInfo.entityType,
-                        source:'backend_api' };
-          _gstinCache.set(g, out); _gstinInFlight.delete(g); return out;
+          const out = {
+            tradeName: tn || ln,
+            legalName: ln || tn,
+            state: d.state || staticInfo.state,
+            stateCode: staticInfo.stateCode,
+            entityType: staticInfo.entityType,
+            pan: staticInfo.pan,
+            address: '',
+            source: 'backend_api',
+            valid: true,
+          };
+          _gstinCache.set(g, out);
+          _gstinInFlight.delete(g);
+          return out;
         }
       }
-    } catch (_) { /* backend unreachable — return static info */ }
+    } catch (_) { /* backend unreachable */ }
 
-    // All sources failed — return static info decoded from GSTIN itself
-    const out = { tradeName:'', legalName:'', ...staticInfo, source:'static_decode_only' };
+    // All sources failed — return static info decoded from GSTIN structure
+    const out = {
+      tradeName: '',
+      legalName: '',
+      ...staticInfo,
+      source: 'static_decode_only',
+      valid: GSTIN_PATTERN.test(g),
+    };
     _gstinCache.set(g, out);
     _gstinInFlight.delete(g);
     return out;
@@ -6318,51 +6277,194 @@ export default function GSTReconciliation() {
           const res = await clientGstinLookup(g);
           const name = res.tradeName || res.legalName || '';
           if (name && !cancelled) {
-            // Use functional update so we never overwrite a name the user just typed
             setManualTradeNames(prev => {
-              if (prev[g.toUpperCase()]) return prev;  // already set — don't overwrite
+              if (prev[g.toUpperCase()]) return prev;
               const updated = { ...prev, [g.toUpperCase()]: name };
               try { localStorage.setItem('gst_manual_trade_names', JSON.stringify(updated)); } catch (_) {}
               return updated;
             });
           }
         } catch (_) { /* silent */ }
-        // 350 ms between requests to avoid hammering public APIs
-        await new Promise(r => setTimeout(r, 350));
+        await new Promise(r => setTimeout(r, 200));
       }
     })();
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [results?.booksOnly]);
 
-
   const [gstinLookupLoading, setGstinLookupLoading] = useState(false);
+  const [autofetchingSuppliers, setAutofetchingSuppliers] = useState(false);
+  const [supplierFetchProgress, setSupplierFetchProgress] = useState(null);
   const gstinLookupTimer = useRef(null);
+
+  // Auto-register and add client to software client list (both in React state and MongoDB)
+  const handleAutoRegisterClient = useCallback(async (gstinVal, nameVal, details = {}) => {
+    if (!gstinVal || !nameVal) return;
+    try {
+      const res = await api.post('/gst-reconciliation/auto-register-client', {
+        gstin: gstinVal,
+        company_name: nameVal,
+        name: nameVal,
+        pan: details.pan || gstinVal.slice(2, 12),
+        address: details.address || '',
+        state: details.state || '',
+      });
+      if (res.data?.client) {
+        const cl = res.data.client;
+        setClients(prev => {
+          const idx = prev.findIndex(c => c.gstin === gstinVal || c.id === cl.id);
+          if (idx >= 0) {
+            const next = [...prev];
+            next[idx] = { ...next[idx], ...cl };
+            return next;
+          }
+          return [cl, ...prev];
+        });
+        setSelectedClient(cl);
+      }
+    } catch (_) {
+      // Local state fallback
+      setClients(prev => {
+        if (prev.some(c => c.gstin === gstinVal)) return prev;
+        const newC = {
+          id: `auto_${gstinVal}`,
+          company_name: nameVal,
+          gstin: gstinVal,
+          pan: details.pan || gstinVal.slice(2, 12),
+          address: details.address || '',
+        };
+        setSelectedClient(newC);
+        return [newC, ...prev];
+      });
+    }
+  }, []);
+
+  const triggerCompanyAutofetch = useCallback(async (gstinToFetch) => {
+    const g = (gstinToFetch || company.gstin || '').trim().toUpperCase();
+    if (!GSTIN_PATTERN.test(g)) {
+      toast.error('Please enter a valid 15-character GSTIN');
+      return;
+    }
+    setGstinLookupLoading(true);
+    try {
+      const result = await clientGstinLookup(g);
+      const name = result.tradeName || result.legalName || '';
+      const pan = result.pan || g.slice(2, 12);
+      const address = result.address || (result.state ? `Registered Office, ${result.state}` : '');
+      const currentYear = new Date().getFullYear();
+      const currentMonth = new Date().getMonth() + 1;
+      const fy = currentMonth >= 4 ? `${currentYear}-${String(currentYear + 1).slice(2)}` : `${currentYear - 1}-${String(currentYear).slice(2)}`;
+
+      setCompany(prev => ({
+        ...prev,
+        gstin: g,
+        name: name || prev.name,
+        pan: pan || prev.pan,
+        address: prev.address || address,
+        fy: prev.fy || fy,
+      }));
+
+      if (name) {
+        toast.success(`✨ Company "${name}" autofetched & added to client list!`, { duration: 4000 });
+        await handleAutoRegisterClient(g, name, { pan, address, state: result.state });
+      } else if (result.state) {
+        toast.info(`GSTIN Valid (${result.state}) — PAN: ${pan}`, { duration: 3000 });
+      }
+    } catch (err) {
+      toast.error('Could not autofetch details for GSTIN');
+    } finally {
+      setGstinLookupLoading(false);
+    }
+  }, [company.gstin, handleAutoRegisterClient]);
 
   const setCo = (k, v) => {
     setCompany(p => ({ ...p, [k]: v }));
-    // Auto-fetch company name from GST portal when a valid GSTIN is typed
+    // Auto-fetch company name & add to list when a valid GSTIN is typed
     if (k === 'gstin') {
       const g = v.trim().toUpperCase();
       clearTimeout(gstinLookupTimer.current);
       if (GSTIN_PATTERN.test(g)) {
-        gstinLookupTimer.current = setTimeout(async () => {
-          setGstinLookupLoading(true);
-          try {
-            const result = await clientGstinLookup(g);
-            const name = result.tradeName || result.legalName || '';
-            if (name) {
-              setCompany(prev => ({ ...prev, name: prev.name || name }));
-              toast.success(`Company name fetched: ${name}`, { duration: 3000 });
-            } else if (result.state) {
-              toast.info(`GSTIN valid — ${result.entityType}, ${result.state}`, { duration: 2500 });
-            }
-          } catch (_) { /* silent */ }
-          finally { setGstinLookupLoading(false); }
-        }, 800);
+        gstinLookupTimer.current = setTimeout(() => {
+          triggerCompanyAutofetch(g);
+        }, 500);
       }
     }
   };
+
+  // Comprehensive Batch Autofetch for all supplier names in the current reconciliation
+  const autofetchMissingSupplierNames = useCallback(async () => {
+    if (!results) return;
+    const allPairs = [
+      ...(results.matched || []),
+      ...(results.mismatch || []),
+      ...(results.portalOnly || []),
+      ...(results.booksOnly || []),
+    ];
+
+    const uniqueGstins = new Set();
+    allPairs.forEach(p => {
+      const pg = p.portal?.portal?.gstin || p.portal?.gstin;
+      const bg = p.books?.books?.gstin || p.books?.gstin;
+      if (pg && GSTIN_PATTERN.test(pg)) uniqueGstins.add(pg.toUpperCase());
+      if (bg && GSTIN_PATTERN.test(bg)) uniqueGstins.add(bg.toUpperCase());
+    });
+
+    const missing = [...uniqueGstins].filter(g => !manualTradeNames[g] && !portalNameMap[g]);
+    if (!missing.length) {
+      toast.success('All supplier company names are already resolved in the report!');
+      return;
+    }
+
+    setAutofetchingSuppliers(true);
+    setSupplierFetchProgress({ current: 0, total: missing.length });
+
+    try {
+      const chunkSize = 30;
+      const newlyResolved = {};
+
+      for (let i = 0; i < missing.length; i += chunkSize) {
+        const chunk = missing.slice(i, i + chunkSize);
+        try {
+          const res = await api.post('/gst-reconciliation/gstin-lookup-batch', { gstins: chunk });
+          const batchResults = res.data?.results || {};
+          Object.entries(batchResults).forEach(([g, info]) => {
+            const name = info?.trade_name || info?.legal_name;
+            if (name) newlyResolved[g.toUpperCase()] = name;
+          });
+        } catch (_) {
+          for (const g of chunk) {
+            try {
+              const info = await clientGstinLookup(g);
+              const name = info?.tradeName || info?.legalName;
+              if (name) newlyResolved[g.toUpperCase()] = name;
+            } catch (_) {}
+          }
+        }
+        setSupplierFetchProgress({ current: Math.min(i + chunkSize, missing.length), total: missing.length });
+      }
+
+      if (Object.keys(newlyResolved).length > 0) {
+        setManualTradeNames(prev => {
+          const updated = { ...prev, ...newlyResolved };
+          try { localStorage.setItem('gst_manual_trade_names', JSON.stringify(updated)); } catch (_) {}
+          return updated;
+        });
+
+        try {
+          await api.post('/gst-reconciliation/trade-names/batch', { names: newlyResolved });
+        } catch (_) {}
+
+        toast.success(`✨ Autofetched ${Object.keys(newlyResolved).length} supplier company names into list!`);
+      } else {
+        toast.info('Supplier verification completed. Status and states mapped.');
+      }
+    } catch (err) {
+      toast.error('Error during supplier autofetch');
+    } finally {
+      setAutofetchingSuppliers(false);
+      setSupplierFetchProgress(null);
+    }
+  }, [results, manualTradeNames, portalNameMap]);
 
   // Auto-save the original (pre-edit) baseline of an opened history session.
   // Returns a Promise that resolves when the snapshot is safely persisted.
@@ -6520,22 +6622,38 @@ export default function GSTReconciliation() {
       const meta = extractPortalMetadata(wb);
       // Auto-fill period only if user hasn't typed one yet
       if (meta.period) setPeriod(prev => prev || meta.period);
-      // Auto-fill company fields from the portal header
-      setCompany(prev => ({
-        ...prev,
-        name:  prev.name  || meta.tradeName || '',
-        gstin: prev.gstin || meta.gstin     || '',
-      }));
-      if (meta.period || meta.tradeName || meta.gstin) {
-        toast.success('Period & company auto-detected from GSTR-2B file', { duration: 3000 });
-      }
-      // If we got a GSTIN and no name yet, trigger client-side GSTIN lookup
-      if (meta.gstin && !meta.tradeName) {
+
+      const targetG = meta.gstin || company.gstin || '';
+      let targetName = meta.tradeName || '';
+
+      if (targetG && GSTIN_PATTERN.test(targetG)) {
+        setGstinLookupLoading(true);
         try {
-          const result = await clientGstinLookup(meta.gstin);
-          const name = result.tradeName || result.legalName || '';
-          if (name) setCompany(prev => ({ ...prev, name: prev.name || name }));
-        } catch (_) { /* best-effort */ }
+          const result = await clientGstinLookup(targetG);
+          targetName = targetName || result.tradeName || result.legalName || '';
+          const pan = result.pan || targetG.slice(2, 12);
+          const address = result.address || (result.state ? `Registered Office, ${result.state}` : '');
+
+          setCompany(prev => ({
+            ...prev,
+            gstin: targetG,
+            name: targetName || prev.name,
+            pan: pan || prev.pan,
+            address: prev.address || address,
+          }));
+
+          if (targetName) {
+            await handleAutoRegisterClient(targetG, targetName, { pan, address, state: result.state });
+            toast.success(`✨ Company "${targetName}" auto-detected from GSTR-2B and added to client list!`, { duration: 4000 });
+          }
+        } catch (_) {}
+        finally { setGstinLookupLoading(false); }
+      } else if (meta.period || meta.tradeName) {
+        setCompany(prev => ({
+          ...prev,
+          name: meta.tradeName || prev.name,
+        }));
+        toast.success(`Period & details auto-detected from GSTR-2B: ${meta.tradeName || meta.period}`, { duration: 3000 });
       }
     } catch (_) { /* If metadata extraction fails, silently continue */ }
   };
@@ -6566,6 +6684,11 @@ export default function GSTReconciliation() {
       const defaultTab = res.mismatch?.length ? 'mismatch' : res.portalOnly?.length ? 'portalOnly' : res.booksOnly?.length ? 'booksOnly' : 'matched';
       setActiveTab(defaultTab);
       toast.success(`Reconciliation complete — ${portalData.length} portal + ${booksData.length} books invoices.`);
+
+      // Automatically autofetch missing supplier company names in background
+      setTimeout(() => {
+        autofetchMissingSupplierNames();
+      }, 300);
 
       // Auto-save session to history
       const summary = {
@@ -7016,15 +7139,30 @@ export default function GSTReconciliation() {
                         { k:'fy',      label:'Financial Year',        icon:Calendar,   ph:'e.g. 2025-26' },
                       ].map(f => (
                         <div key={f.k}>
-                          <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1 flex items-center gap-1">
-                            {f.label}
-                            {f.k === 'gstin' && gstinLookupLoading && (
-                              <Loader2 className="h-3 w-3 animate-spin text-indigo-500 ml-1" />
+                          <div className="flex items-center justify-between mb-1">
+                            <label className="text-xs font-medium text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                              {f.label}
+                              {f.k === 'gstin' && gstinLookupLoading && (
+                                <Loader2 className="h-3 w-3 animate-spin text-indigo-500 ml-1" />
+                              )}
+                              {f.k === 'gstin' && !gstinLookupLoading && GSTIN_PATTERN.test((company.gstin||'').trim().toUpperCase()) && (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-200 dark:border-emerald-800 ml-1">
+                                  <CheckCircle2 className="h-2.5 w-2.5" /> Listed
+                                </span>
+                              )}
+                            </label>
+                            {f.k === 'gstin' && GSTIN_PATTERN.test((company.gstin||'').trim().toUpperCase()) && (
+                              <button
+                                type="button"
+                                onClick={() => triggerCompanyAutofetch()}
+                                disabled={gstinLookupLoading}
+                                className="text-[10px] font-semibold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 flex items-center gap-0.5 cursor-pointer"
+                              >
+                                <Sparkles className="h-2.5 w-2.5" />
+                                {gstinLookupLoading ? 'Fetching…' : 'Autofetch'}
+                              </button>
                             )}
-                            {f.k === 'gstin' && !gstinLookupLoading && GSTIN_PATTERN.test((company.gstin||'').trim().toUpperCase()) && (
-                              <CheckCircle2 className="h-3 w-3 text-emerald-500 ml-1" title="GSTIN validated" />
-                            )}
-                          </label>
+                          </div>
                           <div className="relative">
                             <f.icon className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400"/>
                             <input
@@ -7278,6 +7416,37 @@ export default function GSTReconciliation() {
 
               {/* ── Business-Centric Action Centre ── */}
               <div className="mb-4">
+                {/* Party & Supplier Autofetch Bar */}
+                <div className="flex items-center justify-between flex-wrap gap-2 mb-3 px-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
+                      <Building2 className="h-3.5 w-3.5 text-indigo-500" />
+                      Company &amp; Supplier Auto-Enrichment:
+                    </span>
+                    <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800">
+                      <CheckCircle2 className="h-2.5 w-2.5" /> Auto-Fetched From GSTIN
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => autofetchMissingSupplierNames()}
+                    disabled={autofetchingSuppliers}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-50 dark:bg-slate-700 hover:bg-indigo-100 dark:hover:bg-slate-600 text-indigo-700 dark:text-indigo-300 text-xs font-semibold border border-indigo-200 dark:border-slate-600 transition-all cursor-pointer shadow-xs disabled:opacity-50"
+                  >
+                    {autofetchingSuppliers ? (
+                      <>
+                        <Loader2 className="h-3.5 w-3.5 animate-spin text-indigo-600" />
+                        <span>Autofetching Names {supplierFetchProgress ? `(${supplierFetchProgress.current}/${supplierFetchProgress.total})` : '…'}</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400" />
+                        <span>Autofetch Missing Supplier Names</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
                 {/* Matched summary row — compact, not clickable */}
                 <div className="flex items-center gap-3 px-4 py-2.5 mb-3 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-700 rounded-xl">
                   <CheckCircle2 className="h-4 w-4 text-emerald-500 flex-shrink-0"/>
