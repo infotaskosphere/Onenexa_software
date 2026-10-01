@@ -39,13 +39,13 @@ body:not(.website-surface) #root .records-dashboard-bar{
    The page currently has no dedicated root class, so scope these rules to
    its unique 1400px workspace container rather than changing other modules.
    -------------------------------------------------------------------------- */
-body:not(.website-surface) #root:has([style*="max-width: 1400px"]) .shadow-sm,
-body:not(.website-surface) #root:has([style*="max-width: 1400px"]) .rounded-2xl,
-body:not(.website-surface) #root:has([style*="max-width: 1400px"]) [style*="border-radius: 16px"]{
+body:not(.website-surface) #root:has([style*="max-width: 1400px"]) main .shadow-sm:not([data-ai-drawer] *),
+body:not(.website-surface) #root:has([style*="max-width: 1400px"]) main .rounded-2xl:not([data-ai-drawer] *),
+body:not(.website-surface) #root:has([style*="max-width: 1400px"]) main [style*="border-radius: 16px"]:not([data-ai-drawer] *){
   border-radius:0!important;
 }
 
-body:not(.website-surface) #root:has([style*="max-width: 1400px"]) .shadow-sm{
+body:not(.website-surface) #root:has([style*="max-width: 1400px"]) main .shadow-sm:not([data-ai-drawer] *){
   box-shadow:0 1px 4px rgb(15 23 42 / 5%)!important;
 }
 
