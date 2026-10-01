@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { getXLSX, getJsPDF, getAutoTable } from '@/lib/lazyLibs';
 import { saveAs } from 'file-saver';
 // XLSX / jsPDF / autoTable are loaded on demand (see readWorkbook, exportPDF, exportExcel)
@@ -6730,9 +6731,18 @@ export default function GSTReconciliation() {
                 <ArrowLeftRight className="h-6 w-6 text-white"/>
               </div>
               <div>
-                <p className="text-white/70 text-xs font-medium uppercase tracking-wider mb-0.5">Compliance</p>
-                <h1 className="text-xl font-bold text-white leading-tight">GST Reconciliation</h1>
-                <p className="text-white/65 text-xs mt-0.5">Reconcile GSTR-2B (GST Portal) with Purchase Register (Books of Account)</p>
+                <p className="text-white/70 text-xs font-medium uppercase tracking-wider mb-0.5">CompliGenie · GST Sphere</p>
+                <div className="flex items-center gap-3 flex-wrap">
+                  <h1 className="text-xl font-bold text-white leading-tight">GST Sphere</h1>
+                  <Link
+                    to="/gst-portal-sync"
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/20 hover:bg-white/30 text-white text-[11px] font-semibold transition-all border border-white/25"
+                  >
+                    <Globe className="h-3 w-3" />
+                    Live Portal Sync &amp; Free API Hub →
+                  </Link>
+                </div>
+                <p className="text-white/65 text-xs mt-0.5">Reconcile GSTR-2B (GST Portal) with Purchase Register (Books) &amp; Electronic Ledgers</p>
               </div>
             </div>
             {/* Metric tiles — shown once results are loaded */}

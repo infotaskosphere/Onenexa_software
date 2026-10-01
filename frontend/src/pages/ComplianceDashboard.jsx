@@ -18,8 +18,8 @@ const MODULES = [
     color: HUB_COLORS.mediumBlue, permission: 'can_view_compliance',
   },
   {
-    path: '/gst-reconciliation', icon: ArrowLeftRight, label: 'GST Reconciliation',
-    description: 'Match GSTR-2B / purchase register data and resolve ITC mismatches.',
+    path: '/gst-reconciliation', icon: ArrowLeftRight, label: 'GST Sphere',
+    description: 'Match GSTR-2B / purchase register data, Live GST Portal sync and resolve ITC mismatches.',
     color: HUB_COLORS.emeraldGreen, permission: 'can_view_gst_reconciliation',
   },
   {

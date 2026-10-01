@@ -9,7 +9,7 @@
 export const MODULE_GUIDANCE = {
   taskosphere: 'Master switch for day-to-day work. Turning this OFF hides Tasks, To-Do, Attendance, Reminders, Action Center, Visits and the Client Portal manager for this user — even if the individual pages below are ticked.',
   finix: 'Accounting module. Grant only to finance staff: it exposes sales, purchase, bank balances and the general ledger. Journal posting and bank matching are separate, stronger rights inside it.',
-  compliance: 'Statutory work — Compliance Tracker, GST Reconciliation, Trademark Sphere, MIS and salary slips. "View" rights are safe for reviewers; "manage" rights let the user change filed/compliance status.',
+  compliance: 'Statutory work — Compliance Tracker, GST Sphere, Trademark Sphere, ROC Sphere, MIS and salary slips. "View" rights are safe for reviewers; "manage" rights let the user change filed/compliance status.',
   records: 'The records vault — DSC register, documents, client master and the password vault. Treat the Password Vault pages as the most sensitive rights in the entire app.',
   proposals: 'Pre-sales — leads, quotations and client discussions. Quotation rights include share/print, so the user can send documents on the firm\u2019s letterhead.',
   people_matrix: 'HR side of the app — directory, leave, payroll, recruitment and performance. Payroll and HR "manage" rights expose salary and personal data of colleagues.',
