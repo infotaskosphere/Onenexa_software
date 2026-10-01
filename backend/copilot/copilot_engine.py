@@ -61,7 +61,8 @@ class CopilotEngine:
         # 6. Call provider-agnostic reasoning model
         reasoning_result = await ReasoningEngine.get_response(
             prompt=query,
-            system_instruction=system_instruction
+            system_instruction=system_instruction,
+            context_data=context_info
         )
         response_text = reasoning_result["text"]
 
