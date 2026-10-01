@@ -180,7 +180,11 @@ async def lookup_gstin_details(gstin: str, force_refresh: bool = False) -> Dict[
     # Try live query to free API providers
     external_data = None
     free_api_config = await db.gst_api_config.find_one({"id": "global_config"}, {"_id": 0}) or {}
-    custom_key = free_api_config.get("api_key", "").strip()
+    custom_key = (
+        free_api_config.get("api_key", "").strip()
+        or os.environ.get("GST_API_KEY", "").strip()
+        or os.environ.get("SHEETGST_API_KEY", "").strip()
+    )
 
     # Attempt SheetGST / Free Tier public search if network available
     try:

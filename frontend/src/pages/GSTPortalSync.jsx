@@ -4,7 +4,7 @@ import {
   Landmark, RefreshCw, AlertTriangle, CheckCircle2, ShieldCheck,
   Search, Copy, Check, ExternalLink, Settings, Building2,
   FileSpreadsheet, Upload, Download, Sparkles, Database, Layers,
-  MapPin, Hash, UserCheck, ArrowRight, Play
+  MapPin, Hash, UserCheck, ArrowRight, Play, Wallet, Wifi
 } from 'lucide-react';
 import { ContentLoader } from '@/components/ui/GifLoader.jsx';
 import { Button } from '@/components/ui/button';
@@ -612,7 +612,7 @@ function GSTPortalSyncInner() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <MetricCard label="Total Liability (PMT-01)" value={fmtC(metrics?.total_liability)} icon={Landmark} color={COLORS.coral} isDark={isDark} />
               <MetricCard label="Available ITC (PMT-02)" value={fmtC(metrics?.net_available_credits)} icon={CheckCircle2} color={COLORS.emeraldGreen} isDark={isDark} />
-              <MetricCard label="Bank Cash Reserves" value={fmtC(metrics?.cash_reserves)} icon={Wifi} color={COLORS.mediumBlue} isDark={isDark} />
+              <MetricCard label="Bank Cash Reserves" value={fmtC(metrics?.cash_reserves)} icon={Wallet} color={COLORS.mediumBlue} isDark={isDark} />
               <MetricCard
                 label="Audit Discrepancy"
                 value={metrics?.discrepancy_pct === null || metrics?.discrepancy_pct === undefined ? '0.0%' : `${metrics.discrepancy_pct}%`}
