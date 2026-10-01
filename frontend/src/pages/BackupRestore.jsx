@@ -27,6 +27,52 @@ function downloadBlob(blob, filename) {
   URL.revokeObjectURL(url);
 }
 
+
+function formatEta(seconds) {
+  if (seconds === null || seconds === undefined || !Number.isFinite(Number(seconds))) {
+    return 'Calculating…';
+  }
+  const value = Math.max(0, Math.round(Number(seconds)));
+  if (value < 60) return value + 's remaining';
+  const minutes = Math.floor(value / 60);
+  const secs = value % 60;
+  if (minutes < 60) return minutes + 'm ' + secs + 's remaining';
+  const hours = Math.floor(minutes / 60);
+  return hours + 'h ' + (minutes % 60) + 'm remaining';
+}
+
+function formatBytes(value) {
+  if (!Number.isFinite(Number(value)) || Number(value) <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let amount = Number(value);
+  let index = 0;
+  while (amount >= 1024 && index < units.length - 1) {
+    amount /= 1024;
+    index += 1;
+  }
+  return amount.toFixed(index === 0 ? 0 : amount >= 100 ? 0 : amount >= 10 ? 1 : 2) + ' ' + units[index];
+}
+
+function normalizeBackupDetail(detail) {
+  if (typeof detail === 'string' && detail.trim()) return detail;
+  if (Array.isArray(detail)) {
+    return detail.map((item) => {
+      if (typeof item === 'string') return item;
+      if (!item || typeof item !== 'object') return String(item);
+      const field = Array.isArray(item.loc) && item.loc.length
+        ? String(item.loc[item.loc.length - 1])
+        : 'field';
+      return item.msg
+        ? field + ': ' + item.msg
+        : item.message || JSON.stringify(item);
+    }).filter(Boolean).join(' · ');
+  }
+  if (detail && typeof detail === 'object') {
+    return detail.msg || detail.message || JSON.stringify(detail);
+  }
+  return '';
+}
+
 export default function BackupRestore() {
   const isDark = useDark();
   const fileRef = useRef(null);
@@ -40,6 +86,15 @@ export default function BackupRestore() {
   const [restoreConfirm, setRestoreConfirm] = useState('');
   const [selectedModule, setSelectedModule] = useState('taskosphere');
   const [selectedCollections, setSelectedCollections] = useState([]);
+  const [transfer, setTransfer] = useState({
+    active: false,
+    phase: '',
+    percent: 0,
+    etaSeconds: null,
+    processed: 0,
+    total: 0,
+    detail: '',
+  });
 
   const loadInfo = async () => {
     setLoadingInfo(true);
@@ -80,32 +135,127 @@ export default function BackupRestore() {
       return;
     }
 
+    const progressId =
+      (typeof crypto !== 'undefined' && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : Date.now() + '-' + Math.random().toString(36).slice(2);
+
     setBusy(true);
+    setTransfer({
+      active: true,
+      phase: 'Preparing backup…',
+      percent: 0,
+      etaSeconds: null,
+      processed: 0,
+      total: 0,
+      detail: 'Calculating exact backup document count…',
+    });
+
+    let pollTimer = null;
+    let stopped = false;
+
+    const pollProgress = async () => {
+      if (stopped) return;
+      try {
+        const { data } = await api.get(
+          '/app-backup/create/progress/' + encodeURIComponent(progressId),
+          { _skipReadyGate: true, _silent: true }
+        );
+        if (data?.phase) {
+          setTransfer((current) => ({
+            ...current,
+            active: true,
+            phase: data.phase === 'creating'
+              ? 'Creating backup…'
+              : data.phase === 'encrypting'
+                ? 'Encrypting backup…'
+                : data.phase === 'preparing'
+                  ? 'Preparing backup…'
+                  : data.phase === 'ready'
+                    ? 'Backup created. Starting download…'
+                    : data.phase,
+            percent: Number.isFinite(Number(data.percent)) ? Number(data.percent) : current.percent,
+            etaSeconds: data.eta_seconds ?? current.etaSeconds,
+            processed: data.processed_documents ?? current.processed,
+            total: data.total_documents ?? current.total,
+            detail: data.current_collection
+              ? 'Collection: ' + data.current_collection
+              : current.detail,
+          }));
+        }
+      } catch {
+        // Polling is best-effort; the main backup request remains authoritative.
+      }
+    };
+
+    pollTimer = window.setInterval(pollProgress, 700);
+    void pollProgress();
+
     try {
       const form = new FormData();
       form.append('password', password);
       if (mode !== 'full') form.append('collections', customSelection.join(','));
 
+      const started = performance.now();
+
       const response = await api.post('/app-backup/create', form, {
         responseType: 'blob',
+        headers: { 'X-Backup-Progress-ID': progressId },
+        onDownloadProgress: (event) => {
+          const loaded = Number(event.loaded || 0);
+          const total = Number(event.total || 0);
+          const elapsed = Math.max(0.001, (performance.now() - started) / 1000);
+          const speed = loaded / elapsed;
+          const percent = total > 0 ? Math.min(100, (loaded / total) * 100) : 0;
+          const remaining = total > 0 ? Math.max(0, total - loaded) : 0;
+
+          setTransfer({
+            active: true,
+            phase: 'Downloading backup…',
+            percent,
+            etaSeconds: speed > 0 && total > 0 ? remaining / speed : null,
+            processed: loaded,
+            total,
+            detail: total
+              ? formatBytes(loaded) + ' / ' + formatBytes(total)
+              : formatBytes(loaded) + ' downloaded',
+          });
+        },
+      });
+
+      const blob = response.data;
+      const total = blob?.size || 0;
+      setTransfer({
+        active: false,
+        phase: 'Complete',
+        percent: 100,
+        etaSeconds: 0,
+        processed: total,
+        total,
+        detail: 'Backup downloaded successfully.',
       });
 
       const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
-      downloadBlob(response.data, 'taskosphere-backup-' + timestamp + '.taskosphere');
+      downloadBlob(blob, 'taskosphere-backup-' + timestamp + '.taskosphere');
       toast.success(mode === 'full' ? 'Full application backup downloaded.' : 'Custom backup downloaded.');
     } catch (error) {
-      if (error?.response?.data instanceof Blob) {
-        try {
-          const text = await error.response.data.text();
-          const parsed = JSON.parse(text);
-          toast.error(parsed.detail || 'Backup failed');
-        } catch {
-          toast.error('Backup failed');
-        }
-      } else {
-        toast.error(error?.response?.data?.detail || 'Backup failed');
-      }
+      setTransfer({
+        active: false,
+        phase: 'Failed',
+        percent: 0,
+        etaSeconds: null,
+        processed: 0,
+        total: 0,
+        detail: '',
+      });
+      const detail =
+        normalizeBackupDetail(error?.response?.data?.detail) ||
+        error?.message ||
+        'Backup failed';
+      toast.error(detail);
     } finally {
+      stopped = true;
+      if (pollTimer) window.clearInterval(pollTimer);
       setBusy(false);
     }
   };
@@ -117,12 +267,56 @@ export default function BackupRestore() {
     if (!window.confirm('Restore will replace the selected tenant data from this backup. Continue?')) return;
 
     setBusy(true);
+    setTransfer({
+      active: true,
+      phase: 'Uploading backup…',
+      percent: 0,
+      etaSeconds: null,
+      processed: 0,
+      total: restoreFile.size || 0,
+      detail: 'Transferring encrypted backup to the server…',
+    });
+
     try {
       const form = new FormData();
       form.append('backup', restoreFile);
       form.append('password', restorePassword);
       form.append('confirmation', restoreConfirm);
-      const { data } = await api.post('/app-backup/restore', form);
+      const uploadStarted = performance.now();
+
+      const { data } = await api.post('/app-backup/restore', form, {
+        onUploadProgress: (event) => {
+          const loaded = Number(event.loaded || 0);
+          const total = Number(event.total || restoreFile.size || 0);
+          const elapsed = Math.max(0.001, (performance.now() - uploadStarted) / 1000);
+          const speed = loaded / elapsed;
+          const percent = total > 0 ? Math.min(100, (loaded / total) * 100) : 0;
+          const remaining = total > 0 ? Math.max(0, total - loaded) : 0;
+
+          setTransfer({
+            active: true,
+            phase: percent >= 100 ? 'Restoring backup…' : 'Uploading backup…',
+            percent,
+            etaSeconds: speed > 0 && total > 0 ? remaining / speed : null,
+            processed: loaded,
+            total,
+            detail: percent >= 100
+              ? 'Upload complete. Server is restoring the backup…'
+              : formatBytes(loaded) + ' / ' + formatBytes(total),
+          });
+        },
+      });
+
+      setTransfer({
+        active: false,
+        phase: 'Complete',
+        percent: 100,
+        etaSeconds: 0,
+        processed: restoreFile.size || 0,
+        total: restoreFile.size || 0,
+        detail: 'Backup restored successfully.',
+      });
+
       toast.success('Restore completed: ' + (data.restored_documents || 0) + ' documents restored.');
       setRestoreFile(null);
       setRestorePassword('');
@@ -130,7 +324,17 @@ export default function BackupRestore() {
       if (fileRef.current) fileRef.current.value = '';
       await loadInfo();
     } catch (error) {
-      toast.error(error?.response?.data?.detail || 'Restore failed');
+      setTransfer((current) => ({
+        ...current,
+        active: false,
+        phase: 'Failed',
+        etaSeconds: null,
+      }));
+      const detail =
+        normalizeBackupDetail(error?.response?.data?.detail) ||
+        error?.message ||
+        'Restore failed';
+      toast.error(detail);
     } finally {
       setBusy(false);
     }
@@ -159,6 +363,33 @@ export default function BackupRestore() {
           </button>
         </div>
       </div>
+
+
+      {transfer.phase && (
+        <div className={'rounded-2xl border p-4 ' + card}>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className={'text-sm font-bold ' + heading}>{transfer.phase}</p>
+              <p className={'text-[11px] mt-1 ' + muted}>{transfer.detail || 'Working…'}</p>
+            </div>
+            <div className="text-right shrink-0">
+              <p className="text-lg font-extrabold text-blue-600">{Math.min(100, Math.max(0, Number(transfer.percent || 0))).toFixed(2)}%</p>
+              <p className={'text-[10px] ' + muted}>{transfer.percent >= 100 ? 'Complete' : formatEta(transfer.etaSeconds)}</p>
+            </div>
+          </div>
+          <div className="mt-3 h-2.5 rounded-full overflow-hidden bg-slate-200 dark:bg-slate-700">
+            <div
+              className="h-full rounded-full bg-blue-600 transition-[width] duration-300"
+              style={{ width: Math.min(100, Math.max(0, Number(transfer.percent || 0))) + '%' }}
+            />
+          </div>
+          {transfer.total > 0 && (
+            <p className={'text-[10px] mt-2 ' + muted}>
+              {formatBytes(transfer.processed)} / {formatBytes(transfer.total)}
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className={'rounded-2xl border p-4 ' + card}>
