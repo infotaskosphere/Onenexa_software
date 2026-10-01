@@ -200,7 +200,10 @@ export default function BackupRestore() {
 
       const response = await api.post('/app-backup/create', form, {
         responseType: 'blob',
-        headers: { 'X-Backup-Progress-ID': progressId },
+        headers: {
+          'X-Backup-Progress-ID': progressId,
+          'Content-Type': undefined,
+        },
         onDownloadProgress: (event) => {
           const loaded = Number(event.loaded || 0);
           const total = Number(event.total || 0);
