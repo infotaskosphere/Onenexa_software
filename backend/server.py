@@ -50,6 +50,7 @@ from backend.accounting_extended import router as accounting_ext_router
 from backend.accounting_extended import create_accounting_extended_indexes
 from backend.bank_accounts import router as bank_accounts_router
 from backend.permission_governance import router as permission_governance_router
+from backend.backup_restore import router as backup_restore_router  # Backup & Restore router
 from backend.roles_admin import router as roles_admin_router
 from backend.governed_modules import ALL_GOVERNED_ROUTERS
 from backend.security.rate_limiter import RateLimiter
@@ -258,6 +259,8 @@ from backend.server_modules.application_runtime import register_application_runt
 
 app = FastAPI(title="Taskosphere Backend", redirect_slashes=False)
 api_router = APIRouter(prefix="/api")
+# Backup & Restore — mount the router directly on the FastAPI app so /api/app-backup/* routes are served in production.
+app.include_router(backup_restore_router, prefix="/api")
 register_shutdown_handler(app, scheduler)
 
 _PHASE2_ROUTE_MODULES = [
