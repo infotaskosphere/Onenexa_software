@@ -6402,14 +6402,24 @@ export default function GSTReconciliation() {
     ];
 
     const uniqueGstins = new Set();
+    const portalNames = {};
+
     allPairs.forEach(p => {
-      const pg = p.portal?.portal?.gstin || p.portal?.gstin;
-      const bg = p.books?.books?.gstin || p.books?.gstin;
-      if (pg && GSTIN_PATTERN.test(pg)) uniqueGstins.add(pg.toUpperCase());
-      if (bg && GSTIN_PATTERN.test(bg)) uniqueGstins.add(bg.toUpperCase());
+      const pInv = p.portal?.portal || p.portal;
+      const bInv = p.books?.books || p.books;
+      const pg = pInv?.gstin;
+      const bg = bInv?.gstin;
+      if (pg && GSTIN_PATTERN.test(pg)) {
+        const uG = pg.toUpperCase();
+        uniqueGstins.add(uG);
+        if (pInv?.tradeOrLegalName) portalNames[uG] = pInv.tradeOrLegalName;
+      }
+      if (bg && GSTIN_PATTERN.test(bg)) {
+        uniqueGstins.add(bg.toUpperCase());
+      }
     });
 
-    const missing = [...uniqueGstins].filter(g => !manualTradeNames[g] && !portalNameMap[g]);
+    const missing = [...uniqueGstins].filter(g => !manualTradeNames[g] && !portalNames[g]);
     if (!missing.length) {
       toast.success('All supplier company names are already resolved in the report!');
       return;
@@ -6464,7 +6474,7 @@ export default function GSTReconciliation() {
       setAutofetchingSuppliers(false);
       setSupplierFetchProgress(null);
     }
-  }, [results, manualTradeNames, portalNameMap]);
+  }, [results, manualTradeNames]);
 
   // Auto-save the original (pre-edit) baseline of an opened history session.
   // Returns a Promise that resolves when the snapshot is safely persisted.
