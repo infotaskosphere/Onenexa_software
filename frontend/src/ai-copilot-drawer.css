@@ -1,58 +1,23 @@
-/* AI Search Drawer Dedicated Curves and Typography Protection */
+/* AI Search Drawer — Strict Zero-Curve Enterprise Commercial Theme */
 #ai-search-drawer,
-#ai-search-drawer * {
-  box-sizing: border-box;
+#ai-search-drawer *,
+#ai-search-drawer [class*="rounded"],
+#ai-search-drawer [class*="rounded-"],
+#ai-search-drawer .ai-bot-avatar,
+#ai-search-drawer .ai-user-avatar,
+#ai-search-drawer .ai-user-bubble,
+#ai-search-drawer .ai-bot-bubble,
+#ai-search-drawer .ai-card-surface,
+#ai-search-drawer .ai-pill-btn,
+#ai-search-drawer .ai-input-pill,
+#ai-search-drawer .ai-send-btn,
+#ai-search-drawer .ai-metric-card,
+#ai-search-drawer .ai-header-icon,
+#ai-search-drawer button,
+#ai-search-drawer input {
+  border-radius: 0 !important;
 }
 
 #ai-search-drawer {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
-}
-
-/* Force round curves on avatars and bubbles so no global CSS can strip them */
-#ai-search-drawer .ai-bot-avatar {
-  border-radius: 9999px !important;
-  width: 32px !important;
-  height: 32px !important;
-  min-width: 32px !important;
-  min-height: 32px !important;
-}
-
-#ai-search-drawer .ai-user-avatar {
-  border-radius: 9999px !important;
-  width: 32px !important;
-  height: 32px !important;
-  min-width: 32px !important;
-  min-height: 32px !important;
-}
-
-#ai-search-drawer .ai-user-bubble {
-  border-radius: 18px 4px 18px 18px !important;
-}
-
-#ai-search-drawer .ai-bot-bubble {
-  border-radius: 4px 18px 18px 18px !important;
-}
-
-#ai-search-drawer .ai-card-surface {
-  border-radius: 16px !important;
-}
-
-#ai-search-drawer .ai-pill-btn {
-  border-radius: 9999px !important;
-}
-
-#ai-search-drawer .ai-input-pill {
-  border-radius: 20px !important;
-}
-
-#ai-search-drawer .ai-send-btn {
-  border-radius: 12px !important;
-}
-
-#ai-search-drawer .ai-metric-card {
-  border-radius: 12px !important;
-}
-
-#ai-search-drawer .ai-header-icon {
-  border-radius: 10px !important;
 }

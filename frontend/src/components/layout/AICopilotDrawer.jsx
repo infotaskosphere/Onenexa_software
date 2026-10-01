@@ -3,7 +3,7 @@ import {
   BrainCircuit, Sparkles, X, Send, Paperclip, CheckCheck,
   CheckCircle2, FileText, Users, BarChart3, Search,
   Landmark, ShieldCheck, Maximize2, Minimize2, Settings, User,
-  Loader2, Lightbulb, AlertCircle, ArrowUpRight
+  Loader2, Lightbulb
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { toast } from 'sonner';
@@ -18,7 +18,6 @@ const getTimeString = () => {
 function FormattedText({ text, isDark }) {
   if (!text) return null;
 
-  // Split into lines
   const lines = text.split('\n');
 
   return (
@@ -33,12 +32,11 @@ function FormattedText({ text, isDark }) {
           return (
             <div
               key={idx}
-              className={`mt-2 p-2.5 rounded-xl border flex items-start gap-2 ${
+              className={`mt-2 p-2.5 border flex items-start gap-2 ${
                 isDark
                   ? 'bg-blue-950/40 border-blue-900/50 text-blue-200'
                   : 'bg-blue-50/70 border-blue-100 text-blue-900'
               }`}
-              style={{ borderRadius: '12px' }}
             >
               <Lightbulb className="h-4 w-4 text-amber-500 flex-shrink-0 mt-0.5" />
               <div className="flex-1 min-w-0">
@@ -54,7 +52,7 @@ function FormattedText({ text, isDark }) {
           const bulletText = trimmed.replace(/^[•\-*]\s*/, '');
           return (
             <div key={idx} className="flex items-start gap-2 pl-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-blue-500 flex-shrink-0 mt-1.5" />
+              <span className="w-1.5 h-1.5 bg-blue-500 flex-shrink-0 mt-1.5" />
               <div
                 className="flex-1 min-w-0"
                 dangerouslySetInnerHTML={{ __html: renderInlineMarkdown(bulletText) }}
@@ -132,7 +130,6 @@ export default function AICopilotDrawer({ isOpen, onClose, isDark, user }) {
       const lowerQuery = queryText.toLowerCase();
       const lowerReply = (replyText || '').toLowerCase();
 
-      // Determine the optimal card representation
       let cardType = 'standard';
       let snapshotData = null;
       let invoicesData = null;
@@ -240,7 +237,7 @@ export default function AICopilotDrawer({ isOpen, onClose, isDark, user }) {
         onClick={onClose}
       />
 
-      {/* Drawer Container */}
+      {/* Drawer Container (Strict zero curve) */}
       <motion.div
         initial={{ x: '100%' }}
         animate={{ x: 0 }}
@@ -256,10 +253,7 @@ export default function AICopilotDrawer({ isOpen, onClose, isDark, user }) {
           style={{ borderColor: isDark ? '#1e293b' : '#f1f5f9' }}
         >
           <div className="flex items-center gap-3">
-            <div
-              className="ai-header-icon w-8 h-8 flex items-center justify-center bg-blue-50 dark:bg-blue-950/60 border border-blue-100 dark:border-blue-900/50 text-blue-600 dark:text-blue-400 shadow-sm"
-              style={{ borderRadius: '10px' }}
-            >
+            <div className="ai-header-icon w-8 h-8 flex items-center justify-center bg-blue-50 dark:bg-blue-950/60 border border-blue-100 dark:border-blue-900/50 text-blue-600 dark:text-blue-400 shadow-sm">
               <BrainCircuit className="h-5 w-5" strokeWidth={2.2} />
             </div>
             <div>
@@ -267,7 +261,7 @@ export default function AICopilotDrawer({ isOpen, onClose, isDark, user }) {
                 AI Search
               </h3>
               <p className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5 mt-0.5">
-                <span className="w-2 h-2 bg-emerald-500 inline-block" style={{ borderRadius: '2px' }} /> Workspace Active
+                <span className="w-2 h-2 bg-emerald-500 inline-block" /> Workspace Active
               </p>
             </div>
           </div>
@@ -276,7 +270,7 @@ export default function AICopilotDrawer({ isOpen, onClose, isDark, user }) {
             <button
               type="button"
               onClick={() => setIsExpanded(prev => !prev)}
-              className="p-2 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+              className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
               title={isExpanded ? 'Collapse Drawer' : 'Expand Drawer'}
             >
               {isExpanded ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
@@ -284,7 +278,7 @@ export default function AICopilotDrawer({ isOpen, onClose, isDark, user }) {
             <button
               type="button"
               onClick={() => toast.info('AI Copilot connected with Gemini Enterprise Search')}
-              className="p-2 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+              className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
               title="Copilot Settings"
             >
               <Settings className="h-4 w-4" />
@@ -292,7 +286,7 @@ export default function AICopilotDrawer({ isOpen, onClose, isDark, user }) {
             <button
               type="button"
               onClick={onClose}
-              className="p-2 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+              className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
               title="Close"
             >
               <X className="h-4 w-4" />
@@ -310,19 +304,15 @@ export default function AICopilotDrawer({ isOpen, onClose, isDark, user }) {
                 <div key={m.id} className="flex flex-col items-end max-w-[85%] ml-auto">
                   <div className="flex items-end gap-2.5">
                     <div
-                      className={`ai-user-bubble p-3 px-4 text-xs sm:text-sm font-medium shadow-sm leading-relaxed ${
+                      className={`ai-user-bubble p-3 px-4 text-xs sm:text-sm font-medium shadow-sm leading-relaxed border ${
                         isDark
-                          ? 'bg-blue-950/80 border border-blue-900/70 text-blue-100'
-                          : 'bg-[#EEF4FF] border border-blue-100/90 text-blue-950'
+                          ? 'bg-blue-950/80 border-blue-900/70 text-blue-100'
+                          : 'bg-[#EEF4FF] border-blue-100/90 text-blue-950'
                       }`}
-                      style={{ borderRadius: '18px 4px 18px 18px' }}
                     >
                       {m.content}
                     </div>
-                    <div
-                      className="ai-user-avatar w-8 h-8 bg-blue-600 text-white flex items-center justify-center flex-shrink-0 shadow-sm"
-                      style={{ borderRadius: '9999px' }}
-                    >
+                    <div className="ai-user-avatar w-8 h-8 bg-blue-600 text-white flex items-center justify-center flex-shrink-0 shadow-sm">
                       <User className="h-4 w-4" />
                     </div>
                   </div>
@@ -334,13 +324,10 @@ export default function AICopilotDrawer({ isOpen, onClose, isDark, user }) {
               );
             }
 
-            // Assistant messages
+            // Assistant messages (strict zero curve)
             return (
               <div key={m.id} className="flex items-start gap-3 max-w-[92%] mr-auto">
-                <div
-                  className="ai-bot-avatar w-8 h-8 bg-blue-50 dark:bg-blue-900/40 border border-blue-100 dark:border-blue-800 flex items-center justify-center text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5 shadow-xs"
-                  style={{ borderRadius: '9999px' }}
-                >
+                <div className="ai-bot-avatar w-8 h-8 bg-blue-50 dark:bg-blue-900/40 border border-blue-100 dark:border-blue-800 flex items-center justify-center text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5 shadow-xs">
                   <Sparkles className="h-4 w-4 fill-blue-500/20" />
                 </div>
 
@@ -348,12 +335,11 @@ export default function AICopilotDrawer({ isOpen, onClose, isDark, user }) {
                   {/* Card Type: Greeting */}
                   {m.type === 'greeting' && (
                     <div
-                      className={`ai-bot-bubble p-4 text-xs sm:text-sm leading-relaxed shadow-xs ${
+                      className={`ai-bot-bubble p-4 text-xs sm:text-sm leading-relaxed border shadow-xs ${
                         isDark
-                          ? 'bg-slate-800/80 border border-slate-700/60 text-slate-200'
-                          : 'bg-[#F8FAFC] border border-slate-200/80 text-slate-800'
+                          ? 'bg-slate-800/80 border-slate-700/60 text-slate-200'
+                          : 'bg-[#F8FAFC] border-slate-200/80 text-slate-800'
                       }`}
-                      style={{ borderRadius: '4px 18px 18px 18px' }}
                     >
                       <p className="font-semibold text-slate-900 dark:text-white">
                         Hi {firstName} 👋
@@ -367,18 +353,14 @@ export default function AICopilotDrawer({ isOpen, onClose, isDark, user }) {
                     </div>
                   )}
 
-                  {/* Card Type: No Unpaid Customer Bills (Exact from reference design) */}
+                  {/* Card Type: No Unpaid Customer Bills */}
                   {m.type === 'no_unpaid_bills' && (
                     <div
                       className={`ai-card-surface p-4 border shadow-xs flex items-start gap-3.5 ${
                         isDark ? 'bg-slate-800/90 border-slate-700' : 'bg-white border-slate-200/90'
                       }`}
-                      style={{ borderRadius: '16px' }}
                     >
-                      <div
-                        className="w-7 h-7 bg-emerald-500/10 dark:bg-emerald-500/20 flex items-center justify-center flex-shrink-0 mt-0.5"
-                        style={{ borderRadius: '9999px' }}
-                      >
+                      <div className="w-7 h-7 bg-emerald-500/10 dark:bg-emerald-500/20 flex items-center justify-center flex-shrink-0 mt-0.5">
                         <CheckCircle2 className="h-6 w-6 text-emerald-500" />
                       </div>
                       <div className="min-w-0 flex-1">
@@ -398,13 +380,9 @@ export default function AICopilotDrawer({ isOpen, onClose, isDark, user }) {
                       className={`ai-card-surface p-4 border shadow-xs space-y-3 ${
                         isDark ? 'bg-slate-800/90 border-slate-700' : 'bg-white border-slate-200/90'
                       }`}
-                      style={{ borderRadius: '16px' }}
                     >
                       <div className="flex items-center gap-2.5 pb-2 border-b border-slate-100 dark:border-slate-800">
-                        <div
-                          className="p-1.5 bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400"
-                          style={{ borderRadius: '8px' }}
-                        >
+                        <div className="p-1.5 bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400">
                           <ShieldCheck className="h-4 w-4" />
                         </div>
                         <div>
@@ -419,64 +397,49 @@ export default function AICopilotDrawer({ isOpen, onClose, isDark, user }) {
 
                       <div className="space-y-2">
                         <div
-                          className={`p-2.5 rounded-xl border flex items-center justify-between text-xs ${
+                          className={`p-2.5 border flex items-center justify-between text-xs ${
                             isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-slate-50/80 border-slate-200/70'
                           }`}
-                          style={{ borderRadius: '10px' }}
                         >
                           <div>
                             <span className="font-bold text-slate-800 dark:text-slate-200">GSTR-1</span>
                             <span className="text-slate-500 text-[11px] ml-2">Sales Outward Supply</span>
                           </div>
-                          <span
-                            className="px-2 py-0.5 text-[10px] font-bold bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300"
-                            style={{ borderRadius: '9999px' }}
-                          >
+                          <span className="px-2 py-0.5 text-[10px] font-bold bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
                             Ready / Filed
                           </span>
                         </div>
 
                         <div
-                          className={`p-2.5 rounded-xl border flex items-center justify-between text-xs ${
+                          className={`p-2.5 border flex items-center justify-between text-xs ${
                             isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-slate-50/80 border-slate-200/70'
                           }`}
-                          style={{ borderRadius: '10px' }}
                         >
                           <div>
                             <span className="font-bold text-slate-800 dark:text-slate-200">GSTR-3B</span>
                             <span className="text-slate-500 text-[11px] ml-2">Monthly Tax Return</span>
                           </div>
-                          <span
-                            className="px-2 py-0.5 text-[10px] font-bold bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300"
-                            style={{ borderRadius: '9999px' }}
-                          >
+                          <span className="px-2 py-0.5 text-[10px] font-bold bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
                             Pending Filing
                           </span>
                         </div>
 
                         <div
-                          className={`p-2.5 rounded-xl border flex items-center justify-between text-xs ${
+                          className={`p-2.5 border flex items-center justify-between text-xs ${
                             isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-slate-50/80 border-slate-200/70'
                           }`}
-                          style={{ borderRadius: '10px' }}
                         >
                           <div>
                             <span className="font-bold text-slate-800 dark:text-slate-200">GSTR-2B ITC Match</span>
                             <span className="text-slate-500 text-[11px] ml-2">Purchase Reconciliation</span>
                           </div>
-                          <span
-                            className="px-2 py-0.5 text-[10px] font-bold bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300"
-                            style={{ borderRadius: '9999px' }}
-                          >
+                          <span className="px-2 py-0.5 text-[10px] font-bold bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
                             99.8% Matched
                           </span>
                         </div>
                       </div>
 
-                      <div
-                        className="p-2.5 rounded-xl border bg-blue-50/60 dark:bg-blue-950/30 border-blue-100 dark:border-blue-900/40 text-[11px] text-blue-900 dark:text-blue-200 flex items-center gap-2"
-                        style={{ borderRadius: '10px' }}
-                      >
+                      <div className="p-2.5 border bg-blue-50/60 dark:bg-blue-950/30 border-blue-100 dark:border-blue-900/40 text-[11px] text-blue-900 dark:text-blue-200 flex items-center gap-2">
                         <Lightbulb className="h-4 w-4 text-amber-500 flex-shrink-0" />
                         <span>Navigate to <strong>Finix → GST Reconciliation</strong> for invoice-level matching.</span>
                       </div>
@@ -489,13 +452,9 @@ export default function AICopilotDrawer({ isOpen, onClose, isDark, user }) {
                       className={`ai-card-surface p-4 border shadow-xs space-y-3 ${
                         isDark ? 'bg-slate-800/90 border-slate-700' : 'bg-white border-slate-200/90'
                       }`}
-                      style={{ borderRadius: '16px' }}
                     >
                       <div className="flex items-center gap-2.5 pb-2 border-b border-slate-100 dark:border-slate-800">
-                        <div
-                          className="p-1.5 bg-orange-50 dark:bg-orange-950/50 text-orange-600 dark:text-orange-400"
-                          style={{ borderRadius: '8px' }}
-                        >
+                        <div className="p-1.5 bg-orange-50 dark:bg-orange-950/50 text-orange-600 dark:text-orange-400">
                           <Users className="h-4 w-4" />
                         </div>
                         <div>
@@ -512,7 +471,6 @@ export default function AICopilotDrawer({ isOpen, onClose, isDark, user }) {
                         className={`p-3 border flex items-center justify-between ${
                           isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-orange-50/50 border-orange-100/90'
                         }`}
-                        style={{ borderRadius: '12px' }}
                       >
                         <div>
                           <span className="text-2xl font-bold text-slate-900 dark:text-white">
@@ -522,10 +480,7 @@ export default function AICopilotDrawer({ isOpen, onClose, isDark, user }) {
                             Registered Clients
                           </span>
                         </div>
-                        <span
-                          className="px-2.5 py-1 text-[11px] font-bold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 shadow-xs"
-                          style={{ borderRadius: '9999px' }}
-                        >
+                        <span className="px-2.5 py-1 text-[11px] font-bold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 shadow-xs">
                           Active Master
                         </span>
                       </div>
@@ -542,14 +497,10 @@ export default function AICopilotDrawer({ isOpen, onClose, isDark, user }) {
                       className={`ai-card-surface p-4 border shadow-xs space-y-3.5 ${
                         isDark ? 'bg-slate-800/90 border-slate-700' : 'bg-white border-slate-200/90'
                       }`}
-                      style={{ borderRadius: '16px' }}
                     >
                       {/* Header */}
                       <div className="flex items-start gap-3">
-                        <div
-                          className="p-2 bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex-shrink-0"
-                          style={{ borderRadius: '10px' }}
-                        >
+                        <div className="p-2 bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex-shrink-0">
                           <BarChart3 className="h-5 w-5" />
                         </div>
                         <div>
@@ -562,7 +513,7 @@ export default function AICopilotDrawer({ isOpen, onClose, isDark, user }) {
                         </div>
                       </div>
 
-                      {/* 3 Metric Cards Grid */}
+                      {/* 3 Metric Cards Grid (Strict zero curve) */}
                       <div className="grid grid-cols-3 gap-2.5">
                         <div
                           className={`ai-metric-card p-3 flex flex-col items-center justify-center text-center border ${
@@ -570,7 +521,6 @@ export default function AICopilotDrawer({ isOpen, onClose, isDark, user }) {
                               ? 'bg-blue-950/30 border-blue-900/40 text-blue-100'
                               : 'bg-blue-50/60 border-blue-100/90 text-blue-950'
                           }`}
-                          style={{ borderRadius: '12px' }}
                         >
                           <FileText className="h-5 w-5 text-blue-600 dark:text-blue-400 mb-1" />
                           <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
@@ -588,7 +538,6 @@ export default function AICopilotDrawer({ isOpen, onClose, isDark, user }) {
                               ? 'bg-emerald-950/30 border-emerald-900/40 text-emerald-100'
                               : 'bg-emerald-50/60 border-emerald-100/90 text-emerald-950'
                           }`}
-                          style={{ borderRadius: '12px' }}
                         >
                           <CheckCircle2 className="h-5 w-5 text-emerald-600 dark:text-emerald-400 mb-1" />
                           <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
@@ -606,7 +555,6 @@ export default function AICopilotDrawer({ isOpen, onClose, isDark, user }) {
                               ? 'bg-orange-950/30 border-orange-900/40 text-orange-100'
                               : 'bg-orange-50/60 border-orange-100/90 text-orange-950'
                           }`}
-                          style={{ borderRadius: '12px' }}
                         >
                           <Users className="h-5 w-5 text-orange-600 dark:text-orange-400 mb-1" />
                           <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
@@ -632,7 +580,6 @@ export default function AICopilotDrawer({ isOpen, onClose, isDark, user }) {
                       className={`ai-card-surface p-4 border shadow-xs space-y-3 ${
                         isDark ? 'bg-slate-800/90 border-slate-700' : 'bg-white border-slate-200/90'
                       }`}
-                      style={{ borderRadius: '16px' }}
                     >
                       <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
                         <div>
@@ -651,7 +598,6 @@ export default function AICopilotDrawer({ isOpen, onClose, isDark, user }) {
                             className={`p-2.5 border flex items-center justify-between text-xs ${
                               isDark ? 'bg-slate-900/60 border-slate-700' : 'bg-slate-50 border-slate-200'
                             }`}
-                            style={{ borderRadius: '10px' }}
                           >
                             <div className="min-w-0 pr-2">
                               <p className="font-bold truncate text-slate-800 dark:text-slate-200">
@@ -673,15 +619,14 @@ export default function AICopilotDrawer({ isOpen, onClose, isDark, user }) {
                     </div>
                   )}
 
-                  {/* Standard Message Formatted */}
+                  {/* Standard Formatted Message */}
                   {m.type === 'standard' && (
                     <div
-                      className={`ai-bot-bubble p-4 text-xs sm:text-sm leading-relaxed shadow-xs ${
+                      className={`ai-bot-bubble p-4 text-xs sm:text-sm leading-relaxed border shadow-xs ${
                         isDark
-                          ? 'bg-slate-800/80 border border-slate-700/60 text-slate-200'
-                          : 'bg-[#F8FAFC] border border-slate-200/80 text-slate-800'
+                          ? 'bg-slate-800/80 border-slate-700/60 text-slate-200'
+                          : 'bg-[#F8FAFC] border-slate-200/80 text-slate-800'
                       }`}
-                      style={{ borderRadius: '4px 18px 18px 18px' }}
                     >
                       <FormattedText text={m.content} isDark={isDark} />
                     </div>
@@ -698,10 +643,7 @@ export default function AICopilotDrawer({ isOpen, onClose, isDark, user }) {
 
           {loading && (
             <div className="flex items-center gap-3 text-slate-400 text-xs font-semibold py-2">
-              <div
-                className="ai-bot-avatar w-8 h-8 bg-blue-50 dark:bg-blue-900/40 border border-blue-100 dark:border-blue-800 flex items-center justify-center text-blue-600 dark:text-blue-400"
-                style={{ borderRadius: '9999px' }}
-              >
+              <div className="ai-bot-avatar w-8 h-8 bg-blue-50 dark:bg-blue-900/40 border border-blue-100 dark:border-blue-800 flex items-center justify-center text-blue-600 dark:text-blue-400">
                 <Loader2 className="h-4 w-4 animate-spin" />
               </div>
               <span>AI Search analyzing workspace data...</span>
@@ -711,7 +653,7 @@ export default function AICopilotDrawer({ isOpen, onClose, isDark, user }) {
           <div ref={scrollRef} />
         </div>
 
-        {/* Suggestion Pills */}
+        {/* Suggestion Tabs (Strict zero curve rectangular buttons) */}
         <div
           className="p-3 px-5 border-t flex items-center gap-2 overflow-x-auto slim-scroll"
           style={{ borderColor: isDark ? '#1e293b' : '#f1f5f9' }}
@@ -724,7 +666,6 @@ export default function AICopilotDrawer({ isOpen, onClose, isDark, user }) {
                 ? 'border-blue-900/80 bg-slate-900 text-blue-400 hover:bg-blue-950/60'
                 : 'border-blue-200 bg-white text-blue-600 hover:bg-blue-50/80'
             }`}
-            style={{ borderRadius: '9999px' }}
           >
             <Search className="h-3.5 w-3.5 text-blue-500" />
             Find Unpaid Bills
@@ -738,7 +679,6 @@ export default function AICopilotDrawer({ isOpen, onClose, isDark, user }) {
                 ? 'border-blue-900/80 bg-slate-900 text-blue-400 hover:bg-blue-950/60'
                 : 'border-blue-200 bg-white text-blue-600 hover:bg-blue-50/80'
             }`}
-            style={{ borderRadius: '9999px' }}
           >
             <Landmark className="h-3.5 w-3.5 text-blue-500" />
             Audit <span className="text-blue-500 font-bold">Bank Entries</span>
@@ -752,14 +692,13 @@ export default function AICopilotDrawer({ isOpen, onClose, isDark, user }) {
                 ? 'border-blue-900/80 bg-slate-900 text-blue-400 hover:bg-blue-950/60'
                 : 'border-blue-200 bg-white text-blue-600 hover:bg-blue-50/80'
             }`}
-            style={{ borderRadius: '9999px' }}
           >
             <ShieldCheck className="h-3.5 w-3.5 text-blue-500" />
             Verify GST ITC
           </button>
         </div>
 
-        {/* Bottom Input Area */}
+        {/* Bottom Input Area (Strict zero curve rectangular input + send button) */}
         <form
           onSubmit={handleSend}
           className="p-3 px-5 border-t"
@@ -771,7 +710,6 @@ export default function AICopilotDrawer({ isOpen, onClose, isDark, user }) {
                 ? 'bg-slate-950 border-slate-700/80 focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500'
                 : 'bg-white border-slate-200 focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500'
             }`}
-            style={{ borderRadius: '20px' }}
           >
             <input
               type="text"
@@ -783,7 +721,7 @@ export default function AICopilotDrawer({ isOpen, onClose, isDark, user }) {
             <button
               type="button"
               onClick={() => toast.info('Document and voucher attachment ready')}
-              className="p-2 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors cursor-pointer"
+              className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors cursor-pointer"
               title="Attach document or invoice"
             >
               <Paperclip className="h-4 w-4" />
@@ -792,7 +730,6 @@ export default function AICopilotDrawer({ isOpen, onClose, isDark, user }) {
               type="submit"
               disabled={!input.trim() || loading}
               className="ai-send-btn w-9 h-9 bg-blue-600 hover:bg-blue-700 active:scale-95 disabled:opacity-40 disabled:scale-100 text-white flex items-center justify-center shadow-md transition-all cursor-pointer flex-shrink-0"
-              style={{ borderRadius: '12px' }}
               title="Send message"
             >
               <Send className="h-4 w-4" />
