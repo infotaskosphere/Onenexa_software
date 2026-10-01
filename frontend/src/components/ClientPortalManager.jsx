@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import DriveFolderVisibility from '@/components/DriveFolderVisibility';
 
 const COLORS = { deepBlue: '#0D3B66', mediumBlue: '#1F6FB2' };
 const GRADIENT = `linear-gradient(135deg, ${COLORS.deepBlue} 0%, ${COLORS.mediumBlue} 100%)`;
@@ -41,6 +42,7 @@ export default function ClientPortalManager({ clientId, clientName, onClose }) {
   const [creatingFolder, setCreatingFolder]   = useState(false);
   const [customFolderName, setCustomFolderName] = useState('');
   const [parentFolderLink, setParentFolderLink] = useState('');
+  const [showVisibility, setShowVisibility] = useState(false);
 
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting]           = useState(false);
@@ -298,6 +300,18 @@ export default function ClientPortalManager({ clientId, clientName, onClose }) {
                     )}
                     {pu.google_drive_folder_id ? 'Recreate Folder' : 'Create Drive Folder'}
                   </Button>
+                  {pu.google_drive_folder_id && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setShowVisibility(true)}
+                      className="w-full text-xs flex items-center justify-center gap-1.5 border-slate-300 dark:border-slate-600"
+                    >
+                      <FolderCheck className="h-3.5 w-3.5" />
+                      Manage File &amp; Folder Visibility
+                    </Button>
+                  )}
                 </div>
 
                 {/* ── Danger zone ── */}
@@ -327,6 +341,13 @@ export default function ClientPortalManager({ clientId, clientName, onClose }) {
           </div>
         </motion.div>
       </motion.div>
+      {showVisibility && pu && (
+        <DriveFolderVisibility
+          portalUserId={pu.id}
+          portalUsername={pu.portal_username}
+          onClose={() => setShowVisibility(false)}
+        />
+      )}
     </AnimatePresence>
   );
 }

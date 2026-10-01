@@ -30,13 +30,14 @@ import {
   Shield, Download, UserCheck, AlertCircle, Sparkles, Loader2,
   ArrowLeftRight, RefreshCw, FileSpreadsheet, ExternalLink as ExternalLinkIcon,
   IndianRupee, Save as SaveIcon, Globe, Settings, Clock, Send, Repeat, Link,
-  Merge, Layers, Paperclip, Minimize2,
+  Merge, Layers, Paperclip, Minimize2, CalendarClock,
 } from 'lucide-react';
 import { detectClientDuplicates, detectRelatedClients } from '@/lib/aiDuplicateEngine';
 import StandaloneGovtFeeDialog from '@/components/StandaloneGovtFeeDialog';
 import AIDuplicateDialog from '@/components/ui/AIDuplicateDialog';
 import MergeClientsDialog from '@/components/ui/MergeClientsDialog';
 import ClientGroupsPanel from '@/components/ClientGroupsPanel';
+import ClientRenewalsTab from '@/components/ClientRenewalsTab';
 import { useBulkWASender } from '@/components/BulkWASenderContext';
 import ClientPortalManager from '@/components/ClientPortalManager';
 import ITRClientDialog from '@/components/ITRClientDialog';
@@ -3139,6 +3140,7 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
             { key: 'reconciliation', label: 'GST Recon',   icon: <ArrowLeftRight className="h-3.5 w-3.5" /> },
             { key: 'govtfees',       label: 'Govt Fees',   icon: <IndianRupee className="h-3.5 w-3.5" /> },
             { key: 'portal',         label: 'Portal',      icon: <Globe className="h-3.5 w-3.5" /> },
+            { key: 'renewals',       label: 'Renewals',    icon: <CalendarClock className="h-3.5 w-3.5" /> },
             { key: 'tasks',          label: 'Assign Task', icon: <CheckSquare className="h-3.5 w-3.5" /> },
             ...(canEditClients ? [{ key: 'merge', label: 'Merge', icon: <Merge className="h-3.5 w-3.5" />, accent: '#7C3AED' }] : []),
           ].map(tab => (
@@ -3316,6 +3318,17 @@ const ClientDetailPopup = React.memo(({ selectedClient, detailDialogOpen, setDet
                   }}
                 />
               )}
+            </div>
+          )}
+
+          {/* ════════════════ RENEWALS TAB ════════════════ */}
+          {activeTab === 'renewals' && (
+            <div className="p-6">
+              <ClientRenewalsTab
+                clientId={selectedClient.id}
+                isDark={isDark}
+                currentUserRole={user?.role}
+              />
             </div>
           )}
 

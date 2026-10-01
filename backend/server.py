@@ -295,6 +295,7 @@ register_application_runtime(globals())
 # their prefixes or business logic.
 # ─────────────────────────────────────────────────────────────────────────────
 from backend.website_config import router as website_config_router
+from backend.hr_core import ALL_HR_CORE_ROUTERS
 
 app.include_router(notification_router, prefix="/api")
 app.include_router(visits_router, prefix="/api")
@@ -302,6 +303,8 @@ app.include_router(email_router, prefix="/api")
 app.include_router(website_config_router, prefix="/api")
 app.include_router(client_portal_router, prefix="/api")
 app.include_router(roc_forms_dump_router, prefix="/api/roc-sphere")
+for _hr_router in ALL_HR_CORE_ROUTERS:
+    app.include_router(_hr_router, prefix="/api")
 
 # LeadSense Client Discussion collection compatibility.
 # The LeadSense hub requests a collection-level /api/client-discussion feed.

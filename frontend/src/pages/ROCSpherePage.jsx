@@ -16,6 +16,7 @@ import api from '@/lib/api';
 import { useDark } from '@/hooks/useDark';
 import { HubBanner, StatCard, HUB_COLORS } from '@/components/SectionHub.jsx';
 import ROCFormsDumpTab from '@/components/roc/ROCFormsDumpTab.jsx';
+import '@/roc-sphere-upload-tabs.css';
 
 /* ── helpers ─────────────────────────────────────────────────────────── */
 

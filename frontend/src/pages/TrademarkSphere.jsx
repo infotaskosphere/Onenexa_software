@@ -34,8 +34,9 @@ import {
   Sparkles, RefreshCw, Eye, ArrowUpRight, Copy, Check,
   ImageIcon, Type, Stamp, Tag, Hash, Zap, TrendingUp,
   Info, Filter, SlidersHorizontal, Plus, Trash2, Star,
-  BookmarkCheck, Paintbrush, RotateCcw,
+  BookmarkCheck, Paintbrush, RotateCcw, Code,
 } from "lucide-react";
+import ApiDeveloperPanel from "@/components/trademark/ApiDeveloperPanel.jsx";
 
 // ─── Design tokens (mirrors Dashboard COLORS exactly) ─────────────────────────
 const COLORS = {
@@ -2124,6 +2125,9 @@ export default function TrademarkSphere() {
               else { try { const d = await getReport(id); setReport(d.report); setActiveId(d.id); refreshHistory(); } catch {} }
             }} />
             <ClassFinderPanel T={T} onPickClass={(cls) => { setPinnedClass(String(cls)); toast.success(`Class ${cls} pinned`); scrollToSearch(); }} />
+            <Collapsible T={T} title="Developer API & Embed" icon={Code} iconColor={COLORS.violet} badge="cURL & JS REST API">
+              <ApiDeveloperPanel query={report?.query || ""} classFilter={pinnedClass || report?.class_filter || ""} />
+            </Collapsible>
           </div>
 
           {/* ── Report section (full width) ── */}
