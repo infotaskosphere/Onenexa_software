@@ -283,18 +283,29 @@ function GSTPortalSyncInner() {
 
         {/* ── Main Navigation Tabs ── */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-5">
-          <TabsList className={`p-1 rounded-xl border ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
-            <TabsTrigger value="lookup" className="gap-2 text-xs md:text-sm font-semibold">
-              <Search className="h-4 w-4" />
-              Live GSTIN Search &amp; Verify
+          <TabsList className={`w-full grid grid-cols-1 md:grid-cols-3 h-auto min-h-[46px] p-1.5 gap-2 rounded-xl border shadow-sm ${
+            isDark ? 'bg-slate-800/90 border-slate-700 text-slate-300' : 'bg-slate-100 border-slate-200 text-slate-600'
+          }`}>
+            <TabsTrigger
+              value="lookup"
+              className="h-10 py-2 px-4 gap-2 text-xs md:text-sm font-semibold rounded-lg flex items-center justify-center transition-all data-[state=active]:bg-white dark:data-[state=active]:bg-slate-700 data-[state=active]:text-blue-600 dark:data-[state=active]:text-blue-400 data-[state=active]:shadow-sm cursor-pointer"
+            >
+              <Search className="h-4 w-4 shrink-0" />
+              <span>Live GSTIN Search &amp; Verify</span>
             </TabsTrigger>
-            <TabsTrigger value="bulk" className="gap-2 text-xs md:text-sm font-semibold">
-              <Layers className="h-4 w-4" />
-              Bulk GSTIN Audit
+            <TabsTrigger
+              value="bulk"
+              className="h-10 py-2 px-4 gap-2 text-xs md:text-sm font-semibold rounded-lg flex items-center justify-center transition-all data-[state=active]:bg-white dark:data-[state=active]:bg-slate-700 data-[state=active]:text-blue-600 dark:data-[state=active]:text-blue-400 data-[state=active]:shadow-sm cursor-pointer"
+            >
+              <Layers className="h-4 w-4 shrink-0" />
+              <span>Bulk GSTIN Audit</span>
             </TabsTrigger>
-            <TabsTrigger value="ledgers" className="gap-2 text-xs md:text-sm font-semibold">
-              <Database className="h-4 w-4" />
-              PMT-01 / PMT-02 &amp; Audit Risk
+            <TabsTrigger
+              value="ledgers"
+              className="h-10 py-2 px-4 gap-2 text-xs md:text-sm font-semibold rounded-lg flex items-center justify-center transition-all data-[state=active]:bg-white dark:data-[state=active]:bg-slate-700 data-[state=active]:text-blue-600 dark:data-[state=active]:text-blue-400 data-[state=active]:shadow-sm cursor-pointer"
+            >
+              <Database className="h-4 w-4 shrink-0" />
+              <span>PMT-01 / PMT-02 &amp; Audit Risk</span>
             </TabsTrigger>
           </TabsList>
 
