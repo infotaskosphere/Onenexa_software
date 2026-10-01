@@ -28,7 +28,7 @@ from bson.json_util import CANONICAL_JSON_OPTIONS
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 
@@ -301,10 +301,48 @@ async def backup_info(current_user: User = Depends(get_current_user)):
 
 
 @router.post("/create")
-async def create_backup(password: str = Form(...), collections: str = Form(""), current_user: User = Depends(get_current_user)):
+async def create_backup(request: Request, current_user: User = Depends(get_current_user)):
     _require_backup_access(current_user)
+
+    # Accept multipart/form-data or JSON without relying on FastAPI's automatic
+    # Form(...) validation, while preserving the existing tenant-aware builder.
+    content_type = (request.headers.get("content-type") or "").lower()
+    password = ""
+    collections = ""
+
+    try:
+        if "multipart/form-data" in content_type:
+            form = await request.form()
+            password = str(form.get("password") or "")
+            collections = str(form.get("collections") or "")
+        elif "application/json" in content_type:
+            payload = await request.json()
+            if isinstance(payload, dict):
+                password = str(payload.get("password") or "")
+                collections = str(payload.get("collections") or "")
+        else:
+            try:
+                payload = await request.json()
+                if isinstance(payload, dict):
+                    password = str(payload.get("password") or "")
+                    collections = str(payload.get("collections") or "")
+            except Exception:
+                pass
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid backup request: {exc}") from exc
+
+    if len(password) < 8:
+        raise HTTPException(status_code=400, detail="Backup password must be at least 8 characters.")
+
     requested = [item.strip() for item in collections.split(",") if item.strip()] or None
-    output, _manifest = await _build_archive(current_user, password, requested)
+    try:
+        output, _manifest = await _build_archive(current_user, password, requested)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Backup creation failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Backup creation failed on the server. Check backend logs for details.") from exc
+
     filename = f"taskosphere-backup-{datetime.now().strftime('%Y%m%d-%H%M%S')}.taskosphere"
     return FileResponse(output, media_type="application/octet-stream", filename=filename, background=BackgroundTask(lambda: os.path.exists(output) and os.unlink(output)))
 
