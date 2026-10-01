@@ -911,4 +911,54 @@ async def _build_archive_with_progress(
             pass
 
 
+
+def _encrypt_with_progress(
+    zip_path: str,
+    output_path: str,
+    password: str,
+    progress_id: str | None = None,
+    progress_start: float = 90.0,
+    progress_end: float = 100.0,
+    started_at: float | None = None,
+) -> None:
+    """Encrypt the completed ZIP while reporting byte-based progress."""
+    salt, nonce = secrets.token_bytes(16), secrets.token_bytes(12)
+    encryptor = Cipher(algorithms.AES(_key(password, salt)), modes.GCM(nonce)).encryptor()
+    total_bytes = max(1, os.path.getsize(zip_path))
+    encrypted_bytes = 0
+    start = started_at or time.monotonic()
+
+    with open(output_path, "wb") as out, open(zip_path, "rb") as source:
+        out.write(_header(salt, nonce))
+        while chunk := source.read(CHUNK_SIZE):
+            encrypted_bytes += len(chunk)
+            out.write(encryptor.update(chunk))
+
+            if progress_id:
+                elapsed = max(0.001, time.monotonic() - start)
+                stage_percent = min(100.0, (encrypted_bytes / total_bytes) * 100.0)
+                percent = progress_start + (
+                    (progress_end - progress_start) * stage_percent / 100.0
+                )
+                remaining = max(0, total_bytes - encrypted_bytes)
+                speed = encrypted_bytes / elapsed
+                eta = remaining / speed if speed > 0 else None
+
+                _set_backup_progress(
+                    progress_id,
+                    phase="encrypting",
+                    percent=round(percent, 2),
+                    processed_documents=None,
+                    total_documents=None,
+                    processed_bytes=encrypted_bytes,
+                    total_bytes=total_bytes,
+                    eta_seconds=round(eta, 1) if eta is not None else None,
+                    elapsed_seconds=round(elapsed, 1),
+                    current_collection=None,
+                )
+
+        out.write(encryptor.finalize())
+        out.write(encryptor.tag)
+
+
 _build_archive = _build_archive_with_progress
