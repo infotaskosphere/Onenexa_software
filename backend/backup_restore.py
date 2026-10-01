@@ -14,6 +14,7 @@ credentials are preserved so a restore cannot lock the target account out.
 from __future__ import annotations
 
 import base64
+import asyncio
 import json
 import os
 import secrets
@@ -439,3 +440,143 @@ async def restore_backup(backup: UploadFile = File(...), password: str = Form(..
         if zip_path:
             try: os.unlink(zip_path)
             except FileNotFoundError: pass
+
+
+# ---------------------------------------------------------------------------
+# Render-safe backup builder
+# ---------------------------------------------------------------------------
+# Preserve the existing tenant-aware backup implementation above. This
+# production builder only changes how documents are written: one document at
+# a time directly into the ZIP member rather than building a giant in-memory
+# string with join(). Tenant/company/license remapping remains unchanged.
+async def _build_archive_streaming(user: User, password: str, requested: list[str] | None):
+    company_id, company, user_ids, identities, selected = await _resolve_collections(user, requested)
+    raw = _raw_db()
+    manifest = {
+        "format": "taskosphere-backup",
+        "version": FORMAT_VERSION,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "database": DB_NAME,
+        "scope": "single_customer_tenant",
+        "source_company_id": company_id,
+        "source_license_id": next(iter(identities["license_id"]), None),
+        "source_commercial_customer_id": next(iter(identities["commercial_customer_id"]), None),
+        "owner_user_id": _s(user.id),
+        "company_name": (company or {}).get("name"),
+        "bson_encoding": "MongoDB Extended JSON v2 canonical",
+        "encryption": "AES-256-GCM + PBKDF2-HMAC-SHA256",
+        "selection": "full" if not requested else "custom",
+        "collections": {},
+        "excluded_collections": sorted(EXCLUDED_COLLECTIONS),
+    }
+
+    fd, zip_path = tempfile.mkstemp(prefix="taskosphere-backup-", suffix=".zip")
+    os.close(fd)
+    output = None
+
+    try:
+        with zipfile.ZipFile(
+            zip_path,
+            "w",
+            compression=zipfile.ZIP_DEFLATED,
+            compresslevel=6,
+            allowZip64=True,
+        ) as archive:
+            for name in selected:
+                docs_cursor = raw[name].find({})
+                document_count = 0
+
+                with archive.open(
+                    f"collections/{name.replace('/', '_')}.jsonl",
+                    mode="w",
+                    force_zip64=True,
+                ) as entry:
+                    # Filter tenant-linked records while streaming. This keeps
+                    # the commercial tenant isolation rules intact.
+                    async for doc in docs_cursor:
+                        if name in EXCLUDED_COLLECTIONS:
+                            continue
+
+                        include_doc = False
+                        if name == "companies":
+                            include_doc = (
+                                _s(doc.get("id")) == company_id
+                                or (
+                                    company
+                                    and company.get("_id") is not None
+                                    and doc.get("_id") == company.get("_id")
+                                )
+                            )
+                        elif name == "users" or name in TENANT_COLLECTIONS:
+                            include_doc = (
+                                _s(doc.get("company_id")) == company_id
+                                or (
+                                    doc.get("company_id") is not None
+                                    and str(doc.get("company_id")) == str(company_id)
+                                )
+                            )
+                        else:
+                            include_doc = _linked(doc, user_ids, identities)
+
+                        if not include_doc:
+                            continue
+
+                        entry.write((_dump(doc) + "\n").encode("utf-8"))
+                        document_count += 1
+
+                        if document_count % 250 == 0:
+                            await asyncio.sleep(0)
+
+                try:
+                    list_indexes = getattr(raw[name], "list_indexes", None)
+                    indexes = (
+                        await list_indexes().to_list(1000)
+                        if callable(list_indexes)
+                        else []
+                    )
+                    indexes = [idx for idx in indexes if idx.get("name") != "_id_"]
+                    if indexes:
+                        archive.writestr(
+                            f"indexes/{name.replace('/', '_')}.json",
+                            _dump(indexes),
+                        )
+                except Exception:
+                    pass
+
+                if document_count:
+                    manifest["collections"][name] = {
+                        "documents": document_count,
+                        "safe_name": name.replace("/", "_"),
+                    }
+
+            archive.writestr(
+                "manifest.json",
+                json.dumps(manifest, indent=2, sort_keys=True),
+            )
+
+        fd, output = tempfile.mkstemp(
+            prefix="taskosphere-backup-",
+            suffix=".taskosphere",
+        )
+        os.close(fd)
+        _encrypt(zip_path, output, password)
+        return output, manifest
+
+    except Exception:
+        if output:
+            try:
+                os.unlink(output)
+            except FileNotFoundError:
+                pass
+        raise
+    finally:
+        try:
+            os.unlink(zip_path)
+        except FileNotFoundError:
+            pass
+
+
+# The route resolves _build_archive when the request is handled, so this
+# preserves the existing endpoint and tenant-aware behavior while replacing
+# only the memory-heavy archive construction strategy.
+_build_archive = _build_archive_streaming
