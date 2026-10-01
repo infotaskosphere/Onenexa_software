@@ -2005,9 +2005,11 @@ export default function DSCRegister() {
     </>
   );
 
-  const tabCard = (borderColor) => ({
+  const tabCard = () => ({
     background: isDark ? '#1e293b' : '#fff',
-    borderColor: isDark ? 'rgba(255,255,255,0.07)' : borderColor,
+    borderColor: isDark ? '#334155' : '#e2e8f0',
+    borderWidth: '1px',
+    borderStyle: 'solid',
   });
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -2066,17 +2068,17 @@ export default function DSCRegister() {
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             <Button variant="outline" onClick={handlePrint}
-              className="h-9 px-4 gap-2 rounded-xl text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 backdrop-blur-sm">
+              className="h-9 px-4 gap-2 rounded-xl text-sm bg-white/15 border-0 text-white hover:bg-white/25 backdrop-blur-sm shadow-sm">
               <Printer className="h-4 w-4" />Print
             </Button>
             {/* ── WhatsApp Automation Button ── */}
             <Button
               variant="outline"
               onClick={() => setWhatsappAutoOpen(true)}
-              className="h-9 px-4 gap-2 rounded-xl text-sm backdrop-blur-sm font-semibold transition-all"
+              className="h-9 px-4 gap-2 rounded-xl text-sm backdrop-blur-sm font-semibold transition-all shadow-sm"
               style={{
-                backgroundColor: autoEnabled ? 'rgba(16,185,129,0.20)' : 'rgba(255,255,255,0.10)',
-                borderColor: autoEnabled ? 'rgba(16,185,129,0.60)' : 'rgba(255,255,255,0.25)',
+                backgroundColor: autoEnabled ? 'rgba(16,185,129,0.25)' : 'rgba(255,255,255,0.12)',
+                border: 'none',
                 color: autoEnabled ? '#6ee7b7' : '#fff',
               }}
               title="WhatsApp expiry alerts & automation"
@@ -2090,10 +2092,10 @@ export default function DSCRegister() {
                 variant="outline"
                 onClick={usbPermission === 'granted' ? () => { setUsbDismissed(false); handleGrantUsbAccess(); } : handleGrantUsbAccess}
                 disabled={usbGranting}
-                className="h-9 px-4 gap-2 rounded-xl text-sm backdrop-blur-sm font-semibold transition-all"
+                className="h-9 px-4 gap-2 rounded-xl text-sm backdrop-blur-sm font-semibold transition-all shadow-sm"
                 style={{
-                  backgroundColor: usbPermission === 'granted' ? 'rgba(16,185,129,0.20)' : 'rgba(99,102,241,0.20)',
-                  borderColor: usbPermission === 'granted' ? 'rgba(16,185,129,0.60)' : 'rgba(129,140,248,0.60)',
+                  backgroundColor: usbPermission === 'granted' ? 'rgba(16,185,129,0.25)' : 'rgba(99,102,241,0.25)',
+                  border: 'none',
                   color: usbPermission === 'granted' ? '#6ee7b7' : '#c7d2fe',
                 }}
                 title={usbPermission === 'granted' ? 'Scan for plugged-in DSC token' : 'Grant browser permission to detect DSC USB tokens'}
@@ -2109,8 +2111,8 @@ export default function DSCRegister() {
               variant="outline"
               onClick={handleDetectDscDuplicates}
               disabled={detectingDups || dscList.length === 0}
-              className="h-9 px-4 gap-2 rounded-xl text-sm backdrop-blur-sm font-semibold transition-all disabled:opacity-40"
-              style={{ backgroundColor: 'rgba(139,92,246,0.25)', borderColor: 'rgba(167,139,250,0.6)', color: '#ede9fe' }}
+              className="h-9 px-4 gap-2 rounded-xl text-sm backdrop-blur-sm font-semibold transition-all disabled:opacity-40 shadow-sm"
+              style={{ backgroundColor: 'rgba(139,92,246,0.30)', border: 'none', color: '#ede9fe' }}
             >
               {detectingDups
                 ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />Scanning…</>
@@ -2126,7 +2128,7 @@ export default function DSCRegister() {
                 setUsbDismissed(false);
                 setUsbPromptOpen(true);
               }}
-              className="bg-white text-indigo-700 hover:bg-blue-50 font-semibold rounded-xl px-5 shadow-lg transition-all hover:scale-105 active:scale-95"
+              className="bg-white text-indigo-700 hover:bg-blue-50 font-semibold rounded-xl px-5 shadow-lg transition-all hover:scale-105 active:scale-95 border-0"
               data-testid="add-dsc-btn"
             >
               <Plus className="mr-2 h-4 w-4" />Add DSC
@@ -2237,13 +2239,13 @@ export default function DSCRegister() {
             const Icon = stat.icon;
             return (
               <div key={stat.label}
-                className="rounded-xl backdrop-blur-sm px-4 py-3 flex items-center gap-3 cursor-default transition-all hover:scale-[1.03]"
-                style={{ background: 'rgba(255,255,255,0.10)', border: '1px solid rgba(255,255,255,0.18)', backdropFilter: 'blur(8px)' }}>
-                <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: `${stat.color}30` }}>
+                className="rounded-xl backdrop-blur-sm px-4 py-3 flex items-center gap-3 cursor-default transition-all hover:scale-[1.03] shadow-sm hover:shadow-md"
+                style={{ background: 'rgba(255,255,255,0.12)', border: 'none', outline: 'none', backdropFilter: 'blur(10px)' }}>
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: `${stat.color}35` }}>
                   <Icon className="h-4 w-4" style={{ color: stat.color }} />
                 </div>
                 <div>
-                  <p className="text-white/50 text-[10px] font-semibold uppercase tracking-widest leading-none">{stat.label}</p>
+                  <p className="text-white/60 text-[10px] font-semibold uppercase tracking-widest leading-none">{stat.label}</p>
                   <p className="text-white text-2xl font-black tabular-nums leading-tight mt-0.5" style={{ fontFamily: "'Roboto Mono', monospace" }}>{stat.value}</p>
                 </div>
               </div>
@@ -2382,10 +2384,10 @@ export default function DSCRegister() {
 
           {/* ALL tab — shown only when searching */}
           <TabsContent value="all" className="mt-4">
-            <div className="rounded-2xl border shadow-sm overflow-hidden flex flex-col" style={tabCard('#dbeafe')}>
-              <div className="bg-blue-50 border-b border-blue-200 px-5 py-3 flex items-center gap-2">
-                <Search className="h-4 w-4 text-blue-700 flex-shrink-0" />
-                <p className="text-sm font-semibold text-blue-700 uppercase tracking-wider">All Results for "{searchQuery}" ({allDSC.length})</p>
+            <div className="rounded-xl border shadow-sm overflow-hidden flex flex-col" style={tabCard()}>
+              <div className={`border-b px-5 py-3 flex items-center gap-2 ${isDark ? 'bg-blue-950/40 border-blue-900/40 text-blue-300' : 'bg-blue-50/80 border-blue-100 text-blue-700'}`}>
+                <Search className="h-4 w-4 text-blue-600 dark:text-blue-400 flex-shrink-0" />
+                <p className="text-sm font-semibold uppercase tracking-wider">All Results for "{searchQuery}" ({allDSC.length})</p>
               </div>
               {allDSC.length === 0
                 ? <div className={`text-center py-16 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
@@ -2403,10 +2405,10 @@ export default function DSCRegister() {
 
           {/* IN tab */}
           <TabsContent value="in" className="mt-4">
-            <div className="rounded-2xl border shadow-sm overflow-hidden flex flex-col" style={tabCard('#d1fae5')}>
-              <div className="bg-emerald-50 border-b border-emerald-200 px-5 py-3 flex items-center gap-2">
-                <ArrowDownCircle className="h-4 w-4 text-emerald-700 flex-shrink-0" />
-                <p className="text-sm font-semibold text-emerald-700 uppercase tracking-wider">DSC IN — Available ({inDSC.length})</p>
+            <div className="rounded-xl border shadow-sm overflow-hidden flex flex-col" style={tabCard()}>
+              <div className={`border-b px-5 py-3 flex items-center gap-2 ${isDark ? 'bg-emerald-950/40 border-emerald-900/40 text-emerald-300' : 'bg-emerald-50/80 border-emerald-100 text-emerald-700'}`}>
+                <ArrowDownCircle className="h-4 w-4 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
+                <p className="text-sm font-semibold uppercase tracking-wider">DSC IN — Available ({inDSC.length})</p>
               </div>
               {loading && inDSC.length === 0
                 ? <MiniLoader />
@@ -2427,10 +2429,10 @@ export default function DSCRegister() {
 
           {/* OUT tab */}
           <TabsContent value="out" className="mt-4">
-            <div className="rounded-2xl border shadow-sm overflow-hidden flex flex-col" style={tabCard('#fecaca')}>
-              <div className="bg-red-50 border-b border-red-200 px-5 py-3 flex items-center gap-2">
-                <ArrowUpCircle className="h-4 w-4 text-red-700 flex-shrink-0" />
-                <p className="text-sm font-semibold text-red-700 uppercase tracking-wider">DSC OUT — Taken ({outDSC.length})</p>
+            <div className="rounded-xl border shadow-sm overflow-hidden flex flex-col" style={tabCard()}>
+              <div className={`border-b px-5 py-3 flex items-center gap-2 ${isDark ? 'bg-red-950/40 border-red-900/40 text-red-300' : 'bg-red-50/80 border-red-100 text-red-700'}`}>
+                <ArrowUpCircle className="h-4 w-4 text-red-600 dark:text-red-400 flex-shrink-0" />
+                <p className="text-sm font-semibold uppercase tracking-wider">DSC OUT — Taken ({outDSC.length})</p>
               </div>
               {loading && outDSC.length === 0
                 ? <MiniLoader />
@@ -2451,10 +2453,10 @@ export default function DSCRegister() {
 
           {/* EXPIRED tab */}
           <TabsContent value="expired" className="mt-4">
-            <div className="rounded-2xl border shadow-sm overflow-hidden flex flex-col" style={tabCard('#fde68a')}>
-              <div className="bg-amber-50 border-b border-amber-300 px-5 py-3 flex items-center gap-2">
-                <AlertCircle className="h-4 w-4 text-amber-700 flex-shrink-0" />
-                <p className="text-sm font-semibold text-amber-700 uppercase tracking-wider">DSC EXPIRED ({expiredDSC.length})</p>
+            <div className="rounded-xl border shadow-sm overflow-hidden flex flex-col" style={tabCard()}>
+              <div className={`border-b px-5 py-3 flex items-center gap-2 ${isDark ? 'bg-amber-950/40 border-amber-900/40 text-amber-300' : 'bg-amber-50/80 border-amber-100 text-amber-700'}`}>
+                <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-400 flex-shrink-0" />
+                <p className="text-sm font-semibold uppercase tracking-wider">DSC EXPIRED ({expiredDSC.length})</p>
               </div>
               {loading && expiredDSC.length === 0
                 ? <MiniLoader />
@@ -2475,12 +2477,11 @@ export default function DSCRegister() {
 
           {/* EXPIRING 7d tab */}
           <TabsContent value="expiring7" className="mt-4">
-            <div className="rounded-2xl border shadow-sm overflow-hidden flex flex-col" style={tabCard('#fed7aa')}>
-              <div className="border-b px-5 py-3 flex items-center justify-between gap-2"
-                style={{ background: isDark ? 'rgba(251,146,60,0.10)' : '#fff7ed', borderColor: isDark ? 'rgba(251,146,60,0.25)' : '#fed7aa' }}>
+            <div className="rounded-xl border shadow-sm overflow-hidden flex flex-col" style={tabCard()}>
+              <div className={`border-b px-5 py-3 flex items-center justify-between gap-2 ${isDark ? 'bg-orange-950/40 border-orange-900/40 text-orange-300' : 'bg-orange-50/80 border-orange-100 text-orange-700'}`}>
                 <div className="flex items-center gap-2">
-                  <Clock className="h-4 w-4 text-orange-600 flex-shrink-0" />
-                  <p className="text-sm font-semibold text-orange-700 uppercase tracking-wider">DSC EXPIRING WITHIN 7 DAYS ({expiring7DSC.length})</p>
+                  <Clock className="h-4 w-4 text-orange-600 dark:text-orange-400 flex-shrink-0" />
+                  <p className="text-sm font-semibold uppercase tracking-wider">DSC EXPIRING WITHIN 7 DAYS ({expiring7DSC.length})</p>
                 </div>
                 {expiring7DSC.length > 0 && (
                   <Button size="sm" onClick={() => {
@@ -2586,7 +2587,7 @@ export default function DSCRegister() {
             <DialogDescription>Full details of the selected DSC. Use the buttons to share via WhatsApp, email, or download the screenshot.</DialogDescription>
           </DialogHeader>
 
-          <div ref={shareAreaRef} className={`rounded-2xl overflow-hidden border shadow-2xl ${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-900'}`}>
+          <div ref={shareAreaRef} className={`rounded-xl overflow-hidden shadow-2xl ${isDark ? 'bg-slate-900 border border-slate-700 text-white' : 'bg-white border border-slate-200 text-slate-900'}`} style={{ borderColor: isDark ? '#334155' : '#e2e8f0' }}>
             {/* ── Card body — captured by html2canvas (ref=cardCaptureRef) ── */}
             <div ref={cardCaptureRef}>
             {(() => {

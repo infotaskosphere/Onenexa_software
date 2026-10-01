@@ -33,6 +33,7 @@ from backend.gst_reconciliation import create_gst_reconciliation_indexes
 from backend.zero_touch_entry import router as zero_touch_entry_router, create_zte_indexes
 from backend.learning.learning_router import router as learning_router
 from backend.gst_portal_sync import router as gst_portal_sync_router, create_gst_portal_sync_indexes
+from backend.free_gst_api import router as free_gst_api_router
 from backend.accounting_lock import router as accounting_lock_router, create_accounting_integrity_indexes
 from backend.reminders_router import router as reminders_router
 from backend.quotations import router as quotation_router
@@ -375,6 +376,7 @@ register_legacy_router_mounts(
         zero_touch_entry_router,
         learning_router,
         gst_portal_sync_router,
+        free_gst_api_router,
         accounting_lock_router,
         ai_document_reader_router,
         aiweave_router,

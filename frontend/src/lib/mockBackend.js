@@ -1335,6 +1335,229 @@ export function handleMockRoute(method, url, data) {
     };
   }
 
+  // ── Free GST API & GST Portal Sync Mock Endpoints ──────────────────────
+  if (normUrl.startsWith("/gst/lookup") || normUrl.startsWith("/gst-portal/lookup")) {
+    const rawGstin = normUrl.split("/").pop().replace(/^[?].*$/, "") || (requestData && requestData.gstin) || "29AABCU9603R1ZJ";
+    const clean = decodeURIComponent(rawGstin).trim().toUpperCase();
+    const stateCode = clean.slice(0, 2);
+    const STATE_NAMES = {
+      '01':'Jammu and Kashmir','02':'Himachal Pradesh','03':'Punjab','04':'Chandigarh','05':'Uttarakhand',
+      '06':'Haryana','07':'Delhi','08':'Rajasthan','09':'Uttar Pradesh','10':'Bihar',
+      '19':'West Bengal','24':'Gujarat','27':'Maharashtra','29':'Karnataka','33':'Tamil Nadu','36':'Telangana',
+    };
+    const stateName = STATE_NAMES[stateCode] || 'Maharashtra';
+    const pan = clean.slice(2, 12) || 'AABCU9603R';
+    const KNOWN = {
+      '29AABCU9603R1ZJ': { legal: 'Infosys Limited', trade: 'Infosys', type: 'Public Limited Company', pan: 'AABCU9603R' },
+      '27AAACT2882H1Z7': { legal: 'Tata Consultancy Services Ltd', trade: 'TCS', type: 'Public Limited Company', pan: 'AAACT2882H' },
+      '27AAACR0442P1Z8': { legal: 'Reliance Industries Limited', trade: 'Reliance', type: 'Public Limited Company', pan: 'AAACR0442P' },
+      '29AAACW1682B1ZG': { legal: 'Wipro Limited', trade: 'Wipro', type: 'Public Limited Company', pan: 'AAACW1682B' },
+      '07AAAAA0000A1Z4': { legal: 'Indian Oil Corporation Ltd', trade: 'IndianOil', type: 'Government / PSU', pan: 'AAAAA0000A' },
+      '24AAAAA0000A1Z8': { legal: 'Gujarat State Petroleum Corp', trade: 'GSPC', type: 'State Government', pan: 'AAAAA0000A' },
+    };
+    const info = KNOWN[clean] || {
+      legal: `Enterprise Taxpayer (${stateName})`,
+      trade: `Commercial Taxpayer ${clean.slice(-4)}`,
+      type: 'Company (Private / Public Limited)',
+      pan: pan,
+    };
+    return {
+      status: 200,
+      data: {
+        id: `gst-${clean}`,
+        gstin: clean,
+        valid: clean.length === 15,
+        legal_name: info.legal,
+        trade_name: info.trade,
+        status: clean.length === 15 ? 'Active' : 'Invalid',
+        taxpayer_type: 'Regular',
+        pan: info.pan,
+        state_code: stateCode,
+        state_name: stateName,
+        entity_type: info.type,
+        checksum_valid: clean.length === 15,
+        registration_date: '2017-07-01',
+        principal_place_of_business: {
+          address: `Plot 42, Central Business District, ${stateName}`,
+          state: stateName,
+          state_code: stateCode,
+        },
+        filing_frequency: 'Monthly (GSTR-1, GSTR-3B)',
+        source: 'Free Live GST API Engine',
+        verified_at: new Date().toISOString(),
+      },
+    };
+  }
+
+  if (normUrl === "/gst/verify" || normUrl === "/gst-portal/verify") {
+    const clean = (requestData?.gstin || "").trim().toUpperCase();
+    return {
+      status: 200,
+      data: {
+        gstin: clean,
+        valid: clean.length === 15,
+        status: clean.length === 15 ? "Active" : "Invalid",
+        taxpayer_type: "Regular",
+        legal_name: `Verified Taxpayer (${clean.slice(0, 2)})`,
+        source: "Free GST Verification Engine",
+        verified_at: new Date().toISOString(),
+      },
+    };
+  }
+
+  if (normUrl === "/gst/bulk-verify") {
+    const list = Array.isArray(requestData?.gstins) ? requestData.gstins : [];
+    const results = list.map((g) => {
+      const clean = (g || "").trim().toUpperCase();
+      return {
+        gstin: clean,
+        valid: clean.length === 15,
+        status: clean.length === 15 ? "Active" : "Invalid",
+        legal_name: `Verified Entity ${clean.slice(2, 6)}`,
+        trade_name: clean.length === 15 ? `Trade ${clean.slice(0, 5)}` : "—",
+        state_code: clean.slice(0, 2),
+        pan: clean.slice(2, 12),
+        taxpayer_type: "Regular",
+        source: "Free GST API Bulk Engine",
+      };
+    });
+    return {
+      status: 200,
+      data: {
+        total: results.length,
+        valid_count: results.filter((r) => r.valid).length,
+        invalid_count: results.filter((r) => !r.valid).length,
+        results,
+      },
+    };
+  }
+
+  if (normUrl === "/gst/config") {
+    if (method === "post") {
+      return { status: 200, data: { success: true, message: "Configuration saved." } };
+    }
+    return {
+      status: 200,
+      data: {
+        config: {
+          id: "global_config",
+          provider: "builtin_free",
+          provider_name: "Free Built-in Engine & Public Registry",
+          api_key: "",
+          active: true,
+          tier: "Free / Unlimited",
+        },
+        cache_records_count: 12,
+        supported_providers: [
+          { id: "builtin_free", name: "Free Built-in Engine (No API key needed, unlimited)", is_free: true },
+          { id: "sheetgst", name: "SheetGST / GSTINCheck Free Tier (20 free requests/key)", is_free: true },
+          { id: "rapidapi", name: "RapidAPI GSTIN Tool (Free Plan)", is_free: true },
+          { id: "custom_gsp", name: "Custom GSP / Government Gateway", is_free: false },
+        ],
+      },
+    };
+  }
+
+  if (normUrl.startsWith("/gst-portal/dashboard-metrics")) {
+    return {
+      status: 200,
+      data: {
+        portal_configured: true,
+        mode: "Free GST API Mode",
+        free_api_active: true,
+        total_liability: 34250,
+        net_available_credits: 48900,
+        cash_reserves: 185000,
+        discrepancy_pct: 0.0,
+        is_audit_risk: false,
+        last_synced_at: new Date().toISOString(),
+      },
+    };
+  }
+
+  if (normUrl.startsWith("/gst-portal/snapshot")) {
+    return {
+      status: 200,
+      data: [
+        {
+          id: "snap-01",
+          gstin: "29AABCU9603R1ZJ",
+          period: "09-2026",
+          outward_cash_liability: 12500,
+          outward_total_liability: 34250,
+          available_itc: 48900,
+          fetched_at: new Date().toISOString(),
+        },
+        {
+          id: "snap-02",
+          gstin: "27AAACT2882H1Z7",
+          period: "08-2026",
+          outward_cash_liability: 9800,
+          outward_total_liability: 28400,
+          available_itc: 39500,
+          fetched_at: new Date(Date.now() - 86400000 * 5).toISOString(),
+        },
+      ],
+    };
+  }
+
+  if (normUrl.startsWith("/gst-portal/audit-risk")) {
+    return {
+      status: 200,
+      data: [
+        {
+          id: "risk-01",
+          period: "09-2026",
+          gstin: "29AABCU9603R1ZJ",
+          portal_liability: 34250,
+          internal_liability: 34250,
+          variance: 0,
+          variance_pct: 0.0,
+          is_risk: false,
+          computed_at: new Date().toISOString(),
+        },
+      ],
+    };
+  }
+
+  if (normUrl.startsWith("/gst-portal/sync-now")) {
+    const rawGstin = (data?.gstin || "").trim().toUpperCase() || "29AABCU9603R1ZJ";
+    return {
+      status: 200,
+      data: {
+        success: true,
+        message: "Synced live liability & credit ledger via Free GST API Engine.",
+        snapshot: {
+          id: `snap-${Date.now()}`,
+          gstin: rawGstin,
+          period: "09-2026",
+          outward_cash_liability: 14200,
+          outward_total_liability: 32000,
+          available_itc: 45000,
+          fetched_at: new Date().toISOString(),
+        },
+        audit_risk: {
+          period: "09-2026",
+          portal_liability: 32000,
+          internal_liability: 32000,
+          variance: 0,
+          variance_pct: 0.0,
+          is_risk: false,
+        },
+      },
+    };
+  }
+
+  if (normUrl.startsWith("/gst-portal/register") || normUrl.startsWith("/gst-portal/registrations")) {
+    return {
+      status: 200,
+      data: [
+        { id: "reg-1", gstin: "29AABCU9603R1ZJ", active: true, created_at: new Date().toISOString() },
+        { id: "reg-2", gstin: "27AAACT2882H1Z7", active: true, created_at: new Date().toISOString() },
+      ],
+    };
+  }
+
   // Generic fallback for any other GET/POST
   if (method === "get") {
     return { status: 200, data: [] };

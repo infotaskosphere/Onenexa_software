@@ -284,11 +284,16 @@ export default function DSCLinkerSection({
           return (
             <div
               key={idx}
-              className={`border rounded-xl overflow-hidden transition-all ${
+              className={`border rounded-xl overflow-hidden transition-all shadow-sm ${
                 isLinked
-                  ? isDark ? "bg-blue-900/10 border-blue-500/30" : "bg-blue-50/60 border-blue-200"
-                  : isDark ? "bg-slate-800 border-slate-600" : "bg-white border-slate-200"
+                  ? isDark ? "bg-blue-950/20 border-blue-900/50" : "bg-blue-50/50 border-blue-200"
+                  : isDark ? "bg-slate-800 border-slate-700" : "bg-white border-slate-200"
               }`}
+              style={{
+                borderColor: isLinked
+                  ? (isDark ? 'rgba(59, 130, 246, 0.3)' : '#bfdbfe')
+                  : (isDark ? '#334155' : '#e2e8f0'),
+              }}
             >
               {/* Card header row */}
               <div className="flex items-center gap-3 px-4 py-3">

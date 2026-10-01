@@ -8,23 +8,45 @@
 body:not(.website-surface) #root .records-dashboard-panel{
   border-radius:0!important;
   box-shadow:none!important;
-  border:1px solid #dbe3ea!important;
+  border:1px solid #e2e8f0!important;
+  background:#fff!important;
+}
+
+html.dark body:not(.website-surface) #root .records-dashboard-panel,
+body.dark:not(.website-surface) #root .records-dashboard-panel,
+body:not(.website-surface) #root .records-dashboard-panel-dark{
+  border:1px solid #334155!important;
+  background:#1e293b!important;
+  color:#e2e8f0!important;
 }
 
 body:not(.website-surface) #root .records-dashboard-panel-header{
   border-radius:0!important;
   box-shadow:none!important;
+  border:0!important;
+  border-bottom:1px solid #e2e8f0!important;
+  background:#fff!important;
 }
 
-/* Remove the legacy dark-blue frame that was being applied around panel bodies. */
+html.dark body:not(.website-surface) #root .records-dashboard-panel-header,
+body.dark:not(.website-surface) #root .records-dashboard-panel-header,
+body:not(.website-surface) #root .records-dashboard-panel-dark .records-dashboard-panel-header{
+  background:#1e293b!important;
+  border-bottom:1px solid #334155!important;
+  color:#f8fafc!important;
+}
+
+/* Remove any white frame, padding background, or inner borders */
 body:not(.website-surface) #root .records-dashboard-panel-body{
   border:0!important;
-  border-top:0!important;
-  border-right:0!important;
-  border-bottom:0!important;
-  border-left:0!important;
   border-radius:0!important;
   box-shadow:none!important;
+  background:transparent!important;
+}
+
+html.dark body:not(.website-surface) #root .records-dashboard-panel-body,
+body:not(.website-surface) #root .records-dashboard-panel-dark .records-dashboard-panel-body{
+  background:transparent!important;
 }
 
 body:not(.website-surface) #root .records-dashboard-empty,
@@ -32,6 +54,19 @@ body:not(.website-surface) #root .records-dashboard-approval-empty,
 body:not(.website-surface) #root .records-dashboard-bar{
   border-radius:0!important;
   box-shadow:none!important;
+  background:transparent!important;
+  border:0!important;
+}
+
+html.dark body:not(.website-surface) #root .records-dashboard-empty,
+html.dark body:not(.website-surface) #root .records-dashboard-approval-empty,
+html.dark body:not(.website-surface) #root .records-dashboard-bar,
+body:not(.website-surface) #root .records-dashboard-panel-dark .records-dashboard-empty,
+body:not(.website-surface) #root .records-dashboard-panel-dark .records-dashboard-approval-empty,
+body:not(.website-surface) #root .records-dashboard-panel-dark .records-dashboard-bar{
+  background:transparent!important;
+  color:#94a3b8!important;
+  border:0!important;
 }
 
 /* --------------------------------------------------------------------------

@@ -61,16 +61,30 @@ const fmtDate = (d) => {
 
 function Panel({ title, subtitle, icon: Icon, color, isDark, action, onAction, children }) {
   return (
-    <section className={`records-dashboard-panel ${isDark ? 'records-dashboard-panel-dark' : ''}`}>
-      <header className="records-dashboard-panel-header">
+    <section
+      className={`records-dashboard-panel ${isDark ? 'records-dashboard-panel-dark' : ''}`}
+      style={{
+        border: isDark ? '1px solid #334155' : '1px solid #e2e8f0',
+        borderRadius: 0,
+        backgroundColor: isDark ? '#1e293b' : '#ffffff'
+      }}
+    >
+      <header
+        className="records-dashboard-panel-header"
+        style={{
+          borderBottom: isDark ? '1px solid #334155' : '1px solid #e2e8f0',
+          backgroundColor: isDark ? '#1e293b' : '#ffffff',
+          borderRadius: 0
+        }}
+      >
         {Icon && (
-          <div className="records-dashboard-panel-icon" style={{ background: `${color}18` }}>
+          <div className="records-dashboard-panel-icon" style={{ background: `${color}18`, borderRadius: 0 }}>
             <Icon className="h-4 w-4" style={{ color }} />
           </div>
         )}
         <div className="min-w-0 flex-1">
-          <h3 className="records-dashboard-panel-title">{title}</h3>
-          {subtitle && <p className="records-dashboard-panel-subtitle">{subtitle}</p>}
+          <h3 className={`records-dashboard-panel-title ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{title}</h3>
+          {subtitle && <p className={`records-dashboard-panel-subtitle ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{subtitle}</p>}
         </div>
         {action && (
           <button onClick={onAction} className="records-dashboard-panel-action">
@@ -78,27 +92,45 @@ function Panel({ title, subtitle, icon: Icon, color, isDark, action, onAction, c
           </button>
         )}
       </header>
-      <div className="records-dashboard-panel-body">{children}</div>
+      <div
+        className="records-dashboard-panel-body"
+        style={{
+          backgroundColor: 'transparent',
+          border: 0,
+          borderRadius: 0
+        }}
+      >
+        {children}
+      </div>
     </section>
   );
 }
 
 function EmptyRow({ text, isDark }) {
   return (
-    <p className={`records-dashboard-empty ${isDark ? 'records-dashboard-empty-dark' : ''}`}>{text}</p>
+    <p
+      className={`records-dashboard-empty ${isDark ? 'records-dashboard-empty-dark text-slate-400' : 'text-slate-500'}`}
+      style={{
+        backgroundColor: 'transparent',
+        border: 0,
+        borderRadius: 0
+      }}
+    >
+      {text}
+    </p>
   );
 }
 
 function Bar({ label, value, max, color, isDark }) {
   const pct = max > 0 ? Math.max(4, Math.round((value / max) * 100)) : 0;
   return (
-    <div className="records-dashboard-bar">
+    <div className="records-dashboard-bar" style={{ backgroundColor: 'transparent', border: 0, borderRadius: 0 }}>
       <div className="flex items-center justify-between mb-1.5">
         <span className={`text-xs font-semibold truncate pr-2 ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>{label}</span>
         <span className="text-xs font-extrabold shrink-0" style={{ color }}>{value}</span>
       </div>
-      <div className={`h-1.5 rounded-full ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
-        <div className="h-1.5 rounded-full transition-all" style={{ width: `${pct}%`, background: color }} />
+      <div className={`h-1.5 ${isDark ? 'bg-slate-700/80' : 'bg-slate-100'}`} style={{ borderRadius: 0 }}>
+        <div className="h-1.5 transition-all" style={{ width: `${pct}%`, background: color, borderRadius: 0 }} />
       </div>
     </div>
   );
@@ -289,7 +321,7 @@ export default function RecordsDashboard() {
           {loading ? (
             <EmptyRow text="Loading…" isDark={isDark} />
           ) : pendingList.length === 0 ? (
-            <div className="records-dashboard-approval-empty">
+            <div className="records-dashboard-approval-empty" style={{ backgroundColor: 'transparent', border: 0, borderRadius: 0 }}>
               <CheckCircle2 className="h-5 w-5 mx-auto mb-2 text-emerald-500" />
               <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>All clients are approved.</p>
             </div>

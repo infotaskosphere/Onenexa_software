@@ -49,7 +49,7 @@ export function HubBanner({ icon: Icon, eyebrow, title, subtitle, isDark, stats 
             {visibleStats.map((s, i) => (
               <div
                 key={i}
-                className="min-w-0 w-full xl:min-w-[110px] rounded-2xl px-3 sm:px-4 py-3 bg-white/10 backdrop-blur-sm border border-white/10 overflow-hidden"
+                className="min-w-0 w-full xl:min-w-[110px] rounded-xl px-3 sm:px-4 py-3 bg-white/12 backdrop-blur-sm overflow-hidden shadow-sm border-0"
               >
                 <p className="text-[10px] font-bold uppercase tracking-wider text-blue-100/70 truncate">{s.label}</p>
                 <p className="text-xl font-extrabold text-white mt-0.5">
@@ -70,11 +70,14 @@ export function HubBanner({ icon: Icon, eyebrow, title, subtitle, isDark, stats 
 export function StatCard({ icon: Icon, label, value, loading, color, isDark }) {
   return (
     <div
-      className={`rounded-2xl border p-4 flex items-center gap-3 ${
-        isDark ? 'bg-slate-800/60 border-slate-700/80' : 'bg-white border-slate-100 shadow-sm'
+      className={`rounded-xl border p-4 flex items-center gap-3 transition-colors ${
+        isDark ? 'bg-slate-800/80 text-slate-100' : 'bg-white text-slate-800 shadow-sm'
       }`}
+      style={{
+        borderColor: isDark ? '#334155' : '#e2e8f0',
+      }}
     >
-      <div className="p-2.5 rounded-xl shrink-0" style={{ background: `${color}18` }}>
+      <div className="p-2.5 rounded-lg shrink-0" style={{ background: `${color}18` }}>
         <Icon className="h-5 w-5" style={{ color }} />
       </div>
       <div className="min-w-0">
@@ -98,11 +101,14 @@ export function LinkCard({ icon: Icon, label, description, path, color, isDark, 
       onClick={() => navigate(path)}
       whileHover={{ y: -3 }}
       whileTap={{ scale: 0.98 }}
-      className={`group text-left rounded-2xl border p-5 flex flex-col gap-3 transition-colors cursor-pointer ${
+      className={`group text-left rounded-xl border p-5 flex flex-col gap-3 transition-colors cursor-pointer ${
         isDark
-          ? 'bg-slate-800/60 border-slate-700/80 hover:border-slate-600'
-          : 'bg-white border-slate-100 shadow-sm hover:border-slate-200'
+          ? 'bg-slate-800/80 hover:border-slate-600'
+          : 'bg-white shadow-sm hover:border-slate-300'
       }`}
+      style={{
+        borderColor: isDark ? '#334155' : '#e2e8f0',
+      }}
     >
       <div className="flex items-start justify-between">
         <div className="p-2.5 rounded-xl" style={{ background: `${color}18` }}>
