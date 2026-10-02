@@ -17,9 +17,17 @@ jobs:
         run: |
           python - <<'PY'
           import ast, pathlib, re
-          src = pathlib.Path("backend/tenant_runtime.py").read_text()
-          m = re.search(r"TENANT_COLLECTIONS = \\{(.*?)\\n\\}", src, re.S)
-          names = set(re.findall(r'"([^"]+)"', m.group(1)))
+          tenant_tree = ast.parse(pathlib.Path("backend/tenant_runtime.py").read_text())
+          names = set()
+          for node in ast.walk(tenant_tree):
+              if isinstance(node, ast.Assign) and any(
+                  isinstance(t, ast.Name) and t.id == "TENANT_COLLECTIONS"
+                  for t in node.targets
+              ):
+                  if isinstance(node.value, (ast.Set, ast.Dict, ast.List, ast.Tuple)):
+                      for item in (node.value.elts if hasattr(node.value, "elts") else node.value.keys):
+                          if isinstance(item, ast.Constant) and isinstance(item.value, str):
+                              names.add(item.value)
           names |= {"companies"}
 
           refs = {}
