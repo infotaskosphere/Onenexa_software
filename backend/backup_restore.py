@@ -16,6 +16,7 @@ from __future__ import annotations
 import base64
 import asyncio
 import logging
+import inspect
 import json
 import os
 import secrets
@@ -437,6 +438,111 @@ async def _resolve_collections(user: User, requested: list[str] | None):
     return company_id, company, user_ids, identities, selected
 
 
+# ---------------------------------------------------------------------------
+# Resumable, proxy-safe artifact streaming
+# ---------------------------------------------------------------------------
+# Motor's ``open_download_stream`` is a coroutine and MUST be awaited. It was
+# previously used un-awaited, so the response generator raised AttributeError
+# *after* the 200 headers had been sent. The proxy then returned 502 (no CORS
+# header), which the browser reported as "Network Error". Downloads are also
+# served with Range support so an interrupted transfer can resume instead of
+# restarting, and are marked ``Content-Encoding: identity`` so GZipMiddleware
+# does not try to compress an already-encrypted (incompressible) payload.
+def _parse_range_header(header: str | None, size: int):
+    if not header or size <= 0 or not header.lower().startswith("bytes="):
+        return None
+    spec = header[6:].split(",")[0].strip()
+    start_text, _, end_text = spec.partition("-")
+    try:
+        if start_text == "":
+            suffix = int(end_text)
+            if suffix <= 0:
+                return None
+            start, end = max(0, size - suffix), size - 1
+        else:
+            start = int(start_text)
+            end = int(end_text) if end_text else size - 1
+    except ValueError:
+        return None
+    if start >= size or start > end:
+        raise HTTPException(
+            status_code=416,
+            detail="Requested range is not satisfiable.",
+            headers={"Content-Range": f"bytes */{size}"},
+        )
+    return start, min(end, size - 1)
+
+
+async def _stream_backup_artifact(request: Request, raw, doc: dict, backup_id: str):
+    artifact_id = doc.get("artifact_file_id")
+    if not isinstance(artifact_id, ObjectId):
+        artifact_id = ObjectId(artifact_id) if ObjectId.is_valid(str(artifact_id)) else None
+    if artifact_id is None:
+        raise HTTPException(status_code=410, detail="The backup artifact is no longer available.")
+
+    bucket = _backup_gridfs(raw)
+    try:
+        grid_out = bucket.open_download_stream(artifact_id)
+        if inspect.isawaitable(grid_out):
+            grid_out = await grid_out
+    except Exception as exc:
+        logger.error("Backup artifact missing: %s", exc, exc_info=True)
+        raise HTTPException(status_code=410, detail="The backup artifact is no longer available.") from exc
+
+    size = int(getattr(grid_out, "length", None) or doc.get("file_size_bytes") or 0)
+    byte_range = _parse_range_header(request.headers.get("range"), size)
+    start, end = byte_range if byte_range else (0, max(0, size - 1))
+    length = (end - start + 1) if size else None
+
+    async def stream_backup():
+        skip = start
+        remaining = length
+        try:
+            while remaining is None or remaining > 0:
+                chunk = await grid_out.read(CHUNK_SIZE)
+                if not chunk:
+                    break
+                if skip:
+                    if len(chunk) <= skip:
+                        skip -= len(chunk)
+                        continue
+                    chunk = chunk[skip:]
+                    skip = 0
+                if remaining is not None:
+                    chunk = chunk[:remaining]
+                    remaining -= len(chunk)
+                yield chunk
+        except Exception:
+            logger.error("Backup artifact stream failed for %s", backup_id, exc_info=True)
+            raise
+        finally:
+            try:
+                await grid_out.close()
+            except Exception:
+                pass
+
+    filename = (doc.get("filename") or f"onenexa-backup-{backup_id}{NEW_BACKUP_EXTENSION}").replace('"', "")
+    headers = {
+        "Content-Disposition": f'attachment; filename="{filename}"',
+        "Accept-Ranges": "bytes",
+        "Content-Encoding": "identity",
+        "Cache-Control": "no-store",
+        "X-Backup-Size": str(size),
+    }
+    status = 200
+    if length is not None:
+        headers["Content-Length"] = str(length)
+    if byte_range:
+        status = 206
+        headers["Content-Range"] = f"bytes {start}-{end}/{size}"
+    return StreamingResponse(
+        stream_backup(),
+        status_code=status,
+        media_type="application/octet-stream",
+        headers=headers,
+    )
+
+
 @router.get("/info")
 async def backup_info(current_user: User = Depends(get_current_user)):
     _require_backup_access(current_user)
@@ -505,19 +611,25 @@ async def _run_backup_job(progress_id: str, current_user: User, password: str, r
 
 
 @router.get("/create/download/{progress_id}")
-async def download_created_backup(progress_id: str, current_user: User = Depends(get_current_user)):
+async def download_created_backup(progress_id: str, request: Request, current_user: User = Depends(get_current_user)):
     _require_backup_access(current_user)
     if not progress_id or len(progress_id) > 120:
         raise HTTPException(status_code=400, detail="Invalid backup progress id.")
     state = _get_backup_progress(progress_id)
     if _s(state.get("owner_user_id")) != _s(current_user.id):
         raise HTTPException(status_code=404, detail="Backup progress session not found.")
-    item = _BACKUP_OUTPUTS.get(progress_id)
-    if not item or not item.get("path") or not os.path.exists(item["path"]):
-        raise HTTPException(status_code=409, detail="Backup is not ready for download or has expired.")
     if state.get("phase") != "ready":
         raise HTTPException(status_code=409, detail="Backup is still being created.")
-    return FileResponse(item["path"], media_type="application/octet-stream", filename=item["filename"], background=BackgroundTask(lambda: _cleanup_backup_output(progress_id)))
+    history_id = _s(state.get("history_id"))
+    if not ObjectId.is_valid(history_id):
+        raise HTTPException(status_code=409, detail="Backup is not ready for download or has expired.")
+    raw = _raw_db()
+    # Serve the persisted GridFS artifact (not a process-local temp file) so the
+    # download survives worker restarts and can be retried / resumed.
+    doc = await raw[BACKUP_HISTORY_COLLECTION].find_one({"_id": ObjectId(history_id)})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Backup history record not found.")
+    return await _stream_backup_artifact(request, raw, doc, history_id)
 
 
 @router.get("/history")
@@ -534,7 +646,7 @@ async def list_backup_history(current_user: User = Depends(get_current_user)):
 
 
 @router.get("/history/{backup_id}/download")
-async def download_backup_history(backup_id: str, current_user: User = Depends(get_current_user)):
+async def download_backup_history(backup_id: str, request: Request, current_user: User = Depends(get_current_user)):
     _require_backup_access(current_user)
     if not ObjectId.is_valid(backup_id):
         raise HTTPException(status_code=400, detail="Invalid backup history id.")
@@ -543,34 +655,7 @@ async def download_backup_history(backup_id: str, current_user: User = Depends(g
     doc = await raw[BACKUP_HISTORY_COLLECTION].find_one({"_id": ObjectId(backup_id), "company_id": company_id})
     if not doc:
         raise HTTPException(status_code=404, detail="Backup history record not found.")
-    artifact_id = doc.get("artifact_file_id")
-    if not isinstance(artifact_id, ObjectId):
-        artifact_id = ObjectId(artifact_id) if ObjectId.is_valid(str(artifact_id)) else None
-    if artifact_id is None:
-        raise HTTPException(status_code=410, detail="The backup artifact is no longer available.")
-
-    bucket = _backup_gridfs(raw)
-    try:
-        grid_out = bucket.open_download_stream(artifact_id)
-    except Exception as exc:
-        logger.error("Backup history artifact missing: %s", exc, exc_info=True)
-        raise HTTPException(status_code=410, detail="The backup artifact is no longer available.") from exc
-
-    async def stream_backup():
-        try:
-            while chunk := await grid_out.read(CHUNK_SIZE):
-                yield chunk
-        finally:
-            try:
-                await grid_out.close()
-            except Exception:
-                pass
-
-    filename = doc.get("filename") or f"onenexa-backup-{backup_id}{NEW_BACKUP_EXTENSION}"
-    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
-    if doc.get("file_size_bytes"):
-        headers["Content-Length"] = str(int(doc["file_size_bytes"]))
-    return StreamingResponse(stream_backup(), media_type="application/octet-stream", headers=headers)
+    return await _stream_backup_artifact(request, raw, doc, backup_id)
 
 
 @router.delete("/history/{backup_id}")
