@@ -1210,25 +1210,30 @@ async def _build_archive(
                         if len(pending_lines) >= 500:
                             entry.write(("\n".join(pending_lines) + "\n").encode("utf-8"))
                             pending_lines.clear()
-                        elapsed = max(0.001, time.monotonic() - started_at)
-                        ratio = processed_documents / total_documents if total_documents else 1.0
-                        percent = min(90.0, ratio * 90.0)
-                        speed = processed_documents / elapsed if processed_documents else 0.0
-                        remaining = max(0, total_documents - processed_documents)
-                        eta = remaining / speed if speed > 0 else None
+                        if processed_documents % 500 == 0 or processed_documents == total_documents:
+                            elapsed = max(0.001, time.monotonic() - started_at)
+                            ratio = (
+                                processed_documents / total_documents
+                                if total_documents
+                                else 1.0
+                            )
+                            percent = min(90.0, ratio * 90.0)
+                            speed = processed_documents / elapsed if processed_documents else 0.0
+                            remaining = max(0, total_documents - processed_documents)
+                            eta = (remaining / speed) if speed > 0 else None
 
-                        _set_backup_progress(
-                            progress_id,
-                            phase="creating",
-                            percent=round(percent, 2),
-                            processed_documents=processed_documents,
-                            total_documents=total_documents,
-                            eta_seconds=round(eta, 1) if eta is not None else None,
-                            elapsed_seconds=round(elapsed, 1),
-                            current_collection=name,
-                        )
+                            _set_backup_progress(
+                                progress_id,
+                                phase="creating",
+                                percent=round(percent, 2),
+                                processed_documents=processed_documents,
+                                total_documents=total_documents,
+                                eta_seconds=round(eta, 1) if eta is not None else None,
+                                elapsed_seconds=round(elapsed, 1),
+                                current_collection=name,
+                            )
 
-                        if processed_documents % 500 == 0:
+                        if processed_documents % 50 == 0:
                             await asyncio.sleep(0)
 
                     if pending_lines:
