@@ -556,7 +556,7 @@ async def download_backup_history(backup_id: str, current_user: User = Depends(g
 
     bucket = _backup_gridfs(raw)
     try:
-        grid_out = await bucket.open_download_stream(artifact_id)
+        grid_out = bucket.open_download_stream(artifact_id)
     except Exception as exc:
         logger.error("Backup history artifact missing: %s", exc, exc_info=True)
         raise HTTPException(status_code=410, detail="The backup artifact is no longer available.") from exc
