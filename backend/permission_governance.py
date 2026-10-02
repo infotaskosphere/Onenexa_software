@@ -217,6 +217,31 @@ def _require_admin(user: User):
         raise HTTPException(status_code=403, detail="Only an admin can do this.")
 
 
+async def _access_request_scope_query(current_user: User, extra: Optional[dict] = None) -> dict:
+    """Scope governance requests to the authenticated tenant while preserving legacy rows."""
+    base = dict(extra or {})
+    company_id = str(getattr(current_user, "company_id", "") or "").strip()
+    if not company_id:
+        return base
+
+    scoped_users = await db.users.find(
+        _scope_user_query({}),
+        {"_id": 0, "id": 1},
+    ).to_list(5000)
+    user_ids = [str(row.get("id")) for row in scoped_users if row.get("id")]
+
+    scope = {
+        "$or": [
+            {"company_id": company_id},
+            {
+                "company_id": {"$in": [None, ""]},
+                "user_id": {"$in": user_ids},
+            },
+        ]
+    }
+    return {"$and": [base, scope]} if base else scope
+
+
 @router.get("/permission-governance/modules")
 async def list_governed_modules(current_user: User = Depends(get_current_user)):
     """The list of requestable modules, for the request-access UI to render."""
@@ -247,6 +272,7 @@ async def create_access_request(
         "user_email": current_user.email,
         "module": payload.module,
         "module_label": GOVERNED_MODULES[payload.module]["label"],
+        "company_id": getattr(current_user, "company_id", None),
         "reason": (payload.reason or "").strip()[:500],
         "status": "pending",
         "decided_by": None,
@@ -279,7 +305,8 @@ async def list_access_requests(
     q = {}
     if status:
         q["status"] = status
-    items = await db.access_requests.find(q, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    scoped_query = await _access_request_scope_query(current_user, q)
+    items = await db.access_requests.find(scoped_query, {"_id": 0}).sort("created_at", -1).to_list(1000)
     return items
 
 
@@ -298,6 +325,12 @@ async def approve_access_request(
     reqdoc = await db.access_requests.find_one({"id": request_id}, {"_id": 0})
     if not reqdoc:
         raise HTTPException(status_code=404, detail="Access request not found.")
+    scoped_target = await db.users.find_one(
+        _scope_user_query({"id": reqdoc.get("user_id")}),
+        {"_id": 0, "id": 1},
+    )
+    if not scoped_target:
+        raise HTTPException(status_code=404, detail="Requested user is outside your tenant scope.")
     if reqdoc["status"] != "pending":
         raise HTTPException(status_code=400, detail=f"Request already {reqdoc['status']}.")
 
@@ -337,6 +370,12 @@ async def reject_access_request(
     reqdoc = await db.access_requests.find_one({"id": request_id}, {"_id": 0})
     if not reqdoc:
         raise HTTPException(status_code=404, detail="Access request not found.")
+    scoped_target = await db.users.find_one(
+        _scope_user_query({"id": reqdoc.get("user_id")}),
+        {"_id": 0, "id": 1},
+    )
+    if not scoped_target:
+        raise HTTPException(status_code=404, detail="Requested user is outside your tenant scope.")
     if reqdoc["status"] != "pending":
         raise HTTPException(status_code=400, detail=f"Request already {reqdoc['status']}.")
 
