@@ -49,6 +49,8 @@ TENANT_COLLECTIONS = {
     # AI & Workflow
     "knowledge_base", "learning_events", "manual_corrections", "recommendation_history",
     "learning_audit", "ai_validation_results", "ai_confidence_history", "ai_anomaly_history",
+    "ai_document_memory", "ai_document_workspace", "ai_workspace_knowledge", "document_classifications",
+    "ocr_processing_history", "ocr_quality_reports",
     "workflow_definitions", "workflow_instances", "workflow_history", "aiweave_conversations", "aiweave_executions", "aiweave_provider_accounts", "aiweave_provider_models", "aiweave_routing_rules",
     "approval_requests", "approval_history", "automation_rules", "business_events",
     "notification_history", "workflow_audit", "notifications",
