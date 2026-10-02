@@ -443,3 +443,23 @@ def test_permission_governance_request_scope_keeps_licensee_inboxes_isolated(mon
     assert scoped["$and"][0] == {"status": "pending"}
     assert scoped["$and"][1]["$or"][0] == {"company_id": "company-a"}
     assert scoped["$and"][1]["$or"][1]["user_id"] == {"$in": ["tenant-a-user"]}
+
+
+def test_tenant_registry_covers_automation_and_vault_records():
+    from backend.tenant_runtime import TENANT_COLLECTIONS
+
+    expected = {
+        "pending_client_messages",
+        "service_expiries",
+        "password_sheet_links",
+        "reminder_dup_ignores",
+    }
+
+    assert expected.issubset(TENANT_COLLECTIONS)
+
+
+def test_pending_message_and_service_expiry_models_keep_company_id():
+    from backend.automation_engine import PendingClientMessage, ServiceExpiry
+
+    assert "company_id" in PendingClientMessage.model_fields
+    assert "company_id" in ServiceExpiry.model_fields
