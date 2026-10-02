@@ -40,6 +40,8 @@ from pydantic import BaseModel, Field
 
 from backend.dependencies import get_current_user, require_admin
 from backend.models import User
+from backend.tenant_runtime import enforce_company_value
+from backend.platform_owner import is_platform_owner
 
 logger = logging.getLogger(__name__)
 
@@ -805,9 +807,11 @@ async def schedule_bulk_send(body: WAScheduleBulkRequest, current_user: User = D
     if not await _has_wa_access(current_user):
         raise HTTPException(403, "WhatsApp access not granted")
     db = _db()
+    company_id = None if is_platform_owner(current_user) else enforce_company_value(current_user, None)
     job_id = f"bulk_{int(_time.time() * 1000)}"
     job_doc = {
         "job_id": job_id,
+        "company_id": company_id,
         "created_by": current_user.id,
         "created_by_name": current_user.full_name,
         "scheduled_at": body.scheduled_at,
@@ -828,7 +832,10 @@ async def schedule_bulk_send(body: WAScheduleBulkRequest, current_user: User = D
 async def list_scheduled_bulk(current_user: User = Depends(get_current_user)):
     """List pending scheduled bulk jobs."""
     db = _db()
+    company_id = None if is_platform_owner(current_user) else enforce_company_value(current_user, None)
     query = {"status": "pending"}
+    if company_id is not None:
+        query["company_id"] = company_id
     if current_user.role != "admin":
         query["created_by"] = current_user.id
     jobs = await db["whatsapp_scheduled_bulk"].find(query).sort("scheduled_at", 1).to_list(100)
@@ -842,7 +849,10 @@ async def list_scheduled_bulk(current_user: User = Depends(get_current_user)):
 async def cancel_scheduled_bulk(job_id: str, current_user: User = Depends(get_current_user)):
     """Cancel a pending scheduled bulk job."""
     db = _db()
+    company_id = None if is_platform_owner(current_user) else enforce_company_value(current_user, None)
     query = {"job_id": job_id, "status": "pending"}
+    if company_id is not None:
+        query["company_id"] = company_id
     if current_user.role != "admin":
         query["created_by"] = current_user.id
     result = await db["whatsapp_scheduled_bulk"].update_one(query, {"$set": {"status": "cancelled", "cancelled_at": datetime.now(timezone.utc).isoformat()}})
