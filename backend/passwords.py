@@ -712,6 +712,11 @@ async def bulk_import_passwords(
     successful_imports = 0
     failed_imports = 0
     errors = []
+
+    def clean(v):
+        s = str(v).strip() if v is not None else ""
+        return None if s.lower() in ("nan", "none", "") else s
+
     for index, row in df.iterrows():
         total_processed += 1
         try:
