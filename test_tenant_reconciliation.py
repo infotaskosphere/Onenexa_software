@@ -51,6 +51,12 @@ def test_company_owned_finix_audit_history_collections_are_tenant_scoped():
         "financial_validations",
         "reconciliation_events",
         "template_usage_history",
+        "gst_learning",
+        "gst_processing_history",
+        "gst_validation",
+        "itc_register",
+        "departments",
+        "designations",
     }
 
     assert expected.issubset(TENANT_COLLECTIONS)
