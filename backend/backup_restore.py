@@ -774,8 +774,21 @@ async def restore_backup(backup: UploadFile = File(...), password: str = Form(..
                 out.write(chunk)
         zip_path = _decrypt(source_path, password)
         manifest, collections = await _read_archive(zip_path)
-        if manifest.get("scope") != "single_customer_tenant":
+        # Older Taskosphere backup files may omit the scope field or use a
+        # legacy tenant-scope label. Tenant ownership metadata is still mandatory
+        # and _restore performs the authenticated target remapping.
+        scope = str(manifest.get("scope") or "").strip().lower()
+        supported_scopes = {
+            "",
+            "single_customer_tenant",
+            "single_tenant",
+            "customer_tenant",
+            "single_customer",
+        }
+        if scope not in supported_scopes:
             raise HTTPException(status_code=400, detail="Unsupported backup scope.")
+        if not _s(manifest.get("source_company_id")) or not _s(manifest.get("owner_user_id")):
+            raise HTTPException(status_code=400, detail="Backup is missing tenant ownership metadata.")
         result = await _restore(manifest, collections, current_user, zip_path)
         return {"success": True, "message": "Application backup restored successfully.", **result}
     finally:
