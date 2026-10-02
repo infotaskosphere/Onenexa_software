@@ -48,7 +48,8 @@ TENANT_COLLECTIONS = {
     "mis_manual", "mis_transactions", "mis_uploads", "analytics_data", "kpi_history",
     # AI & Workflow
     "knowledge_base", "learning_events", "manual_corrections", "recommendation_history",
-    "learning_audit", "workflow_definitions", "workflow_instances", "workflow_history", "aiweave_conversations", "aiweave_executions", "aiweave_provider_accounts", "aiweave_provider_models", "aiweave_routing_rules",
+    "learning_audit", "ai_validation_results", "ai_confidence_history", "ai_anomaly_history",
+    "workflow_definitions", "workflow_instances", "workflow_history", "aiweave_conversations", "aiweave_executions", "aiweave_provider_accounts", "aiweave_provider_models", "aiweave_routing_rules",
     "approval_requests", "approval_history", "automation_rules", "business_events",
     "notification_history", "workflow_audit", "notifications",
     "whatsapp_hub_contacts", "whatsapp_hub_groups", "whatsapp_hub_messages",
