@@ -171,7 +171,9 @@ export function hasEffectivePermission(user, permission) {
     // Commercial licensee admins are governed by the active commercial
     // module + selected-page ceiling. Platform Owner is handled above.
     if (String(user.role || "").toLowerCase() === "admin") {
-      return normalizedSelectedFeatures(user)[moduleId]?.has(permission) === true;
+      // Tenant-admin access is capped by the purchased module, not the
+      // granular page selection used for additional tenant users.
+      return hasModuleAccess(user, moduleId);
     }
     // For non-admin (manager, staff): verify parent module is accessible
     const modDef = MODULES[moduleId];
