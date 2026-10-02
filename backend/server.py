@@ -259,7 +259,6 @@ from backend.server_modules.application_runtime import register_application_runt
 
 app = FastAPI(title="Taskosphere Backend", redirect_slashes=False)
 api_router = APIRouter(prefix="/api")
-# Backup & Restore — mount the router directly on the FastAPI app so /api/app-backup/* routes are served in production.
 app.include_router(backup_restore_router, prefix="/api")
 register_shutdown_handler(app, scheduler)
 
@@ -289,15 +288,6 @@ for _register_phase2_routes in _PHASE2_ROUTE_MODULES:
 
 register_application_runtime(globals())
 
-# ─────────────────────────────────────────────────────────────────────────────
-# LATE ROUTER MOUNTS
-# The legacy api_router is mounted by holiday_trademark_misc.py before the
-# remaining Phase 2 runtime routers are appended to api_router. FastAPI copies
-# router routes at include time, so those later additions would otherwise 404.
-# Mount the affected legacy routers directly on the app after the full runtime
-# registration. This preserves the existing route modules and avoids changing
-# their prefixes or business logic.
-# ─────────────────────────────────────────────────────────────────────────────
 from backend.website_config import router as website_config_router
 from backend.hr_core import ALL_HR_CORE_ROUTERS
 
