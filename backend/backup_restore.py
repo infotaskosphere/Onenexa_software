@@ -599,9 +599,34 @@ async def _run_backup_job(progress_id: str, current_user: User, password: str, r
     try:
         output, manifest = await _build_archive(current_user, password, requested, progress_id)
         filename = f"onenexa-backup-{datetime.now().strftime('%Y%m%d-%H%M%S')}{NEW_BACKUP_EXTENSION}"
-        history_id = await _persist_backup_artifact(output, filename, manifest, current_user, progress_id)
-        _BACKUP_OUTPUTS[progress_id] = {"path": output, "filename": filename, "owner_user_id": _s(current_user.id), "created_at": time.time(), "history_id": str(history_id)}
-        _set_backup_progress(progress_id, owner_user_id=_s(current_user.id), phase="ready", percent=100.0, eta_seconds=0.0, current_collection=None, file_size=os.path.getsize(output), download_ready=True, filename=filename, history_id=str(history_id))
+        _BACKUP_OUTPUTS[progress_id] = {
+            "path": output,
+            "filename": filename,
+            "owner_user_id": _s(current_user.id),
+            "created_at": time.time(),
+        }
+        _set_backup_progress(
+            progress_id,
+            owner_user_id=_s(current_user.id),
+            phase="ready",
+            percent=100.0,
+            eta_seconds=0.0,
+            current_collection=None,
+            file_size=os.path.getsize(output),
+            download_ready=True,
+            filename=filename,
+        )
+        try:
+            history_id = await _persist_backup_artifact(output, filename, manifest, current_user, progress_id)
+            _BACKUP_OUTPUTS[progress_id]["history_id"] = str(history_id)
+            _set_backup_progress(progress_id, history_id=str(history_id), history_persisted=True, history_warning=None)
+        except Exception as history_exc:
+            logger.error("Backup completed but History persistence failed for %s: %s", progress_id, history_exc, exc_info=True)
+            _set_backup_progress(
+                progress_id,
+                history_persisted=False,
+                history_warning="Backup completed successfully, but History storage failed. Download the backup now; it remains available from this completed job.",
+            )
         asyncio.create_task(_expire_backup_output(progress_id))
     except Exception as exc:
         previous = _BACKUP_PROGRESS.get(progress_id, {})
@@ -633,15 +658,16 @@ async def download_created_backup(progress_id: str, request: Request, current_us
     if state.get("phase") != "ready":
         raise HTTPException(status_code=409, detail="Backup is still being created.")
     history_id = _s(state.get("history_id"))
-    if not ObjectId.is_valid(history_id):
-        raise HTTPException(status_code=409, detail="Backup is not ready for download or has expired.")
-    raw = _raw_db()
-    # Serve the persisted GridFS artifact (not a process-local temp file) so the
-    # download survives worker restarts and can be retried / resumed.
-    doc = await raw[BACKUP_HISTORY_COLLECTION].find_one({"_id": ObjectId(history_id)})
-    if not doc:
-        raise HTTPException(status_code=404, detail="Backup history record not found.")
-    return await _stream_backup_artifact(request, raw, doc, history_id)
+    if ObjectId.is_valid(history_id):
+        raw = _raw_db()
+        doc = await raw[BACKUP_HISTORY_COLLECTION].find_one({"_id": ObjectId(history_id)})
+        if doc:
+            return await _stream_backup_artifact(request, raw, doc, history_id)
+
+    item = _BACKUP_OUTPUTS.get(progress_id)
+    if item and item.get("owner_user_id") == _s(current_user.id) and os.path.exists(item.get("path", "")):
+        return FileResponse(item["path"], media_type="application/octet-stream", filename=item.get("filename") or "onenexa-backup.onenexa")
+    raise HTTPException(status_code=409, detail="Backup is complete but no downloadable artifact is currently available.")
 
 
 @router.get("/history")
