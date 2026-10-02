@@ -393,3 +393,53 @@ def test_permission_governance_grants_use_tenant_scoped_user_query(monkeypatch):
 
     assert captured["query"] == {}
     assert [user["id"] for user in result] == ["platform-user"]
+
+
+def test_permission_governance_request_scope_keeps_licensee_inboxes_isolated(monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+    from backend import permission_governance as governance
+
+    class _Cursor:
+        def __init__(self, rows):
+            self.rows = rows
+        async def to_list(self, length=None):
+            return list(self.rows)
+
+    class _Users:
+        def __init__(self):
+            self.rows = [
+                {"id": "tenant-a-user", "company_id": "company-a"},
+                {"id": "tenant-b-user", "company_id": "company-b"},
+            ]
+        def find(self, query=None, *args, **kwargs):
+            # The governance helper delegates to the canonical user scope helper;
+            # this fake only needs to expose the resulting user ids.
+            return _Cursor(self.rows[:1])
+
+    class _DB:
+        def __init__(self):
+            self.users = _Users()
+
+    monkeypatch.setattr(governance, "db", _DB())
+    monkeypatch.setattr(
+        governance,
+        "_scope_user_query",
+        lambda query: {"company_id": "company-a"},
+    )
+
+    user = SimpleNamespace(
+        role="admin",
+        company_id="company-a",
+        id="tenant-a-admin",
+    )
+    scoped = asyncio.run(
+        governance._access_request_scope_query(
+            user,
+            {"status": "pending"},
+        )
+    )
+
+    assert scoped["$and"][0] == {"status": "pending"}
+    assert scoped["$and"][1]["$or"][0] == {"company_id": "company-a"}
+    assert scoped["$and"][1]["$or"][1]["user_id"] == {"$in": ["tenant-a-user"]}
