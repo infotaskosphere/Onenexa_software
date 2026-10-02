@@ -33,6 +33,7 @@ from backend.dependencies import db, get_current_user, build_client_query
 from backend.modules.finix_ai.reconciliation.models_gst import ReconciliationSession, SessionSaveBody, GSTR3BBody, ITCReversalBody, VendorCommunicationBody, GSTINBatchBody, TradeNameBody, TradeNamesBatchBody, SessionUpdateBody, AIInsightBody
 
 from backend.models import User
+from backend.platform_owner import is_platform_owner
 
 logger   = logging.getLogger(__name__)
 router   = APIRouter(prefix="/gst-reconciliation", tags=["gst-reconciliation"])
@@ -773,6 +774,7 @@ async def _log_audit(action, user, details):
         await db.gst_audit_logs.insert_one({
             "_id":str(uuid.uuid4()),"action":action,
             "user_id":user.id,"user_name":getattr(user,"full_name",""),
+            "company_id":getattr(user, "company_id", None),
             "timestamp":_now(),"details":details,
         })
     except Exception as exc:
@@ -1454,8 +1456,23 @@ async def get_audit_log(skip:int=Query(0,ge=0), limit:int=Query(50,ge=1,le=200),
     current_user: User=Depends(get_current_user)):
     """Return GST audit log (admin only)."""
     if current_user.role!="admin": raise HTTPException(403,"Admin only")
-    logs  = await db.gst_audit_logs.find({},{"_id":0}).sort("timestamp",-1).skip(skip).limit(limit).to_list(limit)
-    total = await db.gst_audit_logs.count_documents({})
+    if is_platform_owner(current_user):
+        query = {}
+    else:
+        company_id = str(getattr(current_user, "company_id", "") or "").strip()
+        scoped_users = await db.users.find(
+            {"company_id": company_id},
+            {"_id": 0, "id": 1},
+        ).to_list(5000)
+        user_ids = [str(row.get("id")) for row in scoped_users if row.get("id")]
+        query = {
+            "$or": [
+                {"company_id": company_id},
+                {"company_id": {"$in": [None, ""]}, "user_id": {"$in": user_ids}},
+            ]
+        }
+    logs  = await db.gst_audit_logs.find(query,{"_id":0}).sort("timestamp",-1).skip(skip).limit(limit).to_list(limit)
+    total = await db.gst_audit_logs.count_documents(query)
     return {"logs":logs,"total":total}
 
 
