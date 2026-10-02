@@ -903,18 +903,32 @@ async def restore_backup(backup: UploadFile = File(...), password: str = Form(..
         # legacy tenant-scope label. Tenant ownership metadata is still mandatory
         # and _restore performs the authenticated target remapping.
         scope = str(manifest.get("scope") or "").strip().lower()
+        legacy_migration = (
+            scope == "single_application"
+            and str(manifest.get("source_application") or "").strip() == LEGACY_SOURCE_APPLICATION
+        )
         supported_scopes = {
             "",
             "single_customer_tenant",
             "single_tenant",
             "customer_tenant",
             "single_customer",
+            "single_application",
         }
         if scope not in supported_scopes:
             raise HTTPException(status_code=400, detail="Unsupported backup scope.")
-        if not _s(manifest.get("source_company_id")) or not _s(manifest.get("owner_user_id")):
+        if legacy_migration:
+            if not _s(manifest.get("owner_user_id")):
+                raise HTTPException(status_code=400, detail="Legacy backup is missing the source administrator identity.")
+        elif not _s(manifest.get("source_company_id")) or not _s(manifest.get("owner_user_id")):
             raise HTTPException(status_code=400, detail="Backup is missing tenant ownership metadata.")
-        result = await _restore(manifest, collections, current_user, zip_path)
+        result = await _restore(
+            manifest,
+            collections,
+            current_user,
+            zip_path,
+            legacy_migration=legacy_migration,
+        )
         return {"success": True, "message": "Application backup restored successfully.", **result}
     finally:
         try: os.unlink(source_path)
