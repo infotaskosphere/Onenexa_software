@@ -14,7 +14,7 @@ from backend.dependencies import db
 from backend.accounting_core import get_default_account_id
 from backend.party_ledgers import get_or_create_party_account
 from backend.accounting_ai.finix_intelligence import FinixIntelligence
-from backend.accounting_ai.finix_policy import classify_transaction
+from backend.accounting_ai.accounting_policy import classify_transaction
 
 PAISE = Decimal("0.01")
 
