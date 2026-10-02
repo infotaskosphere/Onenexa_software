@@ -1083,8 +1083,7 @@ async def _build_archive_with_progress(
         with zipfile.ZipFile(
             zip_path,
             "w",
-            compression=zipfile.ZIP_DEFLATED,
-            compresslevel=6,
+            compression=zipfile.ZIP_STORED,
             allowZip64=True,
         ) as archive:
             for name in selected:
@@ -1097,6 +1096,7 @@ async def _build_archive_with_progress(
                     force_zip64=True,
                 ) as entry:
                     cursor = raw[name].find({})
+                    pending_lines = []
                     async for doc in cursor:
                         if name in EXCLUDED_COLLECTIONS:
                             continue
@@ -1141,8 +1141,12 @@ async def _build_archive_with_progress(
                             current_collection=name,
                         )
 
-                        if processed_documents % 50 == 0:
+                        if processed_documents % 500 == 0:
                             await asyncio.sleep(0)
+
+                    if pending_lines:
+                        entry.write(("\n".join(pending_lines) + "\n").encode("utf-8"))
+                        pending_lines.clear()
 
                 try:
                     list_indexes = getattr(raw[name], "list_indexes", None)
@@ -1188,14 +1192,15 @@ async def _build_archive_with_progress(
             current_collection=None,
         )
 
-        _encrypt_with_progress(
+        await asyncio.to_thread(
+            _encrypt_with_progress,
             zip_path,
             output,
             password,
-            progress_id=progress_id,
-            progress_start=90.0,
-            progress_end=100.0,
-            started_at=started_at,
+            progress_id,
+            90.0,
+            100.0,
+            started_at,
         )
 
         elapsed = max(0.001, time.monotonic() - started_at)
