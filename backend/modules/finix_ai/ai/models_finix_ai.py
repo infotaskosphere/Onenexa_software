@@ -8,7 +8,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from fastapi import HTTPException
 from datetime import date
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field
 from backend.models import User
 from backend.dependencies import db
 from backend.accounting_core import get_default_account_id
