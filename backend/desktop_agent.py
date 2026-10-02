@@ -26,6 +26,9 @@ import uuid
 
 from backend.dependencies import get_current_user, get_db, admin_required, db
 from backend.models import User
+from backend.tenant_runtime import enforce_company_value
+from backend.platform_owner import is_platform_owner
+from backend.commercial_user_company_scope import _scope_user_query
 from pydantic import BaseModel, Field, ConfigDict
 
 logger = logging.getLogger(__name__)
@@ -54,6 +57,40 @@ def _admin_or_self(current_user: User, target_user_id: str) -> bool:
         return True
     own_id = str(getattr(current_user, "id", "") or getattr(current_user, "_id", ""))
     return own_id == target_user_id
+
+
+async def _desktop_scope_query(current_user: User, extra: Optional[dict] = None) -> dict:
+    """Scope desktop-agent data to the authenticated tenant; preserve legacy rows by user."""
+    base = dict(extra or {})
+    if is_platform_owner(current_user):
+        return base
+    company_id = enforce_company_value(current_user, None)
+    users = await db.users.find(
+        _scope_user_query({}),
+        {"_id": 0, "id": 1},
+    ).to_list(5000)
+    user_ids = [str(row.get("id")) for row in users if row.get("id")]
+    scope = {
+        "$or": [
+            {"company_id": company_id},
+            {
+                "company_id": {"$in": [None, ""]},
+                "user_id": {"$in": user_ids},
+            },
+        ]
+    }
+    return {"$and": [base, scope]} if base else scope
+
+
+def _validate_agent_user(current_user: User, payload_user_id: str) -> None:
+    if not payload_user_id:
+        raise HTTPException(status_code=400, detail="user_id is required")
+    if is_platform_owner(current_user):
+        return
+    if str(payload_user_id) != str(current_user.id):
+        raise HTTPException(status_code=403, detail="Agent user does not match authenticated user")
+
+
 
 
 # ── Pydantic Models ──────────────────────────────────────────────────────────
@@ -191,13 +228,16 @@ async def get_db_ref(request: Request):
 @router.post("/agent/heartbeat")
 async def agent_heartbeat(
     payload: AgentHeartbeat,
+    current_user: User = Depends(get_current_user),
     db=Depends(get_db),
 ):
     """
     Desktop agent sends heartbeat every 30 seconds.
     Updates agent status, CPU, memory, internet connectivity.
     """
-    try:
+    t    company_id = enforce_company_value(current_user, None)
+    _validate_agent_user(current_user, payload.user_id)
+ry:
         now = _now_iso()
         await db.desktop_agents.update_one(
             {"agent_id": payload.agent_id},
@@ -220,6 +260,8 @@ async def agent_heartbeat(
                 "$setOnInsert": {
                     "created_at": now,
                     "agent_id": payload.agent_id,
+                    "company_id": company_id,
+                    "user_id": payload.user_id or current_user.id,
                 },
             },
             upsert=True,
@@ -260,13 +302,16 @@ async def agent_heartbeat(
 @router.post("/activity")
 async def push_activity(
     payload: AgentActivityPayload,
+    current_user: User = Depends(get_current_user),
     db=Depends(get_db),
 ):
     """
     Desktop agent pushes activity report (extended version).
     Upserts one doc per user per date.
     """
-    try:
+    tr    company_id = enforce_company_value(current_user, None)
+    _validate_agent_user(current_user, payload.user_id)
+y:
         report_date = payload.date or _today()
         now = _now_iso()
 
@@ -291,6 +336,7 @@ async def push_activity(
                 "$setOnInsert": {
                     "agent_id": payload.agent_id,
                     "user_id": payload.user_id,
+                    "company_id": company_id,
                     "date": report_date,
                     "created_at": now,
                 },
@@ -309,13 +355,16 @@ async def push_activity(
 @router.post("/browser")
 async def push_browser(
     payload: AgentBrowserPayload,
+    current_user: User = Depends(get_current_user),
     db=Depends(get_db),
 ):
     """
     Desktop agent pushes browser visit data.
     Only domain, title, duration, count — no content capture.
     """
-    try:
+    tr    company_id = enforce_company_value(current_user, None)
+    _validate_agent_user(current_user, payload.user_id)
+y:
         report_date = payload.date or _today()
         now = _now_iso()
 
@@ -336,6 +385,7 @@ async def push_browser(
                 "$setOnInsert": {
                     "agent_id": payload.agent_id,
                     "user_id": payload.user_id,
+                    "company_id": company_id,
                     "date": report_date,
                     "created_at": now,
                 },
@@ -354,17 +404,21 @@ async def push_browser(
 @router.post("/dsc")
 async def push_dsc(
     payload: AgentDscPayload,
+    current_user: User = Depends(get_current_user),
     db=Depends(get_db),
 ):
     """
     Desktop agent pushes DSC token status changes.
     Records connection/disconnection events.
     """
-    try:
+    tr    company_id = enforce_company_value(current_user, None)
+    _validate_agent_user(current_user, payload.user_id)
+y:
         now = _now_iso()
         doc = {
             "agent_id": payload.agent_id,
             "user_id": payload.user_id,
+            "company_id": company_id,
             "machine_name": payload.machine_name,
             "plugged": payload.plugged,
             "cert": payload.cert,
@@ -401,13 +455,16 @@ async def push_dsc(
 @router.post("/usb")
 async def push_usb(
     payload: AgentUsbPayload,
+    current_user: User = Depends(get_current_user),
     db=Depends(get_db),
 ):
     """
     Desktop agent pushes USB device connect/disconnect events.
     Detects DSC tokens, USB drives, phones, printers, etc.
     """
-    try:
+    tr    company_id = enforce_company_value(current_user, None)
+    _validate_agent_user(current_user, payload.user_id)
+y:
         now = _now_iso()
         events = payload.events or []
         if events:
@@ -417,6 +474,7 @@ async def push_usb(
                     {
                         "agent_id": payload.agent_id,
                         "user_id": payload.user_id,
+                        "company_id": company_id,
                         "machine_name": payload.machine_name,
                         "device_type": evt.get("device_type", "unknown"),
                         "device_name": evt.get("device_name", ""),
@@ -442,13 +500,16 @@ async def push_usb(
 @router.post("/productivity")
 async def push_productivity(
     payload: AgentProductivityPayload,
+    current_user: User = Depends(get_current_user),
     db=Depends(get_db),
 ):
     """
     Desktop agent pushes computed productivity metrics.
     Includes focus time, idle time, app breakdown, score.
     """
-    try:
+    tr    company_id = enforce_company_value(current_user, None)
+    _validate_agent_user(current_user, payload.user_id)
+y:
         report_date = payload.date or _today()
         now = _now_iso()
 
@@ -472,6 +533,7 @@ async def push_productivity(
                 "$setOnInsert": {
                     "agent_id": payload.agent_id,
                     "user_id": payload.user_id,
+                    "company_id": company_id,
                     "date": report_date,
                     "created_at": now,
                 },
@@ -490,12 +552,14 @@ async def push_productivity(
 @router.post("/system")
 async def push_system_info(
     payload: AgentSystemInfo,
+    current_user: User = Depends(get_current_user),
     db=Depends(get_db),
 ):
     """
     Desktop agent pushes system information on startup and periodically.
     """
-    try:
+    tr    company_id = enforce_company_value(current_user, None)
+y:
         now = _now_iso()
         await db.desktop_agents.update_one(
             {"agent_id": payload.agent_id},
@@ -515,6 +579,8 @@ async def push_system_info(
                 },
                 "$setOnInsert": {
                     "agent_id": payload.agent_id,
+                    "company_id": company_id,
+                    "user_id": current_user.id,
                     "created_at": now,
                 },
             },
@@ -582,7 +648,8 @@ async def get_connected_agents(
     if role_str != "admin":
         raise HTTPException(status_code=403, detail="Admin access required")
 
-    query = {}
+    query = await _desktop_scope_query(current_user)
+
     if status == "online":
         # Online = heartbeat within last 2 minutes
         cutoff = (datetime.now(timezone.utc) - timedelta(minutes=2)).isoformat()
@@ -628,7 +695,9 @@ async def get_agent_detail(
     if role_str != "admin":
         raise HTTPException(status_code=403, detail="Admin access required")
 
-    agent = await db.desktop_agents.find_one({"agent_id": agent_id})
+    agent = await db.desktop_agents.find_one(
+        {"$and": [await _desktop_scope_query(current_user), {"agent_id": agent_id}]}
+    )
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     agent.pop("_id", None)
@@ -653,7 +722,8 @@ async def get_activity_reports(
     role_str = role.value if hasattr(role, "value") else str(role)
     own_id = str(getattr(current_user, "id", "") or getattr(current_user, "_id", ""))
 
-    query = {}
+    query = await _desktop_scope_query(current_user)
+
     if role_str != "admin":
         query["user_id"] = own_id
     elif user_id:
@@ -700,7 +770,8 @@ async def get_browser_reports(
     role_str = role.value if hasattr(role, "value") else str(role)
     own_id = str(getattr(current_user, "id", "") or getattr(current_user, "_id", ""))
 
-    query = {}
+    query = await _desktop_scope_query(current_user)
+
     if role_str != "admin":
         query["user_id"] = own_id
     elif user_id:
@@ -743,7 +814,8 @@ async def get_dsc_status(
     if role_str != "admin":
         raise HTTPException(status_code=403, detail="Admin access required")
 
-    query = {}
+    query = await _desktop_scope_query(current_user)
+
     if agent_id:
         query["agent_id"] = agent_id
 
@@ -775,7 +847,8 @@ async def get_usb_events(
     if role_str != "admin":
         raise HTTPException(status_code=403, detail="Admin access required")
 
-    query = {}
+    query = await _desktop_scope_query(current_user)
+
     if agent_id:
         query["agent_id"] = agent_id
 
@@ -809,7 +882,8 @@ async def get_productivity_reports(
     role_str = role.value if hasattr(role, "value") else str(role)
     own_id = str(getattr(current_user, "id", "") or getattr(current_user, "_id", ""))
 
-    query = {}
+    query = await _desktop_scope_query(current_user)
+
     if role_str != "admin":
         query["user_id"] = own_id
     elif user_id:
@@ -856,8 +930,10 @@ async def get_agent_health(
     docs = (
         await db.desktop_health.find(
             {
-                "agent_id": agent_id,
-                "timestamp": {"$gte": cutoff},
+                "$and": [
+                    await _desktop_scope_query(current_user),
+                    {"agent_id": agent_id, "timestamp": {"$gte": cutoff}},
+                ],
             }
         )
         .sort("timestamp", 1)
@@ -895,33 +971,26 @@ async def get_desktop_summary(
     today = _today()
     cutoff_online = (datetime.now(timezone.utc) - timedelta(minutes=2)).isoformat()
 
-    total_agents = await db.desktop_agents.count_documents({})
-    online_agents = await db.desktop_agents.count_documents(
-        {
-            "last_heartbeat": {"$gte": cutoff_online},
-        }
-    )
-    dsc_connected = await db.desktop_agents.count_documents({"dsc_plugged": True})
+    scope = await _desktop_scope_query(current_user)
+    total_agents = await db.desktop_agents.count_documents(scope)
+    online_agents = await db.desktop_agents.count_documents({"$and": [scope, {"last_heartbeat": {"$gte": cutoff_online}}]})
+    dsc_connected = await db.desktop_agents.count_documents({"$and": [scope, {"dsc_plugged": True}]})
 
     # Today's activity summary
-    today_activities = await db.desktop_activity.find({"date": today}).to_list(
+    today_activities = await db.desktop_activity.find({"$and": [scope, {"date": today}]}).to_list(
         length=500
     )
     total_active_today = sum(a.get("activeSeconds", 0) for a in today_activities)
     total_focus_today = sum(a.get("focusSeconds", 0) for a in today_activities)
 
     # Productivity score average
-    today_prod = await db.desktop_productivity.find({"date": today}).to_list(length=500)
+    today_prod = await db.desktop_productivity.find({"$and": [scope, {"date": today}]}).to_list(length=500)
     avg_score = 0
     if today_prod:
         avg_score = sum(p.get("score", 0) for p in today_prod) / len(today_prod)
 
     # USB events today
-    usb_today = await db.desktop_usb.count_documents(
-        {
-            "timestamp": {"$gte": today + "T00:00:00"},
-        }
-    )
+    usb_today = await db.desktop_usb.count_documents({"$and": [scope, {"timestamp": {"$gte": today + "T00:00:00"}}]})
 
     return {
         "success": True,
@@ -973,7 +1042,8 @@ async def export_reports(
         )
 
     collection_name = collection_map[report_type]
-    query = {}
+    query = await _desktop_scope_query(current_user)
+
 
     if date_from or date_to:
         date_query = {}
