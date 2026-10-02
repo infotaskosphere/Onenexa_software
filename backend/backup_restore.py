@@ -903,10 +903,7 @@ async def restore_backup(backup: UploadFile = File(...), password: str = Form(..
         # legacy tenant-scope label. Tenant ownership metadata is still mandatory
         # and _restore performs the authenticated target remapping.
         scope = str(manifest.get("scope") or "").strip().lower()
-        legacy_migration = (
-            scope == "single_application"
-            and str(manifest.get("source_application") or "").strip() == LEGACY_SOURCE_APPLICATION
-        )
+        legacy_migration = scope == "single_application"
         supported_scopes = {
             "",
             "single_customer_tenant",
