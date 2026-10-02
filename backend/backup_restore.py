@@ -31,7 +31,8 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
+from motor.motor_asyncio import AsyncIOMotorGridFSBucket
 from starlette.background import BackgroundTask
 
 from backend.dependencies import DB_NAME, MONGO_URL, client, db, get_current_user, get_user_permissions
@@ -58,10 +59,17 @@ PBKDF2_ITERATIONS = 390_000
 CHUNK_SIZE = 1024 * 1024
 MAX_BACKUP_UPLOAD_BYTES = 100 * 1024 * 1024
 
+BACKUP_HISTORY_COLLECTION = "backup_history"
+BACKUP_GRIDFS_BUCKET = "taskosphere_backups"
+
 EXCLUDED_COLLECTIONS = {
     "sessions", "refresh_tokens", "access_tokens", "password_resets",
     "password_reset_tokens", "verification_tokens", "email_verification_tokens",
     "oauth_states", "oauth_tokens", "rate_limits",
+    # Internal backup-management data must never be recursively captured by a backup.
+    BACKUP_HISTORY_COLLECTION,
+    f"{BACKUP_GRIDFS_BUCKET}.files",
+    f"{BACKUP_GRIDFS_BUCKET}.chunks",
 }
 
 AUTH_FIELDS_TO_PRESERVE = {
@@ -116,6 +124,150 @@ def _require_admin(user: User) -> None:
 def _raw_db():
     raw = getattr(db, "_database", None)
     return raw if raw is not None else client[DB_NAME]
+
+
+def _backup_gridfs(raw):
+    return AsyncIOMotorGridFSBucket(raw, bucket_name=BACKUP_GRIDFS_BUCKET, chunk_size_bytes=CHUNK_SIZE)
+
+
+async def _ensure_backup_history_indexes(raw):
+    await raw[BACKUP_HISTORY_COLLECTION].create_index([("company_id", 1), ("created_at", -1)])
+    await raw[BACKUP_HISTORY_COLLECTION].create_index([("artifact_file_id", 1)], sparse=True)
+
+
+def _history_document(doc: dict) -> dict:
+    size = int(doc.get("file_size_bytes") or 0)
+    return {
+        "id": str(doc.get("_id")),
+        "filename": doc.get("filename"),
+        "created_at": doc.get("created_at"),
+        "created_by": doc.get("created_by_name") or doc.get("created_by") or "Administrator",
+        "mode": doc.get("mode") or "full",
+        "company_name": doc.get("company_name"),
+        "collection_count": int(doc.get("collection_count") or 0),
+        "document_count": int(doc.get("document_count") or 0),
+        "file_size_bytes": size,
+        "file_size": f"{size:,} bytes",
+        "collections": doc.get("collections") or [],
+        "deletable": bool(doc.get("artifact_file_id")),
+    }
+
+
+async def _persist_backup_artifact(output: str, filename: str, manifest: dict, current_user: User, progress_id: str | None = None):
+    raw = _raw_db()
+    await _ensure_backup_history_indexes(raw)
+    bucket = _backup_gridfs(raw)
+    history_id = ObjectId()
+    artifact_id = None
+    grid_in = None
+    started_at = time.monotonic()
+    total_bytes = os.path.getsize(output)
+    uploaded_bytes = 0
+    document_count = sum(int(meta.get("documents") or 0) for meta in (manifest.get("collections") or {}).values())
+    total_documents = document_count
+
+    try:
+        grid_in = bucket.open_upload_stream(
+            filename,
+            chunk_size_bytes=CHUNK_SIZE,
+            metadata={
+                "contentType": "application/octet-stream",
+                "backupHistoryId": str(history_id),
+                "companyId": _s(manifest.get("source_company_id")),
+                "format": "taskosphere-backup",
+                "version": FORMAT_VERSION,
+            },
+        )
+        artifact_id = grid_in._id
+        _set_backup_progress(
+            progress_id,
+            phase="storing",
+            percent=90.0,
+            processed_documents=document_count,
+            total_documents=total_documents,
+            eta_seconds=None,
+            elapsed_seconds=round(time.monotonic() - started_at, 1),
+            current_collection=None,
+            processed_bytes=0,
+            total_bytes=total_bytes,
+        )
+
+        with open(output, "rb") as source:
+            while True:
+                chunk = await asyncio.to_thread(source.read, CHUNK_SIZE)
+                if not chunk:
+                    break
+                await grid_in.write(chunk)
+                uploaded_bytes += len(chunk)
+                elapsed = max(0.001, time.monotonic() - started_at)
+                ratio = uploaded_bytes / total_bytes if total_bytes else 1.0
+                percent = 90.0 + (ratio * 10.0)
+                speed = uploaded_bytes / elapsed if uploaded_bytes else 0.0
+                remaining = max(0, total_bytes - uploaded_bytes)
+                eta = remaining / speed if speed > 0 else None
+                _set_backup_progress(
+                    progress_id,
+                    phase="storing",
+                    percent=round(min(100.0, percent), 2),
+                    processed_documents=document_count,
+                    total_documents=total_documents,
+                    eta_seconds=round(eta, 1) if eta is not None else None,
+                    elapsed_seconds=round(elapsed, 1),
+                    current_collection=None,
+                    processed_bytes=uploaded_bytes,
+                    total_bytes=total_bytes,
+                )
+
+        await grid_in.close()
+        grid_in = None
+
+        collection_names = sorted((manifest.get("collections") or {}).keys())
+        created_at = datetime.now(timezone.utc)
+        history = {
+            "_id": history_id,
+            "company_id": _s(manifest.get("source_company_id")),
+            "company_name": manifest.get("company_name"),
+            "created_at": created_at,
+            "created_by": _s(getattr(current_user, "id", None)),
+            "created_by_name": getattr(current_user, "full_name", None) or getattr(current_user, "name", None) or getattr(current_user, "email", None) or "Administrator",
+            "filename": filename,
+            "mode": "full" if manifest.get("selection") == "full" else "custom",
+            "selection": manifest.get("selection") or "full",
+            "collections": collection_names,
+            "collection_count": len(collection_names),
+            "document_count": document_count,
+            "file_size_bytes": total_bytes,
+            "artifact_file_id": artifact_id,
+            "artifact_bucket": BACKUP_GRIDFS_BUCKET,
+            "format_version": FORMAT_VERSION,
+        }
+        await raw[BACKUP_HISTORY_COLLECTION].insert_one(history)
+        _set_backup_progress(
+            progress_id,
+            phase="ready",
+            percent=100.0,
+            processed_documents=document_count,
+            total_documents=total_documents,
+            eta_seconds=0.0,
+            elapsed_seconds=round(time.monotonic() - started_at, 1),
+            current_collection=None,
+            file_size=total_bytes,
+            history_id=str(history_id),
+        )
+        return history_id
+    except Exception:
+        if grid_in is not None:
+            try:
+                await grid_in.abort()
+            except Exception:
+                pass
+        if artifact_id is not None:
+            try:
+                await bucket.delete(artifact_id)
+            except Exception:
+                pass
+        raise
+
 
 
 def _key(password: str, salt: bytes) -> bytes:
@@ -309,7 +461,115 @@ async def create_backup(request: Request, current_user: User = Depends(get_curre
         raise HTTPException(status_code=500, detail="Backup creation failed on the server. Check backend logs for details.") from exc
 
     filename = f"taskosphere-backup-{datetime.now().strftime('%Y%m%d-%H%M%S')}.taskosphere"
-    return FileResponse(output, media_type="application/octet-stream", filename=filename, background=BackgroundTask(lambda: os.path.exists(output) and os.unlink(output)))
+    try:
+        history_id = await _persist_backup_artifact(output, filename, _manifest, current_user, progress_id)
+    except Exception as exc:
+        logger.error("Backup history persistence failed: %s", exc, exc_info=True)
+        try:
+            os.unlink(output)
+        except FileNotFoundError:
+            pass
+        _set_backup_progress(
+            progress_id,
+            phase="error",
+            percent=0.0,
+            eta_seconds=None,
+            error="Backup was created but could not be stored in backup history.",
+        )
+        raise HTTPException(status_code=500, detail="Backup was created but could not be stored in backup history. Please retry.") from exc
+
+    return FileResponse(
+        output,
+        media_type="application/octet-stream",
+        filename=filename,
+        headers={"X-Backup-History-ID": str(history_id)},
+        background=BackgroundTask(lambda: os.path.exists(output) and os.unlink(output)),
+    )
+
+
+@router.get("/history")
+async def list_backup_history(current_user: User = Depends(get_current_user)):
+    _require_backup_access(current_user)
+    company_id, _, _, _ = await _tenant_context(current_user)
+    raw = _raw_db()
+    await _ensure_backup_history_indexes(raw)
+    cursor = raw[BACKUP_HISTORY_COLLECTION].find({"company_id": company_id}).sort("created_at", -1)
+    records = []
+    async for doc in cursor:
+        records.append(_history_document(doc))
+    return {"history": records, "count": len(records)}
+
+
+@router.get("/history/{backup_id}/download")
+async def download_backup_history(backup_id: str, current_user: User = Depends(get_current_user)):
+    _require_backup_access(current_user)
+    if not ObjectId.is_valid(backup_id):
+        raise HTTPException(status_code=400, detail="Invalid backup history id.")
+    company_id, _, _, _ = await _tenant_context(current_user)
+    raw = _raw_db()
+    doc = await raw[BACKUP_HISTORY_COLLECTION].find_one({"_id": ObjectId(backup_id), "company_id": company_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Backup history record not found.")
+    artifact_id = doc.get("artifact_file_id")
+    if not isinstance(artifact_id, ObjectId):
+        artifact_id = ObjectId(artifact_id) if ObjectId.is_valid(str(artifact_id)) else None
+    if artifact_id is None:
+        raise HTTPException(status_code=410, detail="The backup artifact is no longer available.")
+
+    bucket = _backup_gridfs(raw)
+    try:
+        grid_out = await bucket.open_download_stream(artifact_id)
+    except Exception as exc:
+        logger.error("Backup history artifact missing: %s", exc, exc_info=True)
+        raise HTTPException(status_code=410, detail="The backup artifact is no longer available.") from exc
+
+    async def stream_backup():
+        try:
+            while chunk := await grid_out.read(CHUNK_SIZE):
+                yield chunk
+        finally:
+            try:
+                await grid_out.close()
+            except Exception:
+                pass
+
+    filename = doc.get("filename") or f"taskosphere-backup-{backup_id}.taskosphere"
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    if doc.get("file_size_bytes"):
+        headers["Content-Length"] = str(int(doc["file_size_bytes"]))
+    return StreamingResponse(stream_backup(), media_type="application/octet-stream", headers=headers)
+
+
+@router.delete("/history/{backup_id}")
+async def delete_backup_history(backup_id: str, current_user: User = Depends(get_current_user)):
+    _require_admin(current_user)
+    if not ObjectId.is_valid(backup_id):
+        raise HTTPException(status_code=400, detail="Invalid backup history id.")
+    company_id, _, _, _ = await _tenant_context(current_user)
+    raw = _raw_db()
+    history_collection = raw[BACKUP_HISTORY_COLLECTION]
+    doc = await history_collection.find_one({"_id": ObjectId(backup_id), "company_id": company_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Backup history record not found.")
+
+    deleted_meta = await history_collection.delete_one({"_id": ObjectId(backup_id), "company_id": company_id})
+    if deleted_meta.deleted_count != 1:
+        raise HTTPException(status_code=409, detail="Backup history record changed before deletion. Please refresh and retry.")
+
+    artifact_id = doc.get("artifact_file_id")
+    if not isinstance(artifact_id, ObjectId):
+        artifact_id = ObjectId(artifact_id) if ObjectId.is_valid(str(artifact_id)) else None
+    if artifact_id is not None:
+        try:
+            await _backup_gridfs(raw).delete(artifact_id)
+        except Exception as exc:
+            try:
+                await history_collection.insert_one(doc)
+            except Exception:
+                logger.critical("Backup history rollback failed after artifact deletion failure: %s", exc, exc_info=True)
+            raise HTTPException(status_code=500, detail="Backup data could not be deleted completely. The history record was restored; please retry.") from exc
+
+    return {"success": True, "deleted_backup_id": backup_id, "message": "Backup history record and stored backup data deleted."}
 
 
 async def _read_archive(zip_path: str):
