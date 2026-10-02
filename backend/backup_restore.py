@@ -58,6 +58,9 @@ FORMAT_VERSION = 1
 PBKDF2_ITERATIONS = 390_000
 CHUNK_SIZE = 1024 * 1024
 MAX_BACKUP_UPLOAD_BYTES = 100 * 1024 * 1024
+NEW_BACKUP_EXTENSION = ".onenexa"
+LEGACY_BACKUP_EXTENSIONS = {".taskosphere"}
+SUPPORTED_BACKUP_EXTENSIONS = {NEW_BACKUP_EXTENSION, *LEGACY_BACKUP_EXTENSIONS}
 
 BACKUP_HISTORY_COLLECTION = "backup_history"
 BACKUP_GRIDFS_BUCKET = "taskosphere_backups"
@@ -498,7 +501,7 @@ async def create_backup(request: Request, current_user: User = Depends(get_curre
         logger.error("Backup creation failed: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail="Backup creation failed on the server. Check backend logs for details.") from exc
 
-    filename = f"taskosphere-backup-{datetime.now().strftime('%Y%m%d-%H%M%S')}.taskosphere"
+    filename = f"onenexa-backup-{datetime.now().strftime('%Y%m%d-%H%M%S')}{NEW_BACKUP_EXTENSION}"
     try:
         history_id = await _persist_backup_artifact(output, filename, _manifest, current_user, progress_id)
     except Exception as exc:
@@ -571,7 +574,7 @@ async def download_backup_history(backup_id: str, current_user: User = Depends(g
             except Exception:
                 pass
 
-    filename = doc.get("filename") or f"taskosphere-backup-{backup_id}.taskosphere"
+    filename = doc.get("filename") or f"onenexa-backup-{backup_id}{NEW_BACKUP_EXTENSION}"
     headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
     if doc.get("file_size_bytes"):
         headers["Content-Length"] = str(int(doc["file_size_bytes"]))
@@ -759,9 +762,10 @@ async def restore_backup(backup: UploadFile = File(...), password: str = Form(..
     _require_admin(current_user)
     if confirmation.strip() != "RESTORE":
         raise HTTPException(status_code=400, detail="Type RESTORE exactly to confirm the operation.")
-    if not backup.filename or not backup.filename.endswith(".taskosphere"):
-        raise HTTPException(status_code=400, detail="Upload a .taskosphere backup file.")
-    fd, source_path = tempfile.mkstemp(prefix="taskosphere-upload-", suffix=".taskosphere")
+    backup_extension = os.path.splitext(backup.filename or "")[1].lower()
+    if backup_extension not in SUPPORTED_BACKUP_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Upload a .onenexa backup file. Legacy .taskosphere backups are also supported for migration.")
+    fd, source_path = tempfile.mkstemp(prefix="onenexa-upload-", suffix=backup_extension)
     os.close(fd)
     zip_path = None
     try:
