@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import base64
 import asyncio
+import logging
 import json
 import os
 import secrets
@@ -38,6 +39,8 @@ from backend.models import User
 from backend.tenant_runtime import TENANT_COLLECTIONS
 from backend.permission_governance import GOVERNED_MODULES
 from backend.platform_owner import is_platform_owner
+
+logger = logging.getLogger(__name__)
 
 # Backup is a Permission Governance capability. Admins and the platform owner
 # retain their bypass; other users must be approved for this flag before they
