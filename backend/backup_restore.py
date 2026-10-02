@@ -852,7 +852,7 @@ async def _restore(manifest: dict, collections: list[tuple[str, str]], current_u
                             doc["company_id"] = target_company_id
                         else:
                             doc["company_id"] = target_company_id
-                    elif "company_id" in doc:
+                    elif legacy_migration or "company_id" in doc:
                         doc["company_id"] = target_company_id
 
                     query = (
