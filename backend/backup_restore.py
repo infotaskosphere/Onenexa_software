@@ -1031,8 +1031,8 @@ async def _build_archive_with_progress(
             )
 
         fd, output = tempfile.mkstemp(
-            prefix="taskosphere-backup-",
-            suffix=".taskosphere",
+            prefix="onenexa-backup-",
+            suffix=NEW_BACKUP_EXTENSION,
         )
         os.close(fd)
 
