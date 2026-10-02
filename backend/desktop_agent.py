@@ -239,8 +239,11 @@ async def agent_heartbeat(
     _validate_agent_user(current_user, payload.user_id)
     try:
         now = _now_iso()
+        agent_query = {"agent_id": payload.agent_id}
+        if not is_platform_owner(current_user):
+            agent_query["company_id"] = company_id
         await db.desktop_agents.update_one(
-            {"agent_id": payload.agent_id},
+            agent_query,
             {
                 "$set": {
                     "machine_name": payload.machine_name,
@@ -271,6 +274,8 @@ async def agent_heartbeat(
         await db.desktop_health.insert_one(
             {
                 "agent_id": payload.agent_id,
+                "company_id": company_id,
+                "user_id": payload.user_id or current_user.id,
                 "cpu_usage": payload.cpu_usage,
                 "mem_usage_mb": payload.mem_usage_mb,
                 "internet_connected": payload.internet_connected,
@@ -282,6 +287,7 @@ async def agent_heartbeat(
         await db.desktop_health.delete_many(
             {
                 "agent_id": payload.agent_id,
+                "company_id": company_id,
                 "timestamp": {
                     "$lt": (
                         datetime.now(timezone.utc) - timedelta(hours=24)
@@ -431,8 +437,11 @@ async def push_dsc(
         await db.desktop_dsc.insert_one(doc)
 
         # Update current DSC status on agent record
+        agent_query = {"agent_id": payload.agent_id}
+        if not is_platform_owner(current_user):
+            agent_query["company_id"] = company_id
         await db.desktop_agents.update_one(
-            {"agent_id": payload.agent_id},
+            agent_query,
             {
                 "$set": {
                     "dsc_plugged": payload.plugged,
@@ -561,8 +570,11 @@ async def push_system_info(
     company_id = enforce_company_value(current_user, None)
     try:
         now = _now_iso()
+        agent_query = {"agent_id": payload.agent_id}
+        if not is_platform_owner(current_user):
+            agent_query["company_id"] = company_id
         await db.desktop_agents.update_one(
-            {"agent_id": payload.agent_id},
+            agent_query,
             {
                 "$set": {
                     "machine_name": payload.machine_name,
