@@ -17,6 +17,7 @@ from passlib.context import CryptContext
 from fastapi import HTTPException
 
 from backend import dependencies as _dependencies
+from backend.platform_owner import is_platform_owner
 from backend.models import DEFAULT_ROLE_PERMISSIONS, User
 from backend.modules.people_matrix.permissions.catalog import MODULE_HIERARCHY
 
