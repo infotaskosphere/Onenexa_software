@@ -747,10 +747,6 @@ async def bulk_import_passwords(
             )
             client_name_val = filled["client_name"]
 
-            def clean(v):
-                s = str(v).strip() if v is not None else ""
-                return None if s.lower() in ("nan", "none", "") else s
-
             entry_data = {
                 "portal_name": str(row.get("portal_name", "")).strip(),
                 "portal_type": str(row.get("portal_type", "OTHER")).upper(),
