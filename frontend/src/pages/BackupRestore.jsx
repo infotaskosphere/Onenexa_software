@@ -317,6 +317,7 @@ export default function BackupRestore() {
       const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
       downloadBlob(blob, 'taskosphere-backup-' + timestamp + '.taskosphere');
       toast.success(mode === 'full' ? 'Full application backup downloaded.' : 'Custom backup downloaded.');
+      void loadHistory();
     } catch (error) {
       setTransfer({
         active: false,
