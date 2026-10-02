@@ -15,6 +15,7 @@ from backend.bank_ai.payment_matcher import PaymentMatcher
 from backend.bank_ai.narration_analyser import NarrationAnalyser
 from backend.bank_ai.reconciliation_audit import ReconciliationAudit
 from backend.accounting_core import try_auto_post, get_default_account_id
+from backend.dependencies import db
 
 logger = logging.getLogger("reconciliation_engine")
 
