@@ -1,0 +1,23 @@
+name: Temporary Tenant Scope Audit
+
+on:
+  push:
+    branches:
+      - audit/error-free-cleanup-20261002
+
+permissions:
+  contents: read
+
+jobs:
+  tenant-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inventory direct collection access
+        run: |
+          echo "===== db.<collection> ====="
+          git grep -h -o -E '\\b(?:db|raw_db|_raw_db\(\))\\.[A-Za-z_][A-Za-z0-9_]*' -- 'backend/**/*.py' ':!backend/tests/**' ':!backend/test_*.py'             | sed -E 's/^(db|raw_db|_raw_db\\(\\))\\.//' | sort -u
+          echo "===== string-index collection access ====="
+          git grep -h -o -E '\\[("|\\x27)[A-Za-z_][A-Za-z0-9_]*("|\\x27)\\]' -- 'backend/**/*.py' ':!backend/tests/**' ':!backend/test_*.py'             | sed -E 's/^[\\[(]+["\\x27]//;s/["\\x27\\])]$//' | sort -u
+          echo "===== raw database access sites ====="
+          git grep -n -E '\\b_raw_db\\(|\\braw_db\\b' -- 'backend/**/*.py' ':!backend/tests/**' ':!backend/test_*.py' | head -n 300
