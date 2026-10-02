@@ -780,7 +780,7 @@ async def _restore(manifest: dict, collections: list[tuple[str, str]], current_u
             continue
         if name == "users":
             result = await raw.users.delete_many({"company_id": target_company_id, "id": {"$ne": current_user.id}})
-        elif name in TENANT_COLLECTIONS:
+        elif name in TENANT_COLLECTIONS or legacy_migration:
             result = await raw[name].delete_many({"company_id": target_company_id})
         else:
             result = type("DeleteResult", (), {"deleted_count": 0})()
