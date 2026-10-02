@@ -40,7 +40,7 @@ TENANT_COLLECTIONS = {
     "trademark_qc_reports", "trademark_qc_branding", "roc_companies", "roc_documents",
     "gst_reconciliation_history", "gst_reconciliation_sessions", "gst_returns",
     "gst_compliances", "gst_portal_snapshots", "gst_portal_registrations",
-    "gst_trade_names", "gst_vendor_profiles", "gst_portal_audit_risk", "vendor_profiles",
+    "gst_trade_names", "gst_vendor_profiles", "gst_portal_audit_risk", "vendor_profiles", "vendor_rule_overrides", "vendor_learning_history",
     # HR, Attendance & Payroll
     "attendance", "identix_attendance", "salary_slips", "salary_employees",
     "salary_manual_companies", "interview_candidates", "leaves", "holidays", "staff_activity",
