@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Archive, AlertTriangle, Database, Download, HardDriveDownload, History, LockKeyhole, RefreshCw, RotateCcw, ShieldCheck, Trash2, Upload, Users } from 'lucide-react';
 import { toast } from 'sonner';
-import api from '@/lib/api';
+import api, { BASE_URL, getToken } from '@/lib/api';
 import { useDark } from '@/hooks/useDark';
 
 const MODULE_LABELS = {
@@ -71,6 +71,93 @@ function normalizeBackupDetail(detail) {
     return detail.msg || detail.message || JSON.stringify(detail);
   }
   return '';
+}
+
+const BACKUP_RETRY_STATUSES = new Set([0, 408, 425, 429, 500, 502, 503, 504]);
+const sleepMs = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Downloads a backup with automatic resume. A 502/503/504 or a dropped
+// connection mid-transfer (proxy restart, cold start, flaky network) no longer
+// fails the whole backup: the transfer continues from the bytes already
+// received using an HTTP Range request, with exponential backoff.
+async function downloadBackupWithResume(url, onProgress, maxAttempts = 6) {
+  const chunks = [];
+  let loaded = 0;
+  let total = 0;
+  const started = performance.now();
+  let lastError = null;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    if (attempt > 0) await sleepMs(Math.min(8000, 800 * 2 ** (attempt - 1)));
+    try {
+      const headers = { Authorization: getToken() ? 'Bearer ' + getToken() : '' };
+      if (loaded > 0) headers.Range = 'bytes=' + loaded + '-';
+      const response = await fetch(url, { method: 'GET', headers, cache: 'no-store' });
+
+      if (!response.ok && response.status !== 206) {
+        if (BACKUP_RETRY_STATUSES.has(response.status)) {
+          lastError = new Error('Server temporarily unavailable (' + response.status + ')');
+          continue;
+        }
+        let detail = '';
+        try {
+          const parsed = JSON.parse(await response.text());
+          detail = normalizeBackupDetail(parsed?.detail) || normalizeBackupDetail(parsed?.message);
+        } catch { /* non-JSON error body */ }
+        const fatal = new Error(detail || 'Backup download failed (' + response.status + ')');
+        fatal.fatal = true;
+        throw fatal;
+      }
+
+      if (loaded > 0 && response.status === 200) {
+        // Server ignored Range: restart cleanly rather than corrupting the file.
+        chunks.length = 0;
+        loaded = 0;
+      }
+      const contentRange = response.headers.get('content-range') || '';
+      const rangeTotal = Number((contentRange.split('/')[1] || '').trim());
+      const length = Number(response.headers.get('content-length')) || 0;
+      total = rangeTotal || Number(response.headers.get('x-backup-size')) || (length ? loaded + length : total);
+
+      if (!response.body || !response.body.getReader) {
+        const buffer = new Uint8Array(await response.arrayBuffer());
+        chunks.push(buffer);
+        loaded += buffer.byteLength;
+      } else {
+        const reader = response.body.getReader();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          chunks.push(value);
+          loaded += value.byteLength;
+          const elapsed = Math.max(0.001, (performance.now() - started) / 1000);
+          const speed = loaded / elapsed;
+          onProgress({
+            loaded,
+            total,
+            percent: total > 0 ? Math.min(100, (loaded / total) * 100) : 0,
+            etaSeconds: speed > 0 && total > 0 ? Math.max(0, total - loaded) / speed : null,
+            attempt,
+          });
+        }
+      }
+
+      if (total > 0 && loaded < total) {
+        lastError = new Error('Connection closed early (' + loaded + ' of ' + total + ' bytes)');
+        continue;
+      }
+      onProgress({ loaded, total: total || loaded, percent: 100, etaSeconds: 0, attempt });
+      return new Blob(chunks, { type: 'application/octet-stream' });
+    } catch (error) {
+      if (error?.fatal) throw error;
+      lastError = error;
+    }
+  }
+  throw new Error(
+    'Download interrupted after ' + maxAttempts + ' attempts' +
+    (lastError?.message ? ' (' + lastError.message + ')' : '') +
+    '. The backup is saved in the History tab — you can download it from there.'
+  );
 }
 
 export default function BackupRestore() {
@@ -247,19 +334,41 @@ export default function BackupRestore() {
         return phase === 'ready' && progress.download_ready ? progress : null;
       };
 
-      await new Promise((resolve, reject) => {
+      const readyState = await new Promise((resolve, reject) => {
+        let transientFailures = 0;
         const finish = async () => {
-          try { const ready = await pollProgress(); if (ready?.download_ready) { window.clearInterval(pollTimer); stopped = true; resolve(ready); } }
-          catch (error) { window.clearInterval(pollTimer); stopped = true; reject(error); }
+          try { const ready = await pollProgress(); transientFailures = 0; if (ready?.download_ready) { window.clearInterval(pollTimer); stopped = true; resolve(ready); } }
+          catch (error) {
+            const status = error?.response?.status;
+            if (!error?.response || [502, 503, 504].includes(status)) { transientFailures += 1; if (transientFailures < 15) return; }
+            window.clearInterval(pollTimer); stopped = true; reject(error);
+          }
         };
         pollTimer = window.setInterval(finish, 700);
         void finish();
       });
 
       setTransfer((current) => ({ ...current, active: true, phase: 'Downloading backup…', percent: 0, etaSeconds: null, processed: 0, total: 0, detail: 'Transferring encrypted backup to your device…' }));
-      const downloadResponse = await fetch(BASE_URL + '/app-backup/create/download/' + encodeURIComponent(serverProgressId), { method: 'GET', headers: { Authorization: getToken() ? 'Bearer ' + getToken() : '' } });
-      if (!downloadResponse.ok) throw new Error('Backup download failed (' + downloadResponse.status + ')');
-      const backupBlob = await readResponseWithProgress(downloadResponse, ({ loaded, total, percent, etaSeconds }) => { setTransfer((current) => ({ ...current, active: true, phase: 'Downloading backup…', percent, etaSeconds, processed: loaded, total, detail: total ? formatBytes(loaded) + ' / ' + formatBytes(total) : formatBytes(loaded) + ' downloaded' })); });
+      const downloadUrl = readyState?.history_id
+        ? BASE_URL + '/app-backup/history/' + encodeURIComponent(readyState.history_id) + '/download'
+        : BASE_URL + '/app-backup/create/download/' + encodeURIComponent(serverProgressId);
+      const backupBlob = await downloadBackupWithResume(
+        downloadUrl,
+        ({ loaded, total, percent, etaSeconds, attempt }) => {
+          setTransfer((current) => ({
+            ...current,
+            active: true,
+            phase: 'Downloading backup…',
+            percent,
+            etaSeconds,
+            processed: loaded,
+            total,
+            detail: (total ? formatBytes(loaded) + ' / ' + formatBytes(total) : formatBytes(loaded) + ' downloaded')
+              + (attempt > 0 ? ' · resumed after interruption' : ''),
+          }));
+        }
+      );
+
       const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
       downloadBlob(backupBlob, 'onenexa-backup-' + timestamp + '.onenexa');
       setTransfer({ active: false, phase: 'Complete', percent: 100, etaSeconds: 0, processed: backupBlob.size, total: backupBlob.size, detail: 'Backup downloaded successfully.' });
