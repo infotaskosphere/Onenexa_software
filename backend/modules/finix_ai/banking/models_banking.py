@@ -1,9 +1,8 @@
 """Shared bank-account models and reconciliation helpers used by the live bank router."""
 
 import re
-import uuid
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Optional
 
 from pydantic import BaseModel
 
