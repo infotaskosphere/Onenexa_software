@@ -855,10 +855,19 @@ async def _restore(manifest: dict, collections: list[tuple[str, str]], current_u
                     elif legacy_migration or "company_id" in doc:
                         doc["company_id"] = target_company_id
 
+                    if legacy_migration and doc.get("_id") is not None:
+                        existing = await raw[name].find_one({"_id": doc["_id"]}, {"company_id": 1})
+                        if existing and _s(existing.get("company_id")) != target_company_id:
+                            doc.pop("_id", None)
+
                     query = (
-                        {"_id": doc["_id"]}
-                        if doc.get("_id") is not None
-                        else {"id": doc.get("id")}
+                        {"id": doc.get("id"), "company_id": target_company_id}
+                        if legacy_migration and doc.get("id") is not None
+                        else (
+                            {"_id": doc["_id"]}
+                            if doc.get("_id") is not None
+                            else {"id": doc.get("id")}
+                        )
                     )
                     await raw[name].replace_one(query, doc, upsert=True)
                     restored += 1
