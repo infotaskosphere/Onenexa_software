@@ -43,6 +43,14 @@ def test_company_owned_finix_audit_history_collections_are_tenant_scoped():
         "document_classifications",
         "ocr_processing_history",
         "ocr_quality_reports",
+        "bank_learning",
+        "bank_statement_templates",
+        "cashflow_history",
+        "finix_ai_documents",
+        "finix_ai_learning",
+        "financial_validations",
+        "reconciliation_events",
+        "template_usage_history",
     }
 
     assert expected.issubset(TENANT_COLLECTIONS)
