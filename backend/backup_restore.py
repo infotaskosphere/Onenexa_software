@@ -1119,10 +1119,12 @@ async def _build_archive_with_progress(
                         if not include_doc:
                             continue
 
-                        entry.write((_dump(doc) + "\\n").encode("utf-8"))
+                        pending_lines.append(_dump(doc))
                         document_count += 1
                         processed_documents += 1
-
+                        if len(pending_lines) >= 500:
+                            entry.write(("\n".join(pending_lines) + "\n").encode("utf-8"))
+                            pending_lines.clear()
                         elapsed = max(0.001, time.monotonic() - started_at)
                         ratio = processed_documents / total_documents if total_documents else 1.0
                         percent = min(90.0, ratio * 90.0)
