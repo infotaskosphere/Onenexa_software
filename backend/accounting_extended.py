@@ -64,7 +64,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks, U
 from pydantic import BaseModel, Field
 
 from backend.dependencies import db, get_current_user
-from backend.modules.finix_ai.accounting.models_extended import OpeningBalanceLine, OpeningBalanceRequest, MatchRequest, FixedAssetRequest, TDSTCSEntry, BulkJournalLine, BulkJournalEntry, BulkImportRequest
+from backend.modules.finix_ai.accounting.models_extended import OpeningBalanceLine, OpeningBalanceRequest, MatchRequest, FixedAssetRequest, TDSTCSEntry, BulkJournalLine, BulkJournalEntry, BulkImportRequest, _run_bulk_import
 
 from backend.models import User
 from backend.accounting_core import get_default_account_id
