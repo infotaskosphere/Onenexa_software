@@ -818,6 +818,10 @@ async def _restore(manifest: dict, collections: list[tuple[str, str]], current_u
                         continue
                     doc = first_doc
                     doc["id"] = target_company_id
+                    if legacy_migration and source_company_doc:
+                        for key, value in source_company_doc.items():
+                            if key not in {"_id", "id", "license_id", "commercial_customer_id"}:
+                                doc.setdefault(key, value)
                     if target_license:
                         doc["license_id"] = target_license
                     if target_customer:
