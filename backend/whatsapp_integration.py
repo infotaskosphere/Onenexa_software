@@ -57,6 +57,50 @@ def _db():
     from backend.server import db
     return db
 
+
+async def _whatsapp_user_ids_for_scope(current_user: User) -> List[str]:
+    if is_platform_owner(current_user):
+        return []
+    users = await _db()["users"].find(
+        _scope_user_query({}),
+        {"_id": 0, "id": 1},
+    ).to_list(5000)
+    return [str(row.get("id")) for row in users if row.get("id")]
+
+
+async def _whatsapp_session_scope_query(current_user: User) -> dict:
+    if is_platform_owner(current_user):
+        return {}
+    company_id = enforce_company_value(current_user, None)
+    user_ids = await _whatsapp_user_ids_for_scope(current_user)
+    return {
+        "$or": [
+            {"company_id": company_id},
+            {
+                "company_id": {"$in": [None, ""]},
+                "added_by": {"$in": user_ids},
+            },
+        ]
+    }
+
+
+async def _whatsapp_access_request_scope_query(current_user: User, status: Optional[str] = None) -> dict:
+    if is_platform_owner(current_user):
+        return {"status": status} if status else {}
+    company_id = enforce_company_value(current_user, None)
+    user_ids = await _whatsapp_user_ids_for_scope(current_user)
+    base = {"status": status} if status else {}
+    scope = {
+        "$or": [
+            {"company_id": company_id},
+            {
+                "company_id": {"$in": [None, ""]},
+                "user_id": {"$in": user_ids},
+            },
+        ]
+    }
+    return {"$and": [base, scope]} if base else scope
+
 # ── In-memory sessions cache ──────────────────────────────────────────────────
 # Shared by list_sessions and get_wa_status so they never both hit the bridge
 # within the same 15-second window.
@@ -314,7 +358,8 @@ async def list_numbers(current_user: User = Depends(get_current_user)):
     contacts collection so the badge counts in the UI have real data."""
     bridge_sessions = await _get_cached_sessions()
     db = _db()
-    db_records = await db["whatsapp_sessions"].find({}).to_list(100)
+    scope = await _whatsapp_session_scope_query(current_user)
+    db_records = await db["whatsapp_sessions"].find(scope).to_list(100)
     labels = {d["session_id"]: d for d in db_records}
 
     result = []
@@ -322,7 +367,10 @@ async def list_numbers(current_user: User = Depends(get_current_user)):
         if s.get("status") != "connected":
             continue
         sid = s["sessionId"]
-        db_rec = labels.get(sid, {})
+        db_rec = labels.get(sid)
+        if not is_platform_owner(current_user) and not db_rec:
+            continue
+        db_rec = db_rec or {}
         conv_count = await db["whatsapp_hub_contacts"].count_documents({"session_id": sid})
         result.append({
             "id": sid,
@@ -345,7 +393,10 @@ async def list_sessions(current_user: User = Depends(get_current_user)):
     result = []
     for s in bridge_sessions:
         sid = s["sessionId"]
-        db_rec = labels.get(sid, {})
+        db_rec = labels.get(sid)
+        if not is_platform_owner(current_user) and not db_rec:
+            continue
+        db_rec = db_rec or {}
         result.append({
             **s,
             "label": db_rec.get("label") or s.get("displayName") or sid,
@@ -364,8 +415,10 @@ async def add_session(body: WASessionCreate, current_user: User = Depends(requir
     bridge_resp = await _bridge_post("/sessions", bridge_payload)
     label = body.label or f"Number {session_id[-6:]}"
     db = _db()
+    company_id = None if is_platform_owner(current_user) else enforce_company_value(current_user, None)
     await db["whatsapp_sessions"].insert_one({
         "session_id": session_id,
+        "company_id": company_id,
         "label": label,
         "added_by": current_user.id,
         "added_by_name": current_user.full_name,
@@ -383,11 +436,21 @@ async def add_session(body: WASessionCreate, current_user: User = Depends(requir
 
 @router.get("/sessions/{session_id}/qr")
 async def get_session_qr(session_id: str, current_user: User = Depends(require_admin())):
+    scope = await _whatsapp_session_scope_query(current_user)
+    if not is_platform_owner(current_user):
+        record = await _db()["whatsapp_sessions"].find_one({"$and": [scope, {"session_id": session_id}]})
+        if not record:
+            raise HTTPException(404, "WhatsApp session not found")
     return await _bridge_get(f"/sessions/{session_id}/qr")
 
 
 @router.get("/sessions/{session_id}/pair-code")
 async def get_session_pair_code(session_id: str, current_user: User = Depends(require_admin())):
+    if not is_platform_owner(current_user):
+        scope = await _whatsapp_session_scope_query(current_user)
+        record = await _db()["whatsapp_sessions"].find_one({"$and": [scope, {"session_id": session_id}]})
+        if not record:
+            raise HTTPException(404, "WhatsApp session not found")
     """
     Return the phone pairing code for a session started in phone-pairing mode.
     The wa-bridge stores the code in sessions[sessionId].pairCode after calling
@@ -399,15 +462,25 @@ async def get_session_pair_code(session_id: str, current_user: User = Depends(re
 
 @router.delete("/sessions/{session_id}")
 async def remove_session(session_id: str, current_user: User = Depends(require_admin())):
+    query = {"session_id": session_id}
+    if not is_platform_owner(current_user):
+        query = {"$and": [_whatsapp_session_scope_query(current_user), query]}
     await _bridge_delete(f"/sessions/{session_id}")
-    await _db()["whatsapp_sessions"].delete_one({"session_id": session_id})
+    result = await _db()["whatsapp_sessions"].delete_one(query)
+    if result.deleted_count == 0:
+        raise HTTPException(404, "WhatsApp session not found")
     _invalidate_sessions_cache()
     return {"message": f"Session {session_id} removed"}
 
 
 @router.patch("/sessions/{session_id}/label")
 async def update_session_label(session_id: str, body: WASessionCreate, current_user: User = Depends(require_admin())):
-    await _db()["whatsapp_sessions"].update_one({"session_id": session_id}, {"$set": {"label": body.label}})
+    query = {"session_id": session_id}
+    if not is_platform_owner(current_user):
+        query = {"$and": [_whatsapp_session_scope_query(current_user), query]}
+    result = await _db()["whatsapp_sessions"].update_one(query, {"$set": {"label": body.label}})
+    if result.matched_count == 0:
+        raise HTTPException(404, "WhatsApp session not found")
     _invalidate_sessions_cache()
     return {"message": "Label updated"}
 
@@ -431,6 +504,11 @@ async def force_session_sync(session_id: str, current_user: User = Depends(get_c
     from backend.whatsapp_hub import _has_hub_access
     if not (current_user.role == "admin" or await _has_hub_access(current_user)):
         raise HTTPException(403, "You do not have WhatsApp Hub access.")
+    if not is_platform_owner(current_user):
+        scope = await _whatsapp_session_scope_query(current_user)
+        record = await _db()["whatsapp_sessions"].find_one({"$and": [scope, {"session_id": session_id}]})
+        if not record:
+            raise HTTPException(404, "WhatsApp session not found")
     return await _bridge_post(f"/sessions/{session_id}/sync", {})
 
 
@@ -478,7 +556,7 @@ async def request_wa_access(body: WAAccessRequest, current_user: User = Depends(
     if existing:
         return {"message": "Request already exists", "status": existing["status"]}
     await _db()["whatsapp_access_requests"].insert_one({
-        "user_id": current_user.id, "user_name": current_user.full_name,
+        "user_id": current_user.id, "company_id": getattr(current_user, "company_id", None), "user_name": current_user.full_name,
         "user_email": current_user.email, "reason": body.reason,
         "status": "pending", "requested_at": datetime.now(timezone.utc).isoformat(),
     })
@@ -499,7 +577,7 @@ async def my_wa_access_status(current_user: User = Depends(get_current_user)):
 
 @router.get("/access/requests")
 async def list_access_requests(status_filter: Optional[str] = None, current_user: User = Depends(require_admin())):
-    query = {"status": status_filter} if status_filter else {}
+    query = await _whatsapp_access_request_scope_query(current_user, status_filter)
     docs = await _db()["whatsapp_access_requests"].find(query).sort("requested_at", -1).to_list(200)
     for d in docs:
         d["id"] = str(d.pop("_id"))
@@ -509,8 +587,9 @@ async def list_access_requests(status_filter: Optional[str] = None, current_user
 @router.post("/access/decide")
 async def decide_access_request(body: WAAccessDecision, current_user: User = Depends(require_admin())):
     new_status = "approved" if body.approved else "rejected"
+    request_scope = await _whatsapp_access_request_scope_query(current_user, "pending")
     result = await _db()["whatsapp_access_requests"].update_one(
-        {"user_id": body.user_id, "status": "pending"},
+        {"$and": [request_scope, {"user_id": body.user_id}]},
         {"$set": {"status": new_status, "decided_by": current_user.full_name,
                   "decided_at": datetime.now(timezone.utc).isoformat(), "admin_note": body.admin_note}},
     )
