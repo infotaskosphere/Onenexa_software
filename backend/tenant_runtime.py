@@ -24,12 +24,13 @@ TENANT_COLLECTIONS = {
     "invoices", "payments", "purchase_invoices", "purchase_payments", "purchases",
     "bank_accounts", "bank_transactions", "bank_rules", "bank_reconciliation",
     "bank_reconciliation_matches", "bank_reconciliation_audit", "bank_statistics",
-    "bank_transaction_history", "chart_of_accounts", "accounting_audit_trail", "bulk_import_jobs", "finix_ai_proposals", "journal_entries", "journal_lines",
+    "bank_transaction_history", "bank_learning", "bank_statement_templates", "cashflow_history",
+    "chart_of_accounts", "accounting_audit_trail", "bulk_import_jobs", "finix_ai_proposals", "finix_ai_documents", "finix_ai_learning", "journal_entries", "journal_lines",
     "accounting_audit", "accounting_audit_locks", "accounting_audit_sequences",
     "accounting_locks", "accounting_posting_failures", "accounting_rules", "accounting_sequences",
     "adjustment_note_overrides", "ledger_learning", "posting_history", "posting_audit", "journal_templates", "voucher_history",
     "party_ledgers", "opening_balances", "fixed_assets", "depreciation_runs",
-    "tds_tcs_entries", "einvoice_history", "ewaybill_history", "standalone_govt_fees",
+    "tds_tcs_entries", "einvoice_history", "ewaybill_history", "standalone_govt_fees", "financial_validations", "reconciliation_events",
     # Leads & Quotations
     "leads", "quotations",
     # Records & Vaults
@@ -48,7 +49,7 @@ TENANT_COLLECTIONS = {
     "mis_manual", "mis_transactions", "mis_uploads", "analytics_data", "kpi_history",
     # AI & Workflow
     "knowledge_base", "learning_events", "manual_corrections", "recommendation_history",
-    "learning_audit", "ai_validation_results", "ai_confidence_history", "ai_anomaly_history",
+    "learning_audit", "template_usage_history", "ai_validation_results", "ai_confidence_history", "ai_anomaly_history",
     "ai_document_memory", "ai_document_workspace", "ai_workspace_knowledge", "document_classifications",
     "ocr_processing_history", "ocr_quality_reports",
     "workflow_definitions", "workflow_instances", "workflow_history", "aiweave_conversations", "aiweave_executions", "aiweave_provider_accounts", "aiweave_provider_models", "aiweave_routing_rules",
