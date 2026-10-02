@@ -217,129 +217,63 @@ export default function BackupRestore() {
         : Date.now() + '-' + Math.random().toString(36).slice(2);
 
     setBusy(true);
-    setTransfer({
-      active: true,
-      phase: 'Preparing backup…',
-      percent: 0,
-      etaSeconds: null,
-      processed: 0,
-      total: 0,
-      detail: 'Calculating exact backup document count…',
-    });
-
-    let pollTimer = null;
+    setTransfer({ active: true, phase: 'Preparing backup…', percent: 0, etaSeconds: null, processed: 0, total: 0, detail: 'Starting background backup job…' });
     let stopped = false;
-
-    const pollProgress = async () => {
-      if (stopped) return;
-      try {
-        const { data } = await api.get(
-          '/app-backup/create/progress/' + encodeURIComponent(progressId),
-          { _skipReadyGate: true, _silent: true }
-        );
-        if (data?.phase) {
-          setTransfer((current) => ({
-            ...current,
-            active: true,
-            phase: data.phase === 'creating'
-              ? 'Creating backup…'
-              : data.phase === 'encrypting'
-                ? 'Encrypting backup…'
-                : data.phase === 'preparing'
-                  ? 'Preparing backup…'
-                  : data.phase === 'ready'
-                    ? 'Backup created. Starting download…'
-                    : data.phase,
-            percent: Number.isFinite(Number(data.percent)) ? Number(data.percent) : current.percent,
-            etaSeconds: data.eta_seconds ?? current.etaSeconds,
-            processed: data.processed_documents ?? current.processed,
-            total: data.total_documents ?? current.total,
-            detail: data.current_collection
-              ? 'Collection: ' + data.current_collection
-              : current.detail,
-          }));
-        }
-      } catch {
-        // Polling is best-effort; the main backup request remains authoritative.
-      }
-    };
-
-    pollTimer = window.setInterval(pollProgress, 700);
-    void pollProgress();
+    let pollTimer = null;
 
     try {
       const form = new FormData();
       form.append('password', password);
       if (mode !== 'full') form.append('collections', customSelection.join(','));
 
-      const started = performance.now();
+      const response = await fetch(BASE_URL + '/app-backup/create', {
+        method: 'POST',
+        headers: { Authorization: getToken() ? 'Bearer ' + getToken() : '', 'X-Backup-Progress-ID': progressId },
+        body: form,
+      });
+      const rawResponse = await response.text();
+      let data = {};
+      try { data = rawResponse ? JSON.parse(rawResponse) : {}; } catch { data = {}; }
+      if (!response.ok) throw new Error(normalizeBackupDetail(data?.detail) || normalizeBackupDetail(data?.message) || rawResponse || 'Backup could not be started (' + response.status + ')');
+      const serverProgressId = String(data?.progress_id || progressId);
 
-      const response = await api.post('/app-backup/create', form, {
-        responseType: 'blob',
-        headers: {
-          'X-Backup-Progress-ID': progressId,
-          'Content-Type': undefined,
-        },
-        onDownloadProgress: (event) => {
-          const loaded = Number(event.loaded || 0);
-          const total = Number(event.total || 0);
-          const elapsed = Math.max(0.001, (performance.now() - started) / 1000);
-          const speed = loaded / elapsed;
-          const percent = total > 0 ? Math.min(100, (loaded / total) * 100) : 0;
-          const remaining = total > 0 ? Math.max(0, total - loaded) : 0;
+      const pollProgress = async () => {
+        if (stopped) return null;
+        const { data: progress } = await api.get('/app-backup/create/progress/' + encodeURIComponent(serverProgressId), { _skipReadyGate: true, _silent: true });
+        if (!progress) return null;
+        const phase = progress.phase;
+        setTransfer((current) => ({ ...current, active: !['ready', 'error'].includes(phase), phase: phase === 'creating' ? 'Creating backup…' : phase === 'encrypting' ? 'Encrypting backup…' : phase === 'preparing' ? 'Preparing backup…' : phase === 'queued' ? 'Backup queued…' : phase === 'ready' ? 'Backup ready. Starting download…' : phase === 'error' ? 'Failed' : phase || current.phase, percent: Number.isFinite(Number(progress.percent)) ? Number(progress.percent) : current.percent, etaSeconds: progress.eta_seconds ?? current.etaSeconds, processed: progress.processed_documents ?? progress.processed_bytes ?? current.processed, total: progress.total_documents ?? progress.total_bytes ?? current.total, detail: progress.error || (progress.current_collection ? 'Collection: ' + progress.current_collection : progress.download_ready ? 'Backup is ready for download.' : current.detail) }));
+        if (phase === 'error') throw new Error(progress.error || 'Backup creation failed on the server.');
+        return phase === 'ready' && progress.download_ready ? progress : null;
+      };
 
-          setTransfer({
-            active: true,
-            phase: 'Downloading backup…',
-            percent,
-            etaSeconds: speed > 0 && total > 0 ? remaining / speed : null,
-            processed: loaded,
-            total,
-            detail: total
-              ? formatBytes(loaded) + ' / ' + formatBytes(total)
-              : formatBytes(loaded) + ' downloaded',
-          });
-        },
+      await new Promise((resolve, reject) => {
+        const finish = async () => {
+          try { const ready = await pollProgress(); if (ready?.download_ready) { window.clearInterval(pollTimer); stopped = true; resolve(ready); } }
+          catch (error) { window.clearInterval(pollTimer); stopped = true; reject(error); }
+        };
+        pollTimer = window.setInterval(finish, 700);
+        void finish();
       });
 
-      const blob = response.data;
-      const total = blob?.size || 0;
-      setTransfer({
-        active: false,
-        phase: 'Complete',
-        percent: 100,
-        etaSeconds: 0,
-        processed: total,
-        total,
-        detail: 'Backup downloaded successfully.',
-      });
-
+      setTransfer((current) => ({ ...current, active: true, phase: 'Downloading backup…', percent: 0, etaSeconds: null, processed: 0, total: 0, detail: 'Transferring encrypted backup to your device…' }));
+      const downloadResponse = await fetch(BASE_URL + '/app-backup/create/download/' + encodeURIComponent(serverProgressId), { method: 'GET', headers: { Authorization: getToken() ? 'Bearer ' + getToken() : '' } });
+      if (!downloadResponse.ok) throw new Error('Backup download failed (' + downloadResponse.status + ')');
+      const backupBlob = await readResponseWithProgress(downloadResponse, ({ loaded, total, percent, etaSeconds }) => { setTransfer((current) => ({ ...current, active: true, phase: 'Downloading backup…', percent, etaSeconds, processed: loaded, total, detail: total ? formatBytes(loaded) + ' / ' + formatBytes(total) : formatBytes(loaded) + ' downloaded' })); });
       const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
-      downloadBlob(blob, 'onenexa-backup-' + timestamp + '.onenexa');
+      downloadBlob(backupBlob, 'onenexa-backup-' + timestamp + '.onenexa');
+      setTransfer({ active: false, phase: 'Complete', percent: 100, etaSeconds: 0, processed: backupBlob.size, total: backupBlob.size, detail: 'Backup downloaded successfully.' });
       toast.success(mode === 'full' ? 'Full application backup downloaded.' : 'Custom backup downloaded.');
       void loadHistory();
     } catch (error) {
-      setTransfer({
-        active: false,
-        phase: 'Failed',
-        percent: 0,
-        etaSeconds: null,
-        processed: 0,
-        total: 0,
-        detail: '',
-      });
-      const detail =
-        normalizeBackupDetail(error?.response?.data?.detail) ||
-        error?.message ||
-        'Backup failed';
-      toast.error(detail);
+      setTransfer((current) => ({ ...current, active: false, phase: 'Failed', etaSeconds: null, detail: error?.message || '' }));
+      toast.error(error?.message || 'Backup failed');
     } finally {
       stopped = true;
       if (pollTimer) window.clearInterval(pollTimer);
       setBusy(false);
     }
   };
-
   const restoreBackup = async () => {
     if (!restoreFile) return toast.error('Choose a .onenexa backup file, or a legacy .taskosphere file from the old application.');
     if (restorePassword.length < 8) return toast.error('Enter the backup password.');
