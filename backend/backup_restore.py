@@ -1103,7 +1103,7 @@ async def _count_commercial_backup_documents(raw, name, company_id, company, use
     return count
 
 
-async def _build_archive_with_progress(
+async def _build_archive(
     user: User,
     password: str,
     requested: list[str] | None,
@@ -1377,5 +1377,3 @@ def _encrypt_with_progress(
         out.write(encryptor.finalize())
         out.write(encryptor.tag)
 
-
-_build_archive = _build_archive_with_progress
