@@ -172,7 +172,7 @@ async def _persist_backup_artifact(output: str, filename: str, manifest: dict, c
     total_documents = document_count
 
     try:
-        grid_in = bucket.open_upload_stream(
+        grid_in = await bucket.open_upload_stream(
             filename,
             chunk_size_bytes=CHUNK_SIZE,
             metadata={
@@ -604,7 +604,19 @@ async def _run_backup_job(progress_id: str, current_user: User, password: str, r
         _set_backup_progress(progress_id, owner_user_id=_s(current_user.id), phase="ready", percent=100.0, eta_seconds=0.0, current_collection=None, file_size=os.path.getsize(output), download_ready=True, filename=filename, history_id=str(history_id))
         asyncio.create_task(_expire_backup_output(progress_id))
     except Exception as exc:
-        _set_backup_progress(progress_id, owner_user_id=_s(current_user.id), phase="error", percent=0.0, eta_seconds=None, current_collection=None, error=str(exc) if isinstance(exc, HTTPException) else "Backup creation failed on the server.", download_ready=False)
+        previous = _BACKUP_PROGRESS.get(progress_id, {})
+        _set_backup_progress(
+            progress_id,
+            owner_user_id=_s(current_user.id),
+            phase="error",
+            percent=float(previous.get("percent") or 0.0),
+            processed_documents=previous.get("processed_documents", 0),
+            total_documents=previous.get("total_documents", 0),
+            eta_seconds=None,
+            current_collection=previous.get("current_collection"),
+            error=str(exc) if isinstance(exc, HTTPException) else f"Backup creation failed on the server: {exc}",
+            download_ready=False,
+        )
         logger.error("Background backup creation failed for %s: %s", progress_id, exc, exc_info=True)
     finally:
         _BACKUP_TASKS.pop(progress_id, None)
