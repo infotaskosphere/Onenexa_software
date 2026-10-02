@@ -40,7 +40,7 @@ TENANT_COLLECTIONS = {
     "compliance_comments", "trademark_sphere", "trademark_sphere_reminders",
     "trademark_qc_reports", "trademark_qc_branding", "roc_companies", "roc_documents",
     "gst_reconciliation_history", "gst_reconciliation_sessions", "gst_returns",
-    "gst_compliances", "gst_portal_snapshots", "gst_portal_registrations",
+    "gst_compliances", "gst_compliance", "gst_audit", "gst_portal_snapshots", "gst_portal_registrations",
     "gst_trade_names", "gst_vendor_profiles", "gst_portal_audit_risk", "gst_learning", "gst_processing_history", "gst_validation", "itc_register",
     "vendor_profiles", "vendor_rule_overrides", "vendor_learning_history",
     # HR, Attendance & Payroll
