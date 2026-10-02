@@ -454,7 +454,6 @@ def check_module_permission(module,action):
         if _get_perm(current_user,flag,False):return current_user
         raise HTTPException(status_code=403,detail=f"Permission required: {module}.{action} (flag: {flag})")
     return checker
-def check_permission_and_visibility(module,action,record_user_field="created_by",assigned_field="assigned_to"):return None
 def check_record_visibility(user,record,team_ids=None):
     if user.role=="admin":return True
     if record.get("created_by")==user.id or record.get("assigned_to")==user.id or record.get("user_id")==user.id:return True
