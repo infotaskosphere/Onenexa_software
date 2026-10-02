@@ -61,6 +61,7 @@ MAX_BACKUP_UPLOAD_BYTES = 100 * 1024 * 1024
 NEW_BACKUP_EXTENSION = ".onenexa"
 LEGACY_BACKUP_EXTENSIONS = {".taskosphere"}
 SUPPORTED_BACKUP_EXTENSIONS = {NEW_BACKUP_EXTENSION, *LEGACY_BACKUP_EXTENSIONS}
+LEGACY_SOURCE_APPLICATION = "Final-Taskosphere-3"
 
 BACKUP_HISTORY_COLLECTION = "backup_history"
 BACKUP_GRIDFS_BUCKET = "taskosphere_backups"
@@ -633,6 +634,102 @@ async def _read_archive(zip_path: str):
         raise
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Backup archive is invalid: {exc}") from exc
+
+
+
+
+async def _legacy_source_context(zip_path: str, collections: list[tuple[str, str]]):
+    source_company = {}
+    source_company_id = ""
+    company_entry = next((entry for name, entry in collections if name == "companies"), None)
+    if company_entry:
+        with zipfile.ZipFile(zip_path, "r") as archive:
+            with archive.open(company_entry, "r") as member:
+                for raw_line in member:
+                    if not raw_line.strip():
+                        continue
+                    source_company = _load(raw_line.decode("utf-8"))
+                    source_company_id = _s(
+                        source_company.get("id")
+                        or source_company.get("company_id")
+                        or source_company.get("_id")
+                    )
+                    break
+
+    if not source_company_id:
+        users_entry = next((entry for name, entry in collections if name == "users"), None)
+        if users_entry:
+            with zipfile.ZipFile(zip_path, "r") as archive:
+                with archive.open(users_entry, "r") as member:
+                    for raw_line in member:
+                        if not raw_line.strip():
+                            continue
+                        user_doc = _load(raw_line.decode("utf-8"))
+                        source_company_id = _s(user_doc.get("company_id"))
+                        if source_company_id:
+                            break
+
+    return source_company_id, source_company
+
+
+async def _legacy_user_replacements(
+    zip_path: str,
+    collections: list[tuple[str, str]],
+    current_user: User,
+    raw,
+    target_company_id: str,
+    source_owner_id: str,
+):
+    entry = next((entry for name, entry in collections if name == "users"), None)
+    replacements = {}
+    if not entry:
+        if source_owner_id:
+            replacements[source_owner_id] = _s(current_user.id)
+        return replacements
+
+    with zipfile.ZipFile(zip_path, "r") as archive:
+        with archive.open(entry, "r") as member:
+            for raw_line in member:
+                if not raw_line.strip():
+                    continue
+
+                doc = _load(raw_line.decode("utf-8"))
+                old_id = _s(doc.get("id"))
+                if not old_id:
+                    continue
+
+                old_object_id = _s(doc.get("_id"))
+                if old_id == source_owner_id:
+                    new_id = _s(current_user.id)
+                else:
+                    email = _s(doc.get("email")).lower()
+                    existing = None
+                    if email:
+                        existing = await raw.users.find_one(
+                            {
+                                "company_id": target_company_id,
+                                "email": doc.get("email"),
+                            },
+                            {"id": 1},
+                        )
+
+                    new_id = _s(existing.get("id")) if existing else old_id
+                    if not new_id:
+                        new_id = secrets.token_urlsafe(18)
+
+                    if not existing:
+                        collision = await raw.users.find_one({"id": new_id}, {"company_id": 1})
+                        if collision and _s(collision.get("company_id")) != target_company_id:
+                            new_id = secrets.token_urlsafe(18)
+
+                replacements[old_id] = new_id
+                if old_object_id:
+                    replacements[old_object_id] = new_id
+
+    if source_owner_id:
+        replacements[source_owner_id] = _s(current_user.id)
+    return replacements
+
 
 
 def _replace(value: Any, replacements: dict[str, str]) -> Any:
