@@ -464,7 +464,7 @@ async def get_session_pair_code(session_id: str, current_user: User = Depends(re
 async def remove_session(session_id: str, current_user: User = Depends(require_admin())):
     query = {"session_id": session_id}
     if not is_platform_owner(current_user):
-        query = {"$and": [_whatsapp_session_scope_query(current_user), query]}
+        query = {"$and": [await _whatsapp_session_scope_query(current_user), query]}
     await _bridge_delete(f"/sessions/{session_id}")
     result = await _db()["whatsapp_sessions"].delete_one(query)
     if result.deleted_count == 0:
@@ -477,7 +477,7 @@ async def remove_session(session_id: str, current_user: User = Depends(require_a
 async def update_session_label(session_id: str, body: WASessionCreate, current_user: User = Depends(require_admin())):
     query = {"session_id": session_id}
     if not is_platform_owner(current_user):
-        query = {"$and": [_whatsapp_session_scope_query(current_user), query]}
+        query = {"$and": [await _whatsapp_session_scope_query(current_user), query]}
     result = await _db()["whatsapp_sessions"].update_one(query, {"$set": {"label": body.label}})
     if result.matched_count == 0:
         raise HTTPException(404, "WhatsApp session not found")
