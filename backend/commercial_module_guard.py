@@ -752,8 +752,10 @@ def _permission_flag(
             )
 
         if is_admin:
-            selected = _selected_license_features(license_doc, module)
-            return flag in selected
+            # Purchased-module access is the tenant-admin ceiling. The
+            # granular selected_features list applies to additional users,
+            # not the licensee administrator.
+            return True
 
         # Non-admin licensee user: licensee admin has full control over user permissions
         # for modules permitted by the commercial console license.
