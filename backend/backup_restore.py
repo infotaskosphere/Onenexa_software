@@ -767,6 +767,8 @@ async def _restore(manifest: dict, collections: list[tuple[str, str]], current_u
         replacements[source_license] = target_license
     if source_customer and target_customer:
         replacements[source_customer] = target_customer
+    if source_company:
+        replacements[source_company] = target_company_id
 
     selected_names = [name for name, _ in collections]
     raw = _raw_db()
