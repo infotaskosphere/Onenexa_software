@@ -408,12 +408,12 @@ def install() -> None:
     async def _patched_get_current_user(
         credentials,
     ):
-        user = await _commercial_entitlement_base_get_current_user(
+        user = await target_globals["_commercial_entitlement_base_get_current_user"](
             credentials
         )
 
         try:
-            return await _commercial_entitlement_hydrate(
+            return await target_globals["_commercial_entitlement_hydrate"](
                 user
             )
         except Exception:
