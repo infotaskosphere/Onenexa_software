@@ -15,7 +15,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Scan references
         run: |
-          for pattern in             "models_banking import router"             "models_extended import router"             "from backend.modules.finix_ai.banking.models_banking"             "from backend.modules.finix_ai.accounting.models_extended"             "EmployeeMaster"             "IdentixAttendance"             "WebsiteBuilderConsole"             "FinixAIWorkspace"             "check_permission_and_visibility"             "get_team_user_ids"; do
+          for pattern in             "models_banking import router"             "models_extended import router"             "from backend.modules.finix_ai.banking.models_banking"             "from backend.modules.finix_ai.accounting.models_extended"             "EmployeeMaster"             "IdentixAttendance"             "WebsiteBuilderConsole"             "FinixAIWorkspace"             "check_permission_and_visibility"             "get_team_user_ids"             "server_modules.health"             "from backend.server_modules.health"             "server_modules.startup"             "from backend.server_modules.startup"             "check_permission_and_visibility"; do
             echo "===== $pattern ====="
             git grep -n -F "$pattern" -- ':!*.map' || true
           done
