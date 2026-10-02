@@ -172,7 +172,7 @@ async def _persist_backup_artifact(output: str, filename: str, manifest: dict, c
     total_documents = document_count
 
     try:
-        grid_in = await bucket.open_upload_stream(
+        grid_in = bucket.open_upload_stream(
             filename,
             chunk_size_bytes=CHUNK_SIZE,
             metadata={
