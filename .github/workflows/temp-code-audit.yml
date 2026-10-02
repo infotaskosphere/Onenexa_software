@@ -17,6 +17,13 @@ jobs:
         working-directory: frontend
     steps:
       - uses: actions/checkout@v4
+      - name: Reference audit
+        working-directory: .
+        run: |
+          for symbol in EmployeeMaster IdentixAttendance WebsiteBuilderConsole check_permission_and_visibility get_team_user_ids; do
+            echo "===== $symbol ====="
+            git grep -n -E "\\b$symbol\\b" -- ':!*.map' || true
+          done
       - name: Install frontend dependencies
         run: npm install
       - name: Build frontend
