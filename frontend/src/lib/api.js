@@ -369,7 +369,7 @@ const SLASH_COMPATIBLE_COLLECTIONS = new Set([
 
 const api = axios.create({
   baseURL: BASE_URL,
-  timeout: 300000,
+  timeout: 30000,
   headers: {
     "Content-Type": "application/json",
   },
