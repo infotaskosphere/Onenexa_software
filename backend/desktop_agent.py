@@ -235,9 +235,9 @@ async def agent_heartbeat(
     Desktop agent sends heartbeat every 30 seconds.
     Updates agent status, CPU, memory, internet connectivity.
     """
-    t    company_id = enforce_company_value(current_user, None)
+    company_id = enforce_company_value(current_user, None)
     _validate_agent_user(current_user, payload.user_id)
-ry:
+    try:
         now = _now_iso()
         await db.desktop_agents.update_one(
             {"agent_id": payload.agent_id},
@@ -309,9 +309,9 @@ async def push_activity(
     Desktop agent pushes activity report (extended version).
     Upserts one doc per user per date.
     """
-    tr    company_id = enforce_company_value(current_user, None)
-    _validate_agent_user(current_user, payload.user_id)
-y:
+        company_id = enforce_company_value(current_user, None)
+        _validate_agent_user(current_user, payload.user_id)
+    try:
         report_date = payload.date or _today()
         now = _now_iso()
 
@@ -362,9 +362,9 @@ async def push_browser(
     Desktop agent pushes browser visit data.
     Only domain, title, duration, count — no content capture.
     """
-    tr    company_id = enforce_company_value(current_user, None)
-    _validate_agent_user(current_user, payload.user_id)
-y:
+        company_id = enforce_company_value(current_user, None)
+        _validate_agent_user(current_user, payload.user_id)
+    try:
         report_date = payload.date or _today()
         now = _now_iso()
 
@@ -411,9 +411,9 @@ async def push_dsc(
     Desktop agent pushes DSC token status changes.
     Records connection/disconnection events.
     """
-    tr    company_id = enforce_company_value(current_user, None)
-    _validate_agent_user(current_user, payload.user_id)
-y:
+        company_id = enforce_company_value(current_user, None)
+        _validate_agent_user(current_user, payload.user_id)
+    try:
         now = _now_iso()
         doc = {
             "agent_id": payload.agent_id,
@@ -462,9 +462,9 @@ async def push_usb(
     Desktop agent pushes USB device connect/disconnect events.
     Detects DSC tokens, USB drives, phones, printers, etc.
     """
-    tr    company_id = enforce_company_value(current_user, None)
-    _validate_agent_user(current_user, payload.user_id)
-y:
+        company_id = enforce_company_value(current_user, None)
+        _validate_agent_user(current_user, payload.user_id)
+    try:
         now = _now_iso()
         events = payload.events or []
         if events:
@@ -507,9 +507,9 @@ async def push_productivity(
     Desktop agent pushes computed productivity metrics.
     Includes focus time, idle time, app breakdown, score.
     """
-    tr    company_id = enforce_company_value(current_user, None)
-    _validate_agent_user(current_user, payload.user_id)
-y:
+        company_id = enforce_company_value(current_user, None)
+        _validate_agent_user(current_user, payload.user_id)
+    try:
         report_date = payload.date or _today()
         now = _now_iso()
 
@@ -558,8 +558,8 @@ async def push_system_info(
     """
     Desktop agent pushes system information on startup and periodically.
     """
-    tr    company_id = enforce_company_value(current_user, None)
-y:
+        company_id = enforce_company_value(current_user, None)
+    try:
         now = _now_iso()
         await db.desktop_agents.update_one(
             {"agent_id": payload.agent_id},
