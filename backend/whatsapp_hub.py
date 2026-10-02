@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 
 from backend.dependencies import get_current_user, require_admin
 from backend.models import User
+from backend.commercial_user_company_scope import _scope_user_query
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/whatsapp/hub", tags=["whatsapp-hub"])
@@ -1239,7 +1240,10 @@ async def hub_list_access(current_user: User = Depends(require_admin())):
 async def hub_update_access(user_id: str, body: HubAccessUpdate, current_user: User = Depends(require_admin())):
     # Users are keyed by UUID string in the "id" field, not by MongoDB ObjectId "_id".
     db = _db()
-    result = await db["users"].update_one({"id": user_id}, {"$set": {"wa_hub_access": body.grant}})
+    user_query = {"id": user_id}
+    if not _is_platform_owner(current_user):
+        user_query = _scope_user_query(user_query)
+    result = await db["users"].update_one(user_query, {"$set": {"wa_hub_access": body.grant}})
     if result.matched_count == 0:
         raise HTTPException(404, "User not found")
     return {"ok": True, "user_id": user_id, "wa_hub_access": body.grant}
@@ -1258,7 +1262,8 @@ async def hub_request_access(body: HubAccessRequest, current_user: User = Depend
     if existing:
         return {"message": "Request already pending"}
     await db["whatsapp_hub_access_requests"].insert_one({
-        "user_id": str(current_user.id), "user_name": current_user.name, "user_email": current_user.email,
+        "user_id": str(current_user.id), "company_id": getattr(current_user, "company_id", None),
+        "user_name": current_user.name, "user_email": current_user.email,
         "reason": body.reason, "status": "pending", "created_at": datetime.now(timezone.utc),
     })
     return {"message": "Access request submitted."}
@@ -1267,7 +1272,10 @@ async def hub_request_access(body: HubAccessRequest, current_user: User = Depend
 @router.get("/access/requests")
 async def hub_list_requests(current_user: User = Depends(require_admin())):
     db   = _db()
-    reqs = await db["whatsapp_hub_access_requests"].find({"status": "pending"}).to_list(100)
+    query = {"status": "pending"}
+    if not _is_platform_owner(current_user):
+        query["company_id"] = getattr(current_user, "company_id", None)
+    reqs = await db["whatsapp_hub_access_requests"].find(query).to_list(100)
     return {"requests": [{"id": str(r["_id"]), "user_id": r["user_id"], "user_name": r.get("user_name"), "user_email": r.get("user_email"), "reason": r.get("reason"), "created_at": r.get("created_at")} for r in reqs]}
 
 
@@ -1280,12 +1288,20 @@ class HubAccessDecision(BaseModel):
 async def hub_decide_access(body: HubAccessDecision, current_user: User = Depends(require_admin())):
     from bson import ObjectId
     db  = _db()
-    req = await db["whatsapp_hub_access_requests"].find_one({"_id": ObjectId(body.request_id)})
+    req_query = {"_id": ObjectId(body.request_id)}
+    if not _is_platform_owner(current_user):
+        req_query["company_id"] = getattr(current_user, "company_id", None)
+    req = await db["whatsapp_hub_access_requests"].find_one(req_query)
     if not req:
         raise HTTPException(404, "Not found")
     status = "approved" if body.approved else "rejected"
-    await db["whatsapp_hub_access_requests"].update_one({"_id": ObjectId(body.request_id)}, {"$set": {"status": status}})
+    await db["whatsapp_hub_access_requests"].update_one(req_query, {"$set": {"status": status}})
     if body.approved:
         # req["user_id"] is a UUID string stored in the "id" field (not MongoDB "_id")
-        await db["users"].update_one({"id": req["user_id"]}, {"$set": {"wa_hub_access": True}})
+        user_query = {"id": req["user_id"]}
+        if not _is_platform_owner(current_user):
+            user_query = _scope_user_query(user_query)
+        result = await db["users"].update_one(user_query, {"$set": {"wa_hub_access": True}})
+        if result.matched_count == 0:
+            raise HTTPException(404, "Requested user is outside your tenant scope.")
     return {"ok": True, "status": status}
