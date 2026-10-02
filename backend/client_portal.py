@@ -38,6 +38,7 @@ from backend.dependencies import (
     get_user_permissions,
 )
 from backend.models import User
+from backend.platform_owner import is_platform_owner
 # Reuse the same Brevo-backed OTP emailer the main-app forgot-password flow
 # uses, so client portal password resets need no separate email infra.
 from backend.auth_password_reset import _send_otp_email
@@ -2203,8 +2204,9 @@ class PortalMessageCreate(BaseModel):
 @router.get("/messages", dependencies=[Depends(_client_portal_guard)])
 async def list_messages_admin(current_user: User = Depends(get_current_user)):
     """Admin: list all portal messages (scoped to this deployment)."""
+    query = {} if is_platform_owner(current_user) else {"org_id": getattr(current_user, "company_id", None)}
     docs = await db.portal_messages.find(
-        {}, {"_id": 0}
+        query, {"_id": 0}
     ).sort("created_at", -1).to_list(200)
     return docs
 
@@ -2313,7 +2315,12 @@ async def reply_to_message(
 @router.delete("/messages/{msg_id}", dependencies=[Depends(_client_portal_guard)])
 async def delete_portal_message(msg_id: str, current_user: User = Depends(get_current_user)):
     """Admin: delete a message."""
-    await db.portal_messages.delete_one({"id": msg_id})
+    query = {"id": msg_id}
+    if not is_platform_owner(current_user):
+        query["org_id"] = getattr(current_user, "company_id", None)
+    result = await db.portal_messages.delete_one(query)
+    if result.deleted_count == 0:
+        raise HTTPException(404, "Message not found")
     return {"ok": True}
 
 # ── Individual Folder endpoint ─────────────────────────────────────────────
