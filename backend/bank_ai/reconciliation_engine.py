@@ -5,6 +5,7 @@ updates transaction statuses, triggers double-entry ledger posting, and records 
 """
 
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 import uuid
