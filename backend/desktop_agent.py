@@ -309,8 +309,8 @@ async def push_activity(
     Desktop agent pushes activity report (extended version).
     Upserts one doc per user per date.
     """
-        company_id = enforce_company_value(current_user, None)
-        _validate_agent_user(current_user, payload.user_id)
+    company_id = enforce_company_value(current_user, None)
+    _validate_agent_user(current_user, payload.user_id)
     try:
         report_date = payload.date or _today()
         now = _now_iso()
@@ -362,8 +362,8 @@ async def push_browser(
     Desktop agent pushes browser visit data.
     Only domain, title, duration, count — no content capture.
     """
-        company_id = enforce_company_value(current_user, None)
-        _validate_agent_user(current_user, payload.user_id)
+    company_id = enforce_company_value(current_user, None)
+    _validate_agent_user(current_user, payload.user_id)
     try:
         report_date = payload.date or _today()
         now = _now_iso()
@@ -411,8 +411,8 @@ async def push_dsc(
     Desktop agent pushes DSC token status changes.
     Records connection/disconnection events.
     """
-        company_id = enforce_company_value(current_user, None)
-        _validate_agent_user(current_user, payload.user_id)
+    company_id = enforce_company_value(current_user, None)
+    _validate_agent_user(current_user, payload.user_id)
     try:
         now = _now_iso()
         doc = {
@@ -462,8 +462,8 @@ async def push_usb(
     Desktop agent pushes USB device connect/disconnect events.
     Detects DSC tokens, USB drives, phones, printers, etc.
     """
-        company_id = enforce_company_value(current_user, None)
-        _validate_agent_user(current_user, payload.user_id)
+    company_id = enforce_company_value(current_user, None)
+    _validate_agent_user(current_user, payload.user_id)
     try:
         now = _now_iso()
         events = payload.events or []
@@ -507,8 +507,8 @@ async def push_productivity(
     Desktop agent pushes computed productivity metrics.
     Includes focus time, idle time, app breakdown, score.
     """
-        company_id = enforce_company_value(current_user, None)
-        _validate_agent_user(current_user, payload.user_id)
+    company_id = enforce_company_value(current_user, None)
+    _validate_agent_user(current_user, payload.user_id)
     try:
         report_date = payload.date or _today()
         now = _now_iso()
@@ -558,7 +558,7 @@ async def push_system_info(
     """
     Desktop agent pushes system information on startup and periodically.
     """
-        company_id = enforce_company_value(current_user, None)
+    company_id = enforce_company_value(current_user, None)
     try:
         now = _now_iso()
         await db.desktop_agents.update_one(
