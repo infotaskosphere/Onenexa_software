@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 from backend.dependencies import get_current_user, require_admin
 from backend.models import User
 from backend.commercial_user_company_scope import _scope_user_query
+from backend.platform_owner import is_platform_owner as _is_platform_owner
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/whatsapp/hub", tags=["whatsapp-hub"])
