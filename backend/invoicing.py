@@ -4963,7 +4963,7 @@ async def sync_invoice_journal_entry(invoice_id: str):
         if abs(float(_active.get("total_debit") or 0) - _desired_total) <= 0.01:
             return
         from backend.accounting_lock import reverse_journal_entry
-        await reverse_journal_entry(_active["id"], "Source document changed; superseded by latest posting", payment.get("created_by", "system") if "payment" in locals() else inv.get("created_by", "system"))
+        await reverse_journal_entry(_active["id"], "Source document changed; superseded by latest posting", inv.get("created_by", "system"))
         await db.journal_entries.update_one({"id": _active["id"]}, {"$set": {"superseded_at": datetime.now(timezone.utc).isoformat()}})
 
     try:
@@ -5047,7 +5047,7 @@ async def sync_payment_journal_entry(payment_id: str):
         if abs(float(_active.get("total_debit") or 0) - _desired_total) <= 0.01:
             return
         from backend.accounting_lock import reverse_journal_entry
-        await reverse_journal_entry(_active["id"], "Source document changed; superseded by latest posting", payment.get("created_by", "system") if "payment" in locals() else inv.get("created_by", "system"))
+        await reverse_journal_entry(_active["id"], "Source document changed; superseded by latest posting", inv.get("created_by", "system"))
         await db.journal_entries.update_one({"id": _active["id"]}, {"$set": {"superseded_at": datetime.now(timezone.utc).isoformat()}})
 
     try:
@@ -5143,7 +5143,7 @@ async def sync_purchase_journal_entry(invoice_id: str):
         if abs(float(_active.get("total_debit") or 0) - _desired_total) <= 0.01:
             return
         from backend.accounting_lock import reverse_journal_entry
-        await reverse_journal_entry(_active["id"], "Source document changed; superseded by latest posting", payment.get("created_by", "system") if "payment" in locals() else inv.get("created_by", "system"))
+        await reverse_journal_entry(_active["id"], "Source document changed; superseded by latest posting", inv.get("created_by", "system"))
         await db.journal_entries.update_one({"id": _active["id"]}, {"$set": {"superseded_at": datetime.now(timezone.utc).isoformat()}})
 
     try:
@@ -5209,7 +5209,7 @@ async def sync_purchase_payment_journal_entry(payment_id: str):
         if abs(float(_active.get("total_debit") or 0) - _desired_total) <= 0.01:
             return
         from backend.accounting_lock import reverse_journal_entry
-        await reverse_journal_entry(_active["id"], "Source document changed; superseded by latest posting", payment.get("created_by", "system") if "payment" in locals() else inv.get("created_by", "system"))
+        await reverse_journal_entry(_active["id"], "Source document changed; superseded by latest posting", inv.get("created_by", "system"))
         await db.journal_entries.update_one({"id": _active["id"]}, {"$set": {"superseded_at": datetime.now(timezone.utc).isoformat()}})
 
     try:
