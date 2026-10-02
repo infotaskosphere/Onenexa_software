@@ -742,7 +742,7 @@ def _replace(value: Any, replacements: dict[str, str]) -> Any:
     return value
 
 
-async def _restore(manifest: dict, collections: list[tuple[str, str]], current_user: User, zip_path: str):
+async def _restore(manifest: dict, collections: list[tuple[str, str]], current_user: User, zip_path: str, legacy_migration: bool = False):
     target_company_id, target_company, target_user_ids, target_identities = await _tenant_context(current_user)
     source_company = _s(manifest.get("source_company_id"))
     source_owner = _s(manifest.get("owner_user_id"))
