@@ -1,0 +1,21 @@
+name: Temporary Reference Audit
+
+on:
+  push:
+    branches:
+      - audit/error-free-cleanup-20261002
+
+permissions:
+  contents: read
+
+jobs:
+  refs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Scan references
+        run: |
+          for pattern in             "models_banking import router"             "models_extended import router"             "from backend.modules.finix_ai.banking.models_banking"             "from backend.modules.finix_ai.accounting.models_extended"             "EmployeeMaster"             "IdentixAttendance"             "WebsiteBuilderConsole"             "FinixAIWorkspace"             "check_permission_and_visibility"             "get_team_user_ids"; do
+            echo "===== $pattern ====="
+            git grep -n -F "$pattern" -- ':!*.map' || true
+          done
