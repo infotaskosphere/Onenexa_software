@@ -298,22 +298,60 @@ def _read_header(handle):
 
 
 def _decrypt(source_path: str, password: str) -> str:
-    with open(source_path, "rb") as source:
-        salt, nonce = _read_header(source)
-        payload = source.read()
-    if len(payload) <= 16:
-        raise HTTPException(status_code=400, detail="Backup payload is incomplete.")
-    ciphertext, tag = payload[:-16], payload[-16:]
-    try:
-        decryptor = Cipher(algorithms.AES(_key(password, salt)), modes.GCM(nonce, tag)).decryptor()
-        plaintext = decryptor.update(ciphertext) + decryptor.finalize()
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail="Backup password is incorrect or the backup is corrupted.") from exc
+    # Stream GCM decryption to disk. Holding the complete encrypted payload and
+    # complete plaintext ZIP in RAM at once can restart a small hosted instance
+    # during restores of otherwise reasonable backup files.
     fd, path = tempfile.mkstemp(prefix="taskosphere-restore-", suffix=".zip")
     os.close(fd)
-    with open(path, "wb") as out:
-        out.write(plaintext)
-    return path
+    try:
+        with open(source_path, "rb") as source:
+            salt, nonce = _read_header(source)
+            header_end = source.tell()
+            source.seek(0, os.SEEK_END)
+            file_size = source.tell()
+            if file_size - header_end <= 16:
+                raise HTTPException(status_code=400, detail="Backup payload is incomplete.")
+            tag_position = file_size - 16
+            source.seek(tag_position)
+            tag = source.read(16)
+            source.seek(header_end)
+
+            decryptor = Cipher(
+                algorithms.AES(_key(password, salt)),
+                modes.GCM(nonce, tag),
+            ).decryptor()
+
+            remaining = tag_position - header_end
+            with open(path, "wb") as out:
+                while remaining > 0:
+                    chunk = source.read(min(CHUNK_SIZE, remaining))
+                    if not chunk:
+                        raise HTTPException(status_code=400, detail="Backup payload is incomplete.")
+                    remaining -= len(chunk)
+                    out.write(decryptor.update(chunk))
+                try:
+                    out.write(decryptor.finalize())
+                except Exception as exc:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Backup password is incorrect or the backup is corrupted.",
+                    ) from exc
+        return path
+    except HTTPException:
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            pass
+        raise
+    except Exception as exc:
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            pass
+        raise HTTPException(
+            status_code=400,
+            detail="Backup password is incorrect or the backup is corrupted.",
+        ) from exc
 
 
 def _dump(value: Any) -> str:
@@ -586,8 +624,7 @@ async def _read_archive(zip_path: str):
                 entry = f"collections/{meta['safe_name']}.jsonl"
                 if entry not in names:
                     raise ValueError(f"Collection payload missing: {name}")
-                docs = [_load(line) for line in archive.read(entry).decode().splitlines() if line.strip()]
-                collections.append((name, docs))
+                collections.append((name, entry))
             return manifest, collections
     except HTTPException:
         raise
@@ -605,22 +642,28 @@ def _replace(value: Any, replacements: dict[str, str]) -> Any:
     return value
 
 
-async def _restore(manifest: dict, collections: list[tuple[str, list[dict]]], current_user: User):
+async def _restore(manifest: dict, collections: list[tuple[str, str]], current_user: User, zip_path: str):
     target_company_id, target_company, target_user_ids, target_identities = await _tenant_context(current_user)
     source_company = _s(manifest.get("source_company_id"))
     source_owner = _s(manifest.get("owner_user_id"))
     if not source_company or not source_owner:
         raise HTTPException(status_code=400, detail="Backup is missing tenant ownership metadata.")
+
     replacements = {source_company: target_company_id, source_owner: _s(current_user.id)}
     source_license = _s(manifest.get("source_license_id"))
     source_customer = _s(manifest.get("source_commercial_customer_id"))
     target_license = next(iter(target_identities["license_id"]), "")
     target_customer = next(iter(target_identities["commercial_customer_id"]), "")
-    if source_license and target_license: replacements[source_license] = target_license
-    if source_customer and target_customer: replacements[source_customer] = target_customer
+    if source_license and target_license:
+        replacements[source_license] = target_license
+    if source_customer and target_customer:
+        replacements[source_customer] = target_customer
+
+    selected_names = [name for name, _ in collections]
     raw = _raw_db()
-    restored = removed = 0
-    selected_names = {name for name, _ in collections}
+
+    # Clear target data first, preserving the live administrator account.
+    removed = 0
     for name in selected_names:
         if name in EXCLUDED_COLLECTIONS or name == "companies":
             continue
@@ -629,49 +672,87 @@ async def _restore(manifest: dict, collections: list[tuple[str, list[dict]]], cu
         elif name in TENANT_COLLECTIONS:
             result = await raw[name].delete_many({"company_id": target_company_id})
         else:
-            existing = await raw[name].find({}).to_list(100000)
             result = type("DeleteResult", (), {"deleted_count": 0})()
-            for doc in existing:
-                if _linked(doc, {_s(current_user.id)}, target_identities) and doc.get("_id") is not None:
-                    result.deleted_count += (await raw[name].delete_one({"_id": doc["_id"]})).deleted_count
+            cursor = raw[name].find({})
+            async for existing in cursor:
+                if _linked(existing, {_s(current_user.id)}, target_identities) and existing.get("_id") is not None:
+                    result.deleted_count += (
+                        await raw[name].delete_one({"_id": existing["_id"]})
+                    ).deleted_count
         removed += getattr(result, "deleted_count", 0)
-    for name, docs in collections:
-        if name in EXCLUDED_COLLECTIONS:
-            continue
-        rewritten = [_replace(doc, replacements) for doc in docs]
-        if name == "companies":
-            if not rewritten:
-                continue
-            doc = rewritten[0]
-            doc["id"] = target_company_id
-            if target_license: doc["license_id"] = target_license
-            if target_customer: doc["commercial_customer_id"] = target_customer
-            if target_company and target_company.get("_id") is not None: doc["_id"] = target_company["_id"]
-            query = {"_id": target_company["_id"]} if target_company and target_company.get("_id") is not None else {"id": target_company_id}
-            await raw.companies.replace_one(query, doc, upsert=True)
-            restored += 1
-            continue
-        if name == "users":
-            live_admin = await raw.users.find_one({"id": current_user.id})
-            for doc in rewritten:
-                if _s(doc.get("id")) == _s(current_user.id):
-                    if live_admin:
-                        for field in AUTH_FIELDS_TO_PRESERVE:
-                            if field in live_admin: doc[field] = live_admin[field]
-                    doc["id"] = current_user.id
-                    doc["company_id"] = target_company_id
-                else:
-                    doc["company_id"] = target_company_id
-                await raw.users.replace_one({"id": doc.get("id")}, doc, upsert=True)
-                restored += 1
-            continue
-        for doc in rewritten:
-            if "company_id" in doc: doc["company_id"] = target_company_id
-            query = {"_id": doc["_id"]} if doc.get("_id") is not None else {"id": doc.get("id")}
-            await raw[name].replace_one(query, doc, upsert=True)
-            restored += 1
-    return {"restored_documents": restored, "removed_documents": removed, "target_company_id": target_company_id}
 
+    restored = 0
+    live_admin = await raw.users.find_one({"id": current_user.id})
+
+    # Process one JSONL document at a time instead of materializing every
+    # collection into memory. The decrypted ZIP remains on disk.
+    with zipfile.ZipFile(zip_path, "r") as archive:
+        for name, entry in collections:
+            if name in EXCLUDED_COLLECTIONS:
+                continue
+            try:
+                member = archive.open(entry, "r")
+            except KeyError as exc:
+                raise HTTPException(status_code=400, detail=f"Collection payload missing: {name}") from exc
+
+            with member:
+                if name == "companies":
+                    first_doc = None
+                    for raw_line in member:
+                        if not raw_line.strip():
+                            continue
+                        first_doc = _replace(_load(raw_line.decode("utf-8")), replacements)
+                        break
+                    if first_doc is None:
+                        continue
+                    doc = first_doc
+                    doc["id"] = target_company_id
+                    if target_license:
+                        doc["license_id"] = target_license
+                    if target_customer:
+                        doc["commercial_customer_id"] = target_customer
+                    if target_company and target_company.get("_id") is not None:
+                        doc["_id"] = target_company["_id"]
+                    query = (
+                        {"_id": target_company["_id"]}
+                        if target_company and target_company.get("_id") is not None
+                        else {"id": target_company_id}
+                    )
+                    await raw.companies.replace_one(query, doc, upsert=True)
+                    restored += 1
+                    continue
+
+                for raw_line in member:
+                    if not raw_line.strip():
+                        continue
+                    doc = _replace(_load(raw_line.decode("utf-8")), replacements)
+
+                    if name == "users":
+                        if _s(doc.get("id")) == _s(current_user.id):
+                            if live_admin:
+                                for field in AUTH_FIELDS_TO_PRESERVE:
+                                    if field in live_admin:
+                                        doc[field] = live_admin[field]
+                            doc["id"] = current_user.id
+                            doc["company_id"] = target_company_id
+                        else:
+                            doc["company_id"] = target_company_id
+                    elif "company_id" in doc:
+                        doc["company_id"] = target_company_id
+
+                    query = (
+                        {"_id": doc["_id"]}
+                        if doc.get("_id") is not None
+                        else {"id": doc.get("id")}
+                    )
+                    await raw[name].replace_one(query, doc, upsert=True)
+                    restored += 1
+
+    return {
+        "restored_documents": restored,
+        "removed_documents": removed,
+        "target_company_id": target_company_id,
+    }
 
 @router.post("/restore")
 async def restore_backup(backup: UploadFile = File(...), password: str = Form(...), confirmation: str = Form(...), current_user: User = Depends(get_current_user)):
@@ -695,7 +776,7 @@ async def restore_backup(backup: UploadFile = File(...), password: str = Form(..
         manifest, collections = await _read_archive(zip_path)
         if manifest.get("scope") != "single_customer_tenant":
             raise HTTPException(status_code=400, detail="Unsupported backup scope.")
-        result = await _restore(manifest, collections, current_user)
+        result = await _restore(manifest, collections, current_user, zip_path)
         return {"success": True, "message": "Application backup restored successfully.", **result}
     finally:
         try: os.unlink(source_path)
