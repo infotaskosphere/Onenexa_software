@@ -326,7 +326,7 @@ export default function BackupRestore() {
 
       const pollProgress = async () => {
         if (stopped) return null;
-        const { data: progress } = await api.get('/app-backup/create/progress/' + encodeURIComponent(serverProgressId), { _skipReadyGate: true, _silent: true });
+        const { data: progress } = await api.get('/app-backup/create/progress/' + encodeURIComponent(serverProgressId), { _skipReadyGate: true, _silent: true, timeout: 5000 });
         if (!progress) return null;
         const phase = progress.phase;
         setTransfer((current) => ({ ...current, active: !['ready', 'error'].includes(phase), phase: phase === 'creating' ? 'Creating backup…' : phase === 'encrypting' ? 'Encrypting backup…' : phase === 'preparing' ? 'Preparing backup…' : phase === 'queued' ? 'Backup queued…' : phase === 'ready' ? 'Backup ready. Starting download…' : phase === 'error' ? 'Failed' : phase || current.phase, percent: Number.isFinite(Number(progress.percent)) ? Number(progress.percent) : current.percent, etaSeconds: progress.eta_seconds ?? current.etaSeconds, processed: progress.processed_documents ?? progress.processed_bytes ?? current.processed, total: progress.total_documents ?? progress.total_bytes ?? current.total, detail: progress.error || (progress.current_collection ? 'Collection: ' + progress.current_collection : progress.download_ready ? 'Backup is ready for download.' : current.detail) }));
