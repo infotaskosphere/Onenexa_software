@@ -1487,29 +1487,29 @@ export default function VisitsPage() {
                 Schedule and track client visits{filterStatus !== "all" ? ` · ${STATUS_META[filterStatus]?.label}` : ""}
               </p>
             </div>
-            <div className="flex items-center gap-2 flex-wrap">
+            <div className="grid grid-cols-3 gap-2 w-full lg:w-[720px] lg:max-w-[720px] min-w-0 items-stretch">
               {/* View toggle */}
-              <div className="flex rounded-xl p-0.5" style={{ background: "rgba(255,255,255,0.12)", border: "1px solid rgba(255,255,255,0.18)" }}>
+              <div className="flex min-w-0 rounded-xl p-0.5" style={{ background: "rgba(255,255,255,0.12)", border: "1px solid rgba(255,255,255,0.18)" }}>
                 {[["list", ClipboardList], ["calendar", CalendarDays]].map(([mode, Icon]) => (
                   <button key={mode} onClick={() => setViewMode(mode)}
-                    className={cn("flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+                    className={cn("flex flex-1 min-w-0 items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all",
                       viewMode === mode ? "bg-white shadow-sm" : "text-white/70 hover:text-white")}
                     style={viewMode === mode ? { color: COLORS.deepBlue } : {}}>
-                    <Icon className="h-3.5 w-3.5" /><span className="capitalize hidden sm:inline">{mode}</span>
+                    <Icon className="h-3.5 w-3.5 flex-shrink-0" /><span className="capitalize">{mode}</span>
                   </button>
                 ))}
               </div>
               <motion.button whileHover={{ scale: 1.03, y: -2, transition: springPhysics.card }} whileTap={{ scale: 0.97, transition: springPhysics.tap }}
                 onClick={() => setShowEmailImport(true)}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-xl font-semibold text-sm transition-all"
+                className="w-full min-w-0 flex items-center justify-center gap-1.5 px-2 py-2 rounded-xl font-semibold text-sm whitespace-nowrap transition-all"
                 style={{ background: "rgba(255,255,255,0.12)", border: "1px solid rgba(255,255,255,0.18)", color: "white" }}>
-                <Mail className="h-4 w-4" />From Email
+                <Mail className="h-4 w-4 flex-shrink-0" />From Email
               </motion.button>
               <motion.button whileHover={{ scale: 1.03, y: -2, transition: springPhysics.card }} whileTap={{ scale: 0.97, transition: springPhysics.tap }}
                 onClick={() => { setEditingVisit(null); setShowForm(true); }}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-xl font-bold text-sm bg-white/95 shadow-lg transition-all"
+                className="w-full min-w-0 flex items-center justify-center gap-1.5 px-2 py-2 rounded-xl font-bold text-sm whitespace-nowrap bg-white/95 shadow-lg transition-all"
                 style={{ color: COLORS.deepBlue }}>
-                <Plus className="h-4 w-4" />Schedule
+                <Plus className="h-4 w-4 flex-shrink-0" />Schedule
               </motion.button>
             </div>
           </div>

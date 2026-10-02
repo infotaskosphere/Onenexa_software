@@ -42,7 +42,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from pydantic import BaseModel
 
 from backend.dependencies import db, get_current_user
-from backend.modules.finix_ai.banking.models_banking import BankAccountCreate, ManualMatchInput, UnmatchInput, AIAutoMatchInput, IgnoreInput, BankRulePayload, ManualReconcilePayload, BackfillSuspenseInput
+from backend.modules.finix_ai.banking.models_banking import BankAccountCreate, ManualMatchInput, UnmatchInput, AIAutoMatchInput, IgnoreInput, BankRulePayload, ManualReconcilePayload, BackfillSuspenseInput, _mask_account_number, auto_match_similar_transactions, _log_recon_audit
 
 from backend.models import User
 from backend.accounting_core import get_default_account_id, try_auto_post

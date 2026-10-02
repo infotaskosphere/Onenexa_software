@@ -1553,9 +1553,9 @@ export default function Reminders() {
                 : "Manage your reminders and meetings"
             }
             icon={BellRing}
-            actionsClassName="lg:flex-none lg:w-auto"
+            actionsClassName="lg:flex-none lg:w-[660px] lg:max-w-[660px]"
             actions={
-              <div className="flex flex-wrap items-center justify-end gap-2 w-full">
+              <div className="grid grid-cols-3 gap-2 w-full min-w-0 items-stretch">
       {isAdmin && (
         <Select value={selectedUserId || "all"} onValueChange={(v) => setSelectedUserId(v === "all" ? "" : v)}>
           <SelectTrigger className="w-auto min-w-[150px] h-9 px-3 text-xs font-semibold whitespace-nowrap rounded-none bg-white/15 border-white/20 text-white placeholder:text-white/50">

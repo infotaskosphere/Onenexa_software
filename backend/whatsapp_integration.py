@@ -40,6 +40,9 @@ from pydantic import BaseModel, Field
 
 from backend.dependencies import get_current_user, require_admin
 from backend.models import User
+from backend.tenant_runtime import enforce_company_value
+from backend.platform_owner import is_platform_owner
+from backend.commercial_user_company_scope import _scope_user_query
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +56,50 @@ WA_BRIDGE_URL = os.getenv("WA_BRIDGE_URL", "http://localhost:3002")
 def _db():
     from backend.server import db
     return db
+
+
+async def _whatsapp_user_ids_for_scope(current_user: User) -> List[str]:
+    if is_platform_owner(current_user):
+        return []
+    users = await _db()["users"].find(
+        _scope_user_query({}),
+        {"_id": 0, "id": 1},
+    ).to_list(5000)
+    return [str(row.get("id")) for row in users if row.get("id")]
+
+
+async def _whatsapp_session_scope_query(current_user: User) -> dict:
+    if is_platform_owner(current_user):
+        return {}
+    company_id = enforce_company_value(current_user, None)
+    user_ids = await _whatsapp_user_ids_for_scope(current_user)
+    return {
+        "$or": [
+            {"company_id": company_id},
+            {
+                "company_id": {"$in": [None, ""]},
+                "added_by": {"$in": user_ids},
+            },
+        ]
+    }
+
+
+async def _whatsapp_access_request_scope_query(current_user: User, status: Optional[str] = None) -> dict:
+    if is_platform_owner(current_user):
+        return {"status": status} if status else {}
+    company_id = enforce_company_value(current_user, None)
+    user_ids = await _whatsapp_user_ids_for_scope(current_user)
+    base = {"status": status} if status else {}
+    scope = {
+        "$or": [
+            {"company_id": company_id},
+            {
+                "company_id": {"$in": [None, ""]},
+                "user_id": {"$in": user_ids},
+            },
+        ]
+    }
+    return {"$and": [base, scope]} if base else scope
 
 # ── In-memory sessions cache ──────────────────────────────────────────────────
 # Shared by list_sessions and get_wa_status so they never both hit the bridge
@@ -265,14 +312,38 @@ async def _has_wa_access(user: User) -> bool:
     rec = await _db()["whatsapp_access_requests"].find_one({"user_id": user.id, "status": "approved"})
     return rec is not None
 
-async def _store_message(sent_by, to, message, message_type, context_id, status_val, session_id=None, error=None, batch_id=None, batch_name=None):
+async def _store_message(sent_by, to, message, message_type, context_id, status_val, session_id=None, error=None, batch_id=None, batch_name=None, company_id=None):
+    if not company_id and isinstance(sent_by, str):
+        try:
+            creator = await _db()["users"].find_one({"id": sent_by}, {"_id": 0, "company_id": 1})
+            company_id = (creator or {}).get("company_id")
+        except Exception:
+            company_id = None
     await _db()["whatsapp_messages"].insert_one({
-        "sent_by": sent_by, "to": to, "message": message,
+        "sent_by": sent_by, "company_id": company_id, "to": to, "message": message,
         "message_type": message_type, "context_id": context_id,
         "session_id": session_id, "status": status_val, "error": error,
         "batch_id": batch_id, "batch_name": batch_name,
         "sent_at": datetime.now(timezone.utc).isoformat(),
     })
+
+async def _message_history_scope_query(current_user: User) -> dict:
+    """Scope sent-message history to the authenticated company; preserve legacy rows by sender."""
+    if is_platform_owner(current_user):
+        return {}
+    company_id = enforce_company_value(current_user, None)
+    scoped_users = await _db()["users"].find(
+        _scope_user_query({}),
+        {"_id": 0, "id": 1},
+    ).to_list(5000)
+    user_ids = [str(row.get("id")) for row in scoped_users if row.get("id")]
+    return {
+        "$or": [
+            {"company_id": company_id},
+            {"company_id": {"$in": [None, ""]}, "sent_by": {"$in": user_ids}},
+        ]
+    }
+
 
 # ── Multi-session endpoints ──────────────────────────────────────────────────
 
@@ -287,7 +358,8 @@ async def list_numbers(current_user: User = Depends(get_current_user)):
     contacts collection so the badge counts in the UI have real data."""
     bridge_sessions = await _get_cached_sessions()
     db = _db()
-    db_records = await db["whatsapp_sessions"].find({}).to_list(100)
+    scope = await _whatsapp_session_scope_query(current_user)
+    db_records = await db["whatsapp_sessions"].find(scope).to_list(100)
     labels = {d["session_id"]: d for d in db_records}
 
     result = []
@@ -295,7 +367,10 @@ async def list_numbers(current_user: User = Depends(get_current_user)):
         if s.get("status") != "connected":
             continue
         sid = s["sessionId"]
-        db_rec = labels.get(sid, {})
+        db_rec = labels.get(sid)
+        if not is_platform_owner(current_user) and not db_rec:
+            continue
+        db_rec = db_rec or {}
         conv_count = await db["whatsapp_hub_contacts"].count_documents({"session_id": sid})
         result.append({
             "id": sid,
@@ -318,7 +393,10 @@ async def list_sessions(current_user: User = Depends(get_current_user)):
     result = []
     for s in bridge_sessions:
         sid = s["sessionId"]
-        db_rec = labels.get(sid, {})
+        db_rec = labels.get(sid)
+        if not is_platform_owner(current_user) and not db_rec:
+            continue
+        db_rec = db_rec or {}
         result.append({
             **s,
             "label": db_rec.get("label") or s.get("displayName") or sid,
@@ -337,8 +415,10 @@ async def add_session(body: WASessionCreate, current_user: User = Depends(requir
     bridge_resp = await _bridge_post("/sessions", bridge_payload)
     label = body.label or f"Number {session_id[-6:]}"
     db = _db()
+    company_id = None if is_platform_owner(current_user) else enforce_company_value(current_user, None)
     await db["whatsapp_sessions"].insert_one({
         "session_id": session_id,
+        "company_id": company_id,
         "label": label,
         "added_by": current_user.id,
         "added_by_name": current_user.full_name,
@@ -356,11 +436,21 @@ async def add_session(body: WASessionCreate, current_user: User = Depends(requir
 
 @router.get("/sessions/{session_id}/qr")
 async def get_session_qr(session_id: str, current_user: User = Depends(require_admin())):
+    scope = await _whatsapp_session_scope_query(current_user)
+    if not is_platform_owner(current_user):
+        record = await _db()["whatsapp_sessions"].find_one({"$and": [scope, {"session_id": session_id}]})
+        if not record:
+            raise HTTPException(404, "WhatsApp session not found")
     return await _bridge_get(f"/sessions/{session_id}/qr")
 
 
 @router.get("/sessions/{session_id}/pair-code")
 async def get_session_pair_code(session_id: str, current_user: User = Depends(require_admin())):
+    if not is_platform_owner(current_user):
+        scope = await _whatsapp_session_scope_query(current_user)
+        record = await _db()["whatsapp_sessions"].find_one({"$and": [scope, {"session_id": session_id}]})
+        if not record:
+            raise HTTPException(404, "WhatsApp session not found")
     """
     Return the phone pairing code for a session started in phone-pairing mode.
     The wa-bridge stores the code in sessions[sessionId].pairCode after calling
@@ -372,15 +462,25 @@ async def get_session_pair_code(session_id: str, current_user: User = Depends(re
 
 @router.delete("/sessions/{session_id}")
 async def remove_session(session_id: str, current_user: User = Depends(require_admin())):
+    query = {"session_id": session_id}
+    if not is_platform_owner(current_user):
+        query = {"$and": [await _whatsapp_session_scope_query(current_user), query]}
     await _bridge_delete(f"/sessions/{session_id}")
-    await _db()["whatsapp_sessions"].delete_one({"session_id": session_id})
+    result = await _db()["whatsapp_sessions"].delete_one(query)
+    if result.deleted_count == 0:
+        raise HTTPException(404, "WhatsApp session not found")
     _invalidate_sessions_cache()
     return {"message": f"Session {session_id} removed"}
 
 
 @router.patch("/sessions/{session_id}/label")
 async def update_session_label(session_id: str, body: WASessionCreate, current_user: User = Depends(require_admin())):
-    await _db()["whatsapp_sessions"].update_one({"session_id": session_id}, {"$set": {"label": body.label}})
+    query = {"session_id": session_id}
+    if not is_platform_owner(current_user):
+        query = {"$and": [await _whatsapp_session_scope_query(current_user), query]}
+    result = await _db()["whatsapp_sessions"].update_one(query, {"$set": {"label": body.label}})
+    if result.matched_count == 0:
+        raise HTTPException(404, "WhatsApp session not found")
     _invalidate_sessions_cache()
     return {"message": "Label updated"}
 
@@ -404,6 +504,11 @@ async def force_session_sync(session_id: str, current_user: User = Depends(get_c
     from backend.whatsapp_hub import _has_hub_access
     if not (current_user.role == "admin" or await _has_hub_access(current_user)):
         raise HTTPException(403, "You do not have WhatsApp Hub access.")
+    if not is_platform_owner(current_user):
+        scope = await _whatsapp_session_scope_query(current_user)
+        record = await _db()["whatsapp_sessions"].find_one({"$and": [scope, {"session_id": session_id}]})
+        if not record:
+            raise HTTPException(404, "WhatsApp session not found")
     return await _bridge_post(f"/sessions/{session_id}/sync", {})
 
 
@@ -451,7 +556,7 @@ async def request_wa_access(body: WAAccessRequest, current_user: User = Depends(
     if existing:
         return {"message": "Request already exists", "status": existing["status"]}
     await _db()["whatsapp_access_requests"].insert_one({
-        "user_id": current_user.id, "user_name": current_user.full_name,
+        "user_id": current_user.id, "company_id": getattr(current_user, "company_id", None), "user_name": current_user.full_name,
         "user_email": current_user.email, "reason": body.reason,
         "status": "pending", "requested_at": datetime.now(timezone.utc).isoformat(),
     })
@@ -472,7 +577,7 @@ async def my_wa_access_status(current_user: User = Depends(get_current_user)):
 
 @router.get("/access/requests")
 async def list_access_requests(status_filter: Optional[str] = None, current_user: User = Depends(require_admin())):
-    query = {"status": status_filter} if status_filter else {}
+    query = await _whatsapp_access_request_scope_query(current_user, status_filter)
     docs = await _db()["whatsapp_access_requests"].find(query).sort("requested_at", -1).to_list(200)
     for d in docs:
         d["id"] = str(d.pop("_id"))
@@ -482,8 +587,9 @@ async def list_access_requests(status_filter: Optional[str] = None, current_user
 @router.post("/access/decide")
 async def decide_access_request(body: WAAccessDecision, current_user: User = Depends(require_admin())):
     new_status = "approved" if body.approved else "rejected"
+    request_scope = await _whatsapp_access_request_scope_query(current_user, "pending")
     result = await _db()["whatsapp_access_requests"].update_one(
-        {"user_id": body.user_id, "status": "pending"},
+        {"$and": [request_scope, {"user_id": body.user_id}]},
         {"$set": {"status": new_status, "decided_by": current_user.full_name,
                   "decided_at": datetime.now(timezone.utc).isoformat(), "admin_note": body.admin_note}},
     )
@@ -567,13 +673,13 @@ async def get_wa_status(current_user: User = Depends(get_current_user)):
 
 @router.get("/messages")
 async def list_messages(message_type: Optional[str] = None, batch_id: Optional[str] = None, limit: int = 50, current_user: User = Depends(get_current_user)):
-    query: Dict[str, Any] = {}
+    query: Dict[str, Any] = await _message_history_scope_query(current_user)
     if current_user.role != "admin":
-        query["sent_by"] = current_user.id
+        query = {"$and": [query, {"sent_by": current_user.id}]}
     if message_type:
-        query["message_type"] = message_type
+        query = {"$and": [query, {"message_type": message_type}]}
     if batch_id:
-        query["batch_id"] = batch_id
+        query = {"$and": [query, {"batch_id": batch_id}]}
     docs = await _db()["whatsapp_messages"].find(query).sort("sent_at", -1).limit(limit).to_list(limit)
     for d in docs:
         d["id"] = str(d.pop("_id"))
@@ -586,9 +692,12 @@ async def list_batches(limit: int = 100, current_user: User = Depends(get_curren
 
     Groups whatsapp_messages by batch_id. Non-admins see only their own batches.
     """
+    scope = await _message_history_scope_query(current_user)
     match: Dict[str, Any] = {"batch_id": {"$ne": None}}
+    if scope:
+        match = {"$and": [scope, match]}
     if current_user.role != "admin":
-        match["sent_by"] = current_user.id
+        match = {"$and": [match, {"sent_by": current_user.id}]}
     pipeline = [
         {"$match": match},
         {"$group": {
@@ -805,9 +914,11 @@ async def schedule_bulk_send(body: WAScheduleBulkRequest, current_user: User = D
     if not await _has_wa_access(current_user):
         raise HTTPException(403, "WhatsApp access not granted")
     db = _db()
+    company_id = None if is_platform_owner(current_user) else enforce_company_value(current_user, None)
     job_id = f"bulk_{int(_time.time() * 1000)}"
     job_doc = {
         "job_id": job_id,
+        "company_id": company_id,
         "created_by": current_user.id,
         "created_by_name": current_user.full_name,
         "scheduled_at": body.scheduled_at,
@@ -828,7 +939,10 @@ async def schedule_bulk_send(body: WAScheduleBulkRequest, current_user: User = D
 async def list_scheduled_bulk(current_user: User = Depends(get_current_user)):
     """List pending scheduled bulk jobs."""
     db = _db()
+    company_id = None if is_platform_owner(current_user) else enforce_company_value(current_user, None)
     query = {"status": "pending"}
+    if company_id is not None:
+        query["company_id"] = company_id
     if current_user.role != "admin":
         query["created_by"] = current_user.id
     jobs = await db["whatsapp_scheduled_bulk"].find(query).sort("scheduled_at", 1).to_list(100)
@@ -842,7 +956,10 @@ async def list_scheduled_bulk(current_user: User = Depends(get_current_user)):
 async def cancel_scheduled_bulk(job_id: str, current_user: User = Depends(get_current_user)):
     """Cancel a pending scheduled bulk job."""
     db = _db()
+    company_id = None if is_platform_owner(current_user) else enforce_company_value(current_user, None)
     query = {"job_id": job_id, "status": "pending"}
+    if company_id is not None:
+        query["company_id"] = company_id
     if current_user.role != "admin":
         query["created_by"] = current_user.id
     result = await db["whatsapp_scheduled_bulk"].update_one(query, {"$set": {"status": "cancelled", "cancelled_at": datetime.now(timezone.utc).isoformat()}})
@@ -887,6 +1004,7 @@ async def _run_scheduled_bulk_jobs():
                     to=r["phone"], message=r["message"],
                     message_type=job.get("message_type", "bulk_scheduled"),
                     context_id=r.get("client_id"), status_val="sent", session_id=job.get("session_id"),
+                    company_id=job.get("company_id"),
                 )
                 results.append({"phone": r["phone"], "status": "sent"})
             except Exception as exc:

@@ -1,9 +1,0 @@
-[
-  "tests/test_aiweave_omni.py::test_account_health_manager",
-  "tests/test_aiweave_omni.py::test_adapter_registry",
-  "tests/test_aiweave_omni.py::test_candidate_selector_auto_routing",
-  "tests/test_aiweave_omni.py::test_candidate_selector_vision_filtering",
-  "tests/test_aiweave_omni.py::test_omni_models_and_catalog",
-  "tests/test_aiweave_omni.py::test_omni_request_response_schemas",
-  "tests/test_commercial_console.py::test_commercial_console_api_routes"
-]

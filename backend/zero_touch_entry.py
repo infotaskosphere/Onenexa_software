@@ -71,6 +71,7 @@ from pydantic import BaseModel, Field
 
 from backend.dependencies import db, get_current_user
 from backend.models import User
+from backend.ai.vendor_mapper import find_best_vendor_match
 from backend import accounting_core as ac
 
 router = APIRouter(prefix="/api/zte", tags=["Zero-Touch Entry Engine"])
@@ -514,13 +515,11 @@ async def process_document(
             try:
                 vendor_name = extracted.get("vendor_or_customer_name") or ""
                 vendor_gstin = extracted.get("tax_registration_number") or ""
-                if vendor_gstin:
-                    vendor_profile = await db.vendor_intelligence.find_one({"gstin": vendor_gstin})
-                if not vendor_profile and vendor_name:
-                    vendor_profile = await db.vendor_intelligence.find_one({"vendor_name": vendor_name})
+                if vendor_name:
+                    vendor_profile, _, _ = await find_best_vendor_match(vendor_name, vendor_gstin)
             except Exception as e:
                 _zte_logger.error(f"Error querying vendor in ZTE decision: {e}")
-                
+
             from backend.ai.document_validator import run_document_validation_pipeline
             validation_report = await run_document_validation_pipeline(
                 extracted_data=extracted,
@@ -730,10 +729,8 @@ async def post_ledger_preview(company_id: str, preview: dict, created_by: str, s
     vendor_profile = None
     vendor_name = extracted.get("vendor_or_customer_name") or ""
     vendor_gstin = extracted.get("tax_registration_number") or ""
-    if vendor_gstin:
-        vendor_profile = await db.vendor_intelligence.find_one({"gstin": vendor_gstin})
-    if not vendor_profile and vendor_name:
-        vendor_profile = await db.vendor_intelligence.find_one({"vendor_name": vendor_name})
+    if vendor_name:
+        vendor_profile, _, _ = await find_best_vendor_match(vendor_name, vendor_gstin)
 
     return await AccountingEngine.process_posting(
         company_id=company_id,

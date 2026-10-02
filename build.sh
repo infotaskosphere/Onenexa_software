@@ -17,9 +17,9 @@ fi
 
 echo "==> Installing Python dependencies..."
 pip install -r backend/requirements.txt
-# Also install the root requirements file when a Render service or local
-# deployment overrides the normal build command and uses the repository root.
-if [ -f requirements.txt ]; then
+# Keep the root requirements file as a deployment fallback, but avoid
+# installing the same dependency set twice when both files are identical.
+if [ -f requirements.txt ] && ! cmp -s requirements.txt backend/requirements.txt; then
   pip install -r requirements.txt
 fi
 

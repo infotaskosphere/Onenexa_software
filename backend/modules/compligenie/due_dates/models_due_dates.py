@@ -1,4 +1,5 @@
 """Canonical CompliGenie due-date Pydantic models."""
+import uuid
 from typing import Optional, Any, List, Dict
 from datetime import datetime, date
 from pydantic import BaseModel, ConfigDict, Field, field_validator

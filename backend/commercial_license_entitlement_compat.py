@@ -371,6 +371,12 @@ async def _hydrate(user: Any):
     )
 
 
+# These names are injected into backend.dependencies.get_current_user.__globals__
+# by install(). Keeping explicit module-level declarations lets static analyzers
+# understand the intentionally dynamic compatibility hook without adding a closure.
+_commercial_entitlement_base_get_current_user = None
+_commercial_entitlement_hydrate = _hydrate
+
 def install() -> None:
     current = _dependencies.get_current_user
 

@@ -8,7 +8,7 @@ Provides central administration endpoints for:
 - AIWeave Omni Route configuration & provider account monitoring
 """
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 import os
 import time
@@ -34,7 +34,7 @@ def require_commercial_admin(user: User = Depends(get_current_user)) -> User:
     if is_platform_owner(user):
         return user
     role = str(getattr(user, "role", "") or "").strip().lower()
-    if role in {"platform_owner", "superadmin", "saas_admin", "admin"}:
+    if role in {"platform_owner", "superadmin", "saas_admin"}:
         return user
     raise HTTPException(
         status_code=403,

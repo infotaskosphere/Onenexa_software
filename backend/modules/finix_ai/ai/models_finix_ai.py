@@ -2,12 +2,19 @@
 from __future__ import annotations
 
 import re
+import uuid
+from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from fastapi import HTTPException
 from datetime import date
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field
 from backend.models import User
+from backend.dependencies import db
+from backend.accounting_core import get_default_account_id
+from backend.party_ledgers import get_or_create_party_account
+from backend.accounting_ai.finix_intelligence import FinixIntelligence
+from backend.accounting_ai.accounting_policy import classify_transaction
 
 PAISE = Decimal("0.01")
 

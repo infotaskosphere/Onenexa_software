@@ -139,6 +139,7 @@ class AutomationSettingsUpdate(BaseModel):
 class PendingClientMessage(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    company_id: Optional[str] = None
     kind: Literal["birthday", "festival"]
     channel: Literal["whatsapp", "email"]
     client_id: str
@@ -157,6 +158,7 @@ class PendingClientMessage(BaseModel):
 class ServiceExpiry(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    company_id: Optional[str] = None
     client_id: str
     label: str  # e.g. "Trade License", "MSME Certificate", "Insurance Policy"
     expiry_date: str  # ISO date
@@ -326,6 +328,7 @@ async def reject_pending_message(message_id: str, current_user=Depends(require_a
 async def _queue_or_send(kind, channel, client, recipient_name, recipient_contact, message, subject, requires_approval, media_url=None):
     if requires_approval:
         entry = PendingClientMessage(
+            company_id=client.get("company_id"),
             kind=kind, channel=channel, client_id=client["id"],
             client_name=client.get("company_name", ""), recipient_name=recipient_name,
             recipient_contact=recipient_contact, message=message, subject=subject,
@@ -362,7 +365,12 @@ async def create_service_expiry(client_id: str, payload: ServiceExpiryCreate, cu
     client = await db.clients.find_one({"id": client_id}, {"_id": 0, "id": 1})
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
-    entry = ServiceExpiry(client_id=client_id, created_by=current_user.id, **payload.model_dump())
+    entry = ServiceExpiry(
+        company_id=client.get("company_id"),
+        client_id=client_id,
+        created_by=current_user.id,
+        **payload.model_dump(),
+    )
     await db.service_expiries.insert_one(entry.model_dump())
     await log_client_activity(
         client_id=client_id, type="document",

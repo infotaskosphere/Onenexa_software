@@ -17,6 +17,7 @@ from passlib.context import CryptContext
 from fastapi import HTTPException
 
 from backend import dependencies as _dependencies
+from backend.platform_owner import is_platform_owner
 from backend.models import DEFAULT_ROLE_PERMISSIONS, User
 from backend.modules.people_matrix.permissions.catalog import MODULE_HIERARCHY
 
@@ -227,7 +228,13 @@ def get_all_admin_permissions(license_doc: Optional[Dict[str, Any]] = None) -> D
         # invites under this tenant; see _permission_flag in
         # commercial_module_guard.py for that enforcement point.
         if module_allowed:
-            selected = set(selected_features.get(module_id) or [])
+            # Licensee admin access is capped by purchased modules, not by the
+            # granular page selection used for additional tenant users.
+            selected = {
+                str(page.get("flag")).strip()
+                for page in module_def.get("pages", []) or []
+                if page.get("flag")
+            }
         else:
             selected = set()
         # AIWeave is intentionally different from the other modules: purchasing

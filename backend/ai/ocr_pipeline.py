@@ -1,4 +1,5 @@
 import io
+import os
 import logging
 import time
 import uuid
@@ -11,7 +12,7 @@ from backend.ai.pdf_text_extractor import is_searchable_pdf, extract_searchable_
 from backend.ai.page_splitter import split_pdf_pages, split_image_or_other
 from backend.ai.image_preprocessor import preprocess_image_for_ocr
 from backend.ai.image_optimizer import optimize_image_for_ocr
-from backend.ai.ocr_selector import select_best_ocr_engine, register_ocr_engine, BaseOCREngine, estimate_metrics
+from backend.ai.ocr_selector import select_best_ocr_engine, register_ocr_engine, get_registered_engines, BaseOCREngine, estimate_metrics
 from backend.ai.ocr_quality import evaluate_image_quality
 from backend.ai.language_detector import detect_language
 from backend.ai.ocr_storage import store_ocr_history, store_ocr_quality_report

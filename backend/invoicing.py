@@ -36,6 +36,8 @@ from pydantic import BaseModel, Field, field_validator
 
 from backend.dependencies import db, get_current_user, check_module_permission
 from backend.models import User
+from backend.tenant_runtime import enforce_company_value
+from backend.platform_owner import is_platform_owner
 
 # Google Drive is centralized in backend.google_drive_service.
 # Service-account authentication is preferred; legacy OAuth remains only
@@ -2352,8 +2354,14 @@ async def get_backup_sources(
         if src in source_map:
             source_map[src]["client_count"] = doc["count"]
 
-    # Count products per source
+    # Count products per source. Products are not in the central tenant
+    # collection registry because legacy rows may lack company_id, so scope
+    # this aggregation explicitly rather than exposing cross-tenant totals.
+    product_match = {} if is_platform_owner(current_user) else {
+        "company_id": enforce_company_value(current_user, None)
+    }
     async for doc in db.products.aggregate([
+        {"$match": product_match},
         {"$group": {"_id": "$imported_from", "count": {"$sum": 1}}},
         {"$match": {"_id": {"$ne": None}}},
     ]):
@@ -2376,9 +2384,14 @@ async def remove_backup(
     if not source:
         raise HTTPException(status_code=400, detail="source query param is required")
 
-    inv_res    = await db.invoices.delete_many({"imported_from": source})
-    client_res = await db.clients.delete_many({"imported_from": source})
-    prod_res   = await db.products.delete_many({"imported_from": source})
+    company_id = None if is_platform_owner(current_user) else enforce_company_value(current_user, None)
+    scoped_filter = {"imported_from": source}
+    if company_id is not None:
+        scoped_filter["company_id"] = company_id
+
+    inv_res    = await db.invoices.delete_many(scoped_filter)
+    client_res = await db.clients.delete_many(scoped_filter)
+    prod_res   = await db.products.delete_many(scoped_filter)
 
     return {
         "source": source,
@@ -2470,8 +2483,9 @@ async def upload_pdf_bytes_to_drive(
 @router.post("/products", response_model=Product)
 async def create_product(data: ProductCreate, current_user: User = Depends(check_module_permission("invoicing", "create"))):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
+    company_id = enforce_company_value(current_user, None)
     now = datetime.now(timezone.utc).isoformat()
-    doc = {"id": str(uuid.uuid4()), **data.model_dump(), "created_by": current_user.id, "created_at": now}
+    doc = {"id": str(uuid.uuid4()), **data.model_dump(), "company_id": company_id, "created_by": current_user.id, "created_at": now}
     await db.products.insert_one(doc); doc.pop("_id", None)
     return doc
 
@@ -2479,8 +2493,10 @@ async def create_product(data: ProductCreate, current_user: User = Depends(check
 @router.get("/products")
 async def list_products(search: Optional[str] = None, current_user: User = Depends(check_module_permission("invoicing", "view"))):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
-    q: dict = {}
-    if current_user.role != "admin": q["created_by"] = current_user.id
+    company_id = None if is_platform_owner(current_user) else enforce_company_value(current_user, None)
+    q: dict = {} if company_id is None else {"company_id": company_id}
+    if current_user.role != "admin":
+        q["created_by"] = current_user.id
     if search:
         q["$or"] = [{"name": {"$regex": search, "$options": "i"}},
                     {"description": {"$regex": search, "$options": "i"}}]
@@ -2490,18 +2506,24 @@ async def list_products(search: Optional[str] = None, current_user: User = Depen
 @router.put("/products/{pid}")
 async def update_product(pid: str, data: ProductCreate, current_user: User = Depends(check_module_permission("invoicing", "create"))):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
-    ex = await db.products.find_one({"id": pid})
+    company_id = None if is_platform_owner(current_user) else enforce_company_value(current_user, None)
+    query = {"id": pid} if company_id is None else {"id": pid, "company_id": company_id}
+    ex = await db.products.find_one(query)
     if not ex: raise HTTPException(404, "Product not found")
     if current_user.role != "admin" and ex.get("created_by") != current_user.id:
         raise HTTPException(403, "Not authorized")
-    await db.products.update_one({"id": pid}, {"$set": data.model_dump()})
-    return await db.products.find_one({"id": pid}, {"_id": 0})
+    await db.products.update_one(query, {"$set": {**data.model_dump(), "company_id": ex.get("company_id") or company_id}})
+    return await db.products.find_one(query, {"_id": 0})
 
 
 @router.delete("/products/{pid}")
 async def delete_product(pid: str, current_user: User = Depends(check_module_permission("invoicing", "delete"))):
     if not _perm(current_user): raise HTTPException(403, "Access denied")
-    await db.products.delete_one({"id": pid})
+    company_id = None if is_platform_owner(current_user) else enforce_company_value(current_user, None)
+    query = {"id": pid} if company_id is None else {"id": pid, "company_id": company_id}
+    result = await db.products.delete_one(query)
+    if result.deleted_count == 0:
+        raise HTTPException(404, "Product not found")
     return {"message": "Product deleted"}
 
 
@@ -4963,7 +4985,7 @@ async def sync_invoice_journal_entry(invoice_id: str):
         if abs(float(_active.get("total_debit") or 0) - _desired_total) <= 0.01:
             return
         from backend.accounting_lock import reverse_journal_entry
-        await reverse_journal_entry(_active["id"], "Source document changed; superseded by latest posting", payment.get("created_by", "system") if "payment" in locals() else inv.get("created_by", "system"))
+        await reverse_journal_entry(_active["id"], "Source document changed; superseded by latest posting", inv.get("created_by", "system"))
         await db.journal_entries.update_one({"id": _active["id"]}, {"$set": {"superseded_at": datetime.now(timezone.utc).isoformat()}})
 
     try:
@@ -5047,7 +5069,7 @@ async def sync_payment_journal_entry(payment_id: str):
         if abs(float(_active.get("total_debit") or 0) - _desired_total) <= 0.01:
             return
         from backend.accounting_lock import reverse_journal_entry
-        await reverse_journal_entry(_active["id"], "Source document changed; superseded by latest posting", payment.get("created_by", "system") if "payment" in locals() else inv.get("created_by", "system"))
+        await reverse_journal_entry(_active["id"], "Source document changed; superseded by latest posting", inv.get("created_by", "system"))
         await db.journal_entries.update_one({"id": _active["id"]}, {"$set": {"superseded_at": datetime.now(timezone.utc).isoformat()}})
 
     try:
@@ -5143,7 +5165,7 @@ async def sync_purchase_journal_entry(invoice_id: str):
         if abs(float(_active.get("total_debit") or 0) - _desired_total) <= 0.01:
             return
         from backend.accounting_lock import reverse_journal_entry
-        await reverse_journal_entry(_active["id"], "Source document changed; superseded by latest posting", payment.get("created_by", "system") if "payment" in locals() else inv.get("created_by", "system"))
+        await reverse_journal_entry(_active["id"], "Source document changed; superseded by latest posting", inv.get("created_by", "system"))
         await db.journal_entries.update_one({"id": _active["id"]}, {"$set": {"superseded_at": datetime.now(timezone.utc).isoformat()}})
 
     try:
@@ -5209,7 +5231,7 @@ async def sync_purchase_payment_journal_entry(payment_id: str):
         if abs(float(_active.get("total_debit") or 0) - _desired_total) <= 0.01:
             return
         from backend.accounting_lock import reverse_journal_entry
-        await reverse_journal_entry(_active["id"], "Source document changed; superseded by latest posting", payment.get("created_by", "system") if "payment" in locals() else inv.get("created_by", "system"))
+        await reverse_journal_entry(_active["id"], "Source document changed; superseded by latest posting", inv.get("created_by", "system"))
         await db.journal_entries.update_one({"id": _active["id"]}, {"$set": {"superseded_at": datetime.now(timezone.utc).isoformat()}})
 
     try:
@@ -5821,20 +5843,19 @@ async def sync_unprepared_income_journal_entry(income_id: str):
 async def list_unprepared_incomes(company_id: str = Query(""), current_user: User = Depends(get_current_user)):
     if not _perm(current_user):
         raise HTTPException(403, "Access denied")
-    q = {}
-    if company_id:
-        q["company_id"] = company_id
-    return await db.unprepared_incomes.find(q).sort("date", -1).to_list(5000)
+    company_id = enforce_company_value(current_user, company_id or None)
+    return await db.unprepared_incomes.find({"company_id": company_id}).sort("date", -1).to_list(5000)
 
 
 @router.post("/unprepared-incomes")
 async def create_unprepared_income(payload: UnpreparedIncomeCreate, current_user: User = Depends(get_current_user)):
     if not _perm(current_user):
         raise HTTPException(403, "Access denied")
+    company_id = enforce_company_value(current_user, payload.company_id)
     now = datetime.now(timezone.utc).isoformat()
     doc = {
         "id": str(uuid.uuid4()),
-        "company_id": payload.company_id,
+        "company_id": company_id,
         "date": payload.date,
         "amount": payload.amount,
         "payer_name": payload.payer_name,
@@ -5855,13 +5876,15 @@ async def create_unprepared_income(payload: UnpreparedIncomeCreate, current_user
 async def update_unprepared_income(income_id: str, payload: UnpreparedIncomeCreate, current_user: User = Depends(get_current_user)):
     if not _perm(current_user):
         raise HTTPException(403, "Access denied")
-    existing = await db.unprepared_incomes.find_one({"id": income_id})
+    existing = await db.unprepared_incomes.find_one(
+        {"id": income_id, "company_id": enforce_company_value(current_user, payload.company_id)}
+    )
     if not existing:
         raise HTTPException(404, "Income record not found")
     
     now = datetime.now(timezone.utc).isoformat()
     update = {
-        "company_id": payload.company_id,
+        "company_id": existing.get("company_id"),
         "date": payload.date,
         "amount": payload.amount,
         "payer_name": payload.payer_name,
@@ -5882,6 +5905,8 @@ async def delete_unprepared_income(income_id: str, current_user: User = Depends(
     existing = await db.unprepared_incomes.find_one({"id": income_id})
     if not existing:
         raise HTTPException(404, "Income record not found")
+    if not is_platform_owner(current_user):
+        enforce_company_value(current_user, existing.get("company_id"))
     
     # Preserve the accounting trail when deleting the operational record.
     from backend.accounting_lock import reverse_journal_entry

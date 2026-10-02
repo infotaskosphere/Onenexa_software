@@ -712,6 +712,11 @@ async def bulk_import_passwords(
     successful_imports = 0
     failed_imports = 0
     errors = []
+
+    def clean(v):
+        s = str(v).strip() if v is not None else ""
+        return None if s.lower() in ("nan", "none", "") else s
+
     for index, row in df.iterrows():
         total_processed += 1
         try:
@@ -741,10 +746,6 @@ async def bulk_import_passwords(
                 trade_name=trade_name_val,
             )
             client_name_val = filled["client_name"]
-
-            def clean(v):
-                s = str(v).strip() if v is not None else ""
-                return None if s.lower() in ("nan", "none", "") else s
 
             entry_data = {
                 "portal_name": str(row.get("portal_name", "")).strip(),
