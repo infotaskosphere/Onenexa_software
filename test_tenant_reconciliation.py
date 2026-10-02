@@ -34,6 +34,9 @@ def test_company_owned_finix_audit_history_collections_are_tenant_scoped():
         "gst_portal_audit_risk",
         "vendor_rule_overrides",
         "vendor_learning_history",
+        "ai_validation_results",
+        "ai_confidence_history",
+        "ai_anomaly_history",
     }
 
     assert expected.issubset(TENANT_COLLECTIONS)
