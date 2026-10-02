@@ -42,6 +42,7 @@ from backend.dependencies import get_current_user, require_admin
 from backend.models import User
 from backend.tenant_runtime import enforce_company_value
 from backend.platform_owner import is_platform_owner
+from backend.commercial_user_company_scope import _scope_user_query
 
 logger = logging.getLogger(__name__)
 
@@ -267,14 +268,38 @@ async def _has_wa_access(user: User) -> bool:
     rec = await _db()["whatsapp_access_requests"].find_one({"user_id": user.id, "status": "approved"})
     return rec is not None
 
-async def _store_message(sent_by, to, message, message_type, context_id, status_val, session_id=None, error=None, batch_id=None, batch_name=None):
+async def _store_message(sent_by, to, message, message_type, context_id, status_val, session_id=None, error=None, batch_id=None, batch_name=None, company_id=None):
+    if not company_id and isinstance(sent_by, str):
+        try:
+            creator = await _db()["users"].find_one({"id": sent_by}, {"_id": 0, "company_id": 1})
+            company_id = (creator or {}).get("company_id")
+        except Exception:
+            company_id = None
     await _db()["whatsapp_messages"].insert_one({
-        "sent_by": sent_by, "to": to, "message": message,
+        "sent_by": sent_by, "company_id": company_id, "to": to, "message": message,
         "message_type": message_type, "context_id": context_id,
         "session_id": session_id, "status": status_val, "error": error,
         "batch_id": batch_id, "batch_name": batch_name,
         "sent_at": datetime.now(timezone.utc).isoformat(),
     })
+
+async def _message_history_scope_query(current_user: User) -> dict:
+    """Scope sent-message history to the authenticated company; preserve legacy rows by sender."""
+    if is_platform_owner(current_user):
+        return {}
+    company_id = enforce_company_value(current_user, None)
+    scoped_users = await _db()["users"].find(
+        _scope_user_query({}),
+        {"_id": 0, "id": 1},
+    ).to_list(5000)
+    user_ids = [str(row.get("id")) for row in scoped_users if row.get("id")]
+    return {
+        "$or": [
+            {"company_id": company_id},
+            {"company_id": {"$in": [None, ""]}, "sent_by": {"$in": user_ids}},
+        ]
+    }
+
 
 # ── Multi-session endpoints ──────────────────────────────────────────────────
 
@@ -569,13 +594,13 @@ async def get_wa_status(current_user: User = Depends(get_current_user)):
 
 @router.get("/messages")
 async def list_messages(message_type: Optional[str] = None, batch_id: Optional[str] = None, limit: int = 50, current_user: User = Depends(get_current_user)):
-    query: Dict[str, Any] = {}
+    query: Dict[str, Any] = await _message_history_scope_query(current_user)
     if current_user.role != "admin":
-        query["sent_by"] = current_user.id
+        query = {"$and": [query, {"sent_by": current_user.id}]}
     if message_type:
-        query["message_type"] = message_type
+        query = {"$and": [query, {"message_type": message_type}]
     if batch_id:
-        query["batch_id"] = batch_id
+        query = {"$and": [query, {"batch_id": batch_id}]
     docs = await _db()["whatsapp_messages"].find(query).sort("sent_at", -1).limit(limit).to_list(limit)
     for d in docs:
         d["id"] = str(d.pop("_id"))
@@ -588,9 +613,12 @@ async def list_batches(limit: int = 100, current_user: User = Depends(get_curren
 
     Groups whatsapp_messages by batch_id. Non-admins see only their own batches.
     """
+    scope = await _message_history_scope_query(current_user)
     match: Dict[str, Any] = {"batch_id": {"$ne": None}}
+    if scope:
+        match = {"$and": [scope, match]}
     if current_user.role != "admin":
-        match["sent_by"] = current_user.id
+        match = {"$and": [match, {"sent_by": current_user.id}]}
     pipeline = [
         {"$match": match},
         {"$group": {
@@ -897,6 +925,7 @@ async def _run_scheduled_bulk_jobs():
                     to=r["phone"], message=r["message"],
                     message_type=job.get("message_type", "bulk_scheduled"),
                     context_id=r.get("client_id"), status_val="sent", session_id=job.get("session_id"),
+                    company_id=job.get("company_id"),
                 )
                 results.append({"phone": r["phone"], "status": "sent"})
             except Exception as exc:
