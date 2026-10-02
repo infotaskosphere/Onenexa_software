@@ -946,7 +946,25 @@ async def restore_backup(backup: UploadFile = File(...), password: str = Form(..
 # Live backup progress
 # ---------------------------------------------------------------------------
 _BACKUP_PROGRESS = globals().get("_BACKUP_PROGRESS", {})
+_BACKUP_OUTPUTS = globals().get("_BACKUP_OUTPUTS", {})
+_BACKUP_TASKS = globals().get("_BACKUP_TASKS", {})
 _BACKUP_PROGRESS_TTL_SECONDS = 3600
+_BACKUP_OUTPUT_TTL_SECONDS = 3600
+
+def _cleanup_backup_output(progress_id: str):
+    item = _BACKUP_OUTPUTS.pop(progress_id, None)
+    if item:
+        try:
+            os.unlink(item.get("path", ""))
+        except (FileNotFoundError, TypeError):
+            pass
+
+
+async def _expire_backup_output(progress_id: str):
+    await asyncio.sleep(_BACKUP_OUTPUT_TTL_SECONDS)
+    item = _BACKUP_OUTPUTS.get(progress_id)
+    if item and time.time() - float(item.get("created_at", time.time())) >= _BACKUP_OUTPUT_TTL_SECONDS:
+        _cleanup_backup_output(progress_id)
 
 def _set_backup_progress(progress_id: str | None, **values):
     if not progress_id:
