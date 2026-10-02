@@ -37,6 +37,12 @@ def test_company_owned_finix_audit_history_collections_are_tenant_scoped():
         "ai_validation_results",
         "ai_confidence_history",
         "ai_anomaly_history",
+        "ai_document_memory",
+        "ai_document_workspace",
+        "ai_workspace_knowledge",
+        "document_classifications",
+        "ocr_processing_history",
+        "ocr_quality_reports",
     }
 
     assert expected.issubset(TENANT_COLLECTIONS)
