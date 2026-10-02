@@ -32,9 +32,9 @@ jobs:
       - name: Reference audit
         working-directory: .
         run: |
-          for symbol in EmployeeMaster IdentixAttendance WebsiteBuilderConsole check_permission_and_visibility get_team_user_ids; do
-            echo "===== $symbol ====="
-            git grep -n -E "\\b$symbol\\b" -- ':!*.map' || true
+          for pattern in "models_banking import router" "models_extended import router" "FinixAIWorkspace" "EmployeeMaster" "IdentixAttendance" "WebsiteBuilderConsole" "check_permission_and_visibility" "get_team_user_ids"; do
+            echo "===== $pattern ====="
+            git grep -n -F "$pattern" -- ':!*.map' || true
           done
       - name: Install frontend dependencies
         run: npm install
