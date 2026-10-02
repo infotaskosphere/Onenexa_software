@@ -537,7 +537,9 @@ export default function BackupRestore() {
           </div>
           {transfer.total > 0 && (
             <p className={'text-[10px] mt-2 ' + muted}>
-              {formatBytes(transfer.processed)} / {formatBytes(transfer.total)}
+              {['queued', 'preparing', 'creating'].includes(String(transfer.phase || '').toLowerCase())
+                ? Number(transfer.processed || 0).toLocaleString('en-IN') + ' / ' + Number(transfer.total || 0).toLocaleString('en-IN') + ' documents'
+                : formatBytes(transfer.processed) + ' / ' + formatBytes(transfer.total)}
             </p>
           )}
         </div>
