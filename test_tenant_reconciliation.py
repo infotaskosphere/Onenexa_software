@@ -55,6 +55,8 @@ def test_company_owned_finix_audit_history_collections_are_tenant_scoped():
         "gst_processing_history",
         "gst_validation",
         "itc_register",
+        "gst_audit",
+        "gst_compliance",
         "departments",
         "designations",
     }
