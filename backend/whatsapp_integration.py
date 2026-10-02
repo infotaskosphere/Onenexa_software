@@ -598,9 +598,9 @@ async def list_messages(message_type: Optional[str] = None, batch_id: Optional[s
     if current_user.role != "admin":
         query = {"$and": [query, {"sent_by": current_user.id}]}
     if message_type:
-        query = {"$and": [query, {"message_type": message_type}]
+        query = {"$and": [query, {"message_type": message_type}]}
     if batch_id:
-        query = {"$and": [query, {"batch_id": batch_id}]
+        query = {"$and": [query, {"batch_id": batch_id}]}
     docs = await _db()["whatsapp_messages"].find(query).sort("sent_at", -1).limit(limit).to_list(limit)
     for d in docs:
         d["id"] = str(d.pop("_id"))
