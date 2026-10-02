@@ -62,3 +62,33 @@ def test_company_owned_finix_audit_history_collections_are_tenant_scoped():
     }
 
     assert expected.issubset(TENANT_COLLECTIONS)
+
+
+def test_tenant_aware_collection_rejects_cross_company_query(monkeypatch):
+    import asyncio
+    from backend.tenant_runtime import TenantAwareCollection, set_authenticated_company, reset_authenticated_company
+    from fastapi import HTTPException
+
+    class FakeCollection:
+        def __init__(self):
+            self.last_query = None
+        async def find_one(self, query, *args, **kwargs):
+            self.last_query = query
+            return {"id": "row-a", "company_id": "company-a"} if query.get("company_id") == "company-a" else None
+
+    raw = FakeCollection()
+    wrapped = TenantAwareCollection(raw, "invoices")
+    token = set_authenticated_company("company-a")
+    try:
+        result = asyncio.run(wrapped.find_one({"id": "row-a"}))
+        assert result["company_id"] == "company-a"
+        assert raw.last_query == {"id": "row-a", "company_id": "company-a"}
+
+        try:
+            asyncio.run(wrapped.find_one({"id": "row-b", "company_id": "company-b"}))
+        except HTTPException as exc:
+            assert exc.status_code == 403
+        else:
+            raise AssertionError("Cross-company query should be rejected")
+    finally:
+        reset_authenticated_company(token)
