@@ -54,6 +54,7 @@ TENANT_COLLECTIONS = {
     "ocr_processing_history", "ocr_quality_reports",
     "workflow_definitions", "workflow_instances", "workflow_history", "aiweave_conversations", "aiweave_executions", "aiweave_provider_accounts", "aiweave_provider_models", "aiweave_routing_rules",
     "approval_requests", "approval_history", "automation_rules", "business_events",
+    "pending_client_messages", "service_expiries", "password_sheet_links", "reminder_dup_ignores",
     "notification_history", "workflow_audit", "notifications",
     "whatsapp_hub_contacts", "whatsapp_hub_groups", "whatsapp_hub_messages",
     "zte_processed_documents", "zte_category_rules", "template_library"
