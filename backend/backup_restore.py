@@ -362,6 +362,9 @@ def _decrypt(source_path: str, password: str) -> str:
 def _dump(value: Any) -> str:
     return json_util.dumps(value, json_options=CANONICAL_JSON_OPTIONS)
 
+def _dump_batch(values: list[Any]) -> bytes:
+    return (chr(10).join(_dump(value) for value in values) + chr(10)).encode("utf-8")
+
 
 def _load(value: str) -> Any:
     return json_util.loads(value, json_options=CANONICAL_JSON_OPTIONS)
@@ -1242,11 +1245,12 @@ async def _build_archive(
                         if not include_doc:
                             continue
 
-                        pending_lines.append(_dump(doc))
+                        pending_lines.append(doc)
                         document_count += 1
                         processed_documents += 1
                         if len(pending_lines) >= 500:
-                            entry.write(("\n".join(pending_lines) + "\n").encode("utf-8"))
+                            payload = await asyncio.to_thread(_dump_batch, pending_lines)
+                            await asyncio.to_thread(entry.write, payload)
                             pending_lines.clear()
                         if processed_documents % 500 == 0 or processed_documents == total_documents:
                             elapsed = max(0.001, time.monotonic() - started_at)
@@ -1275,7 +1279,8 @@ async def _build_archive(
                             await asyncio.sleep(0)
 
                     if pending_lines:
-                        entry.write(("\n".join(pending_lines) + "\n").encode("utf-8"))
+                        payload = await asyncio.to_thread(_dump_batch, pending_lines)
+                        await asyncio.to_thread(entry.write, payload)
                         pending_lines.clear()
 
                 try:
