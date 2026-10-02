@@ -674,11 +674,14 @@ async def get_connected_agents(
         query["user_id"] = user_id
 
     if search:
-        query["$or"] = [
-            {"machine_name": {"$regex": search, "$options": "i"}},
-            {"hostname": {"$regex": search, "$options": "i"}},
-            {"agent_id": {"$regex": search, "$options": "i"}},
-        ]
+        search_query = {
+            "$or": [
+                {"machine_name": {"$regex": search, "$options": "i"}},
+                {"hostname": {"$regex": search, "$options": "i"}},
+                {"agent_id": {"$regex": search, "$options": "i"}},
+            ]
+        }
+        query = {"$and": [query, search_query]}
 
     docs = (
         await db.desktop_agents.find(query)
