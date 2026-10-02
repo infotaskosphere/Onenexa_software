@@ -288,6 +288,11 @@ export default function BackupRestore() {
       const uploadStarted = performance.now();
 
       const { data } = await api.post('/app-backup/restore', form, {
+        headers: {
+          // FormData must let the browser/axios generate multipart/form-data with its boundary.
+          // The shared API instance defaults to application/json, which causes FastAPI to return 422.
+          'Content-Type': undefined,
+        },
         onUploadProgress: (event) => {
           const loaded = Number(event.loaded || 0);
           const total = Number(event.total || restoreFile.size || 0);
