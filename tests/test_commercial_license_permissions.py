@@ -50,3 +50,35 @@ def test_aiweave_remains_explicitly_governed_for_licensee_admin():
     assert permissions["can_access_finix"] is True
     assert permissions["can_access_aiweave"] is False
     assert permissions["can_view_aiweave"] is False
+
+
+def test_request_guard_allows_licensee_admin_purchased_finix_pages():
+    from backend.commercial_module_guard import _permission_flag
+    from backend.models import User
+
+    user = User(
+        id="tenant-admin",
+        email="admin@example.com",
+        role="admin",
+        company_id="company-1",
+        permissions={},
+    )
+    license_doc = {
+        "id": "license-finix-only",
+        "customer_id": "customer-1",
+        "modules": ["finix"],
+        "selected_features": {"finix": ["can_view_sale"]},
+    }
+
+    assert _permission_flag(
+        user,
+        "can_view_accounting_reports",
+        license_doc,
+        "finix",
+    ) is True
+    assert _permission_flag(
+        user,
+        "can_view_purchase",
+        license_doc,
+        "finix",
+    ) is True
