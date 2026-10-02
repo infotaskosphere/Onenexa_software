@@ -32,6 +32,8 @@ def test_company_owned_finix_audit_history_collections_are_tenant_scoped():
         "posting_history",
         "voucher_history",
         "gst_portal_audit_risk",
+        "vendor_rule_overrides",
+        "vendor_learning_history",
     }
 
     assert expected.issubset(TENANT_COLLECTIONS)
