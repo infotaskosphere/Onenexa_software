@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Archive, AlertTriangle, Database, Download, HardDriveDownload, LockKeyhole, RefreshCw, RotateCcw, ShieldCheck, Upload, Users } from 'lucide-react';
+import { Archive, AlertTriangle, Database, Download, HardDriveDownload, History, LockKeyhole, RefreshCw, RotateCcw, ShieldCheck, Trash2, Upload, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import api from '@/lib/api';
 import { useDark } from '@/hooks/useDark';
@@ -86,6 +86,9 @@ export default function BackupRestore() {
   const [restoreConfirm, setRestoreConfirm] = useState('');
   const [selectedModule, setSelectedModule] = useState('taskosphere');
   const [selectedCollections, setSelectedCollections] = useState([]);
+  const [activeTab, setActiveTab] = useState('backup');
+  const [history, setHistory] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [transfer, setTransfer] = useState({
     active: false,
     phase: '',
@@ -108,8 +111,81 @@ export default function BackupRestore() {
     }
   };
 
+  const loadHistory = async () => {
+    setHistoryLoading(true);
+    try {
+      const { data } = await api.get('/app-backup/history');
+      setHistory(Array.isArray(data?.history) ? data.history : []);
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || 'Unable to load backup history');
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  const downloadHistoryBackup = async (record) => {
+    try {
+      const response = await api.get('/app-backup/history/' + encodeURIComponent(record.id) + '/download', {
+        responseType: 'blob',
+        onDownloadProgress: (event) => {
+          const loaded = Number(event.loaded || 0);
+          const total = Number(event.total || record.file_size_bytes || 0);
+          const percent = total > 0 ? Math.min(100, (loaded / total) * 100) : 0;
+          setTransfer((current) => ({
+            ...current,
+            active: percent < 100,
+            phase: 'Downloading stored backup…',
+            percent,
+            processed: loaded,
+            total,
+            detail: total ? formatBytes(loaded) + ' / ' + formatBytes(total) : formatBytes(loaded) + ' downloaded',
+          }));
+        },
+      });
+      const filename = record.filename || ('taskosphere-backup-' + record.id + '.taskosphere');
+      downloadBlob(response.data, filename);
+      setTransfer({
+        active: false,
+        phase: 'Complete',
+        percent: 100,
+        etaSeconds: 0,
+        processed: record.file_size_bytes || response.data?.size || 0,
+        total: record.file_size_bytes || response.data?.size || 0,
+        detail: 'Historical backup downloaded successfully.',
+      });
+      toast.success('Historical backup downloaded.');
+    } catch (error) {
+      setTransfer((current) => ({
+        ...current,
+        active: false,
+        phase: 'Failed',
+        etaSeconds: null,
+      }));
+      toast.error(normalizeBackupDetail(error?.response?.data?.detail) || error?.message || 'Unable to download historical backup');
+    }
+  };
+
+  const deleteHistoryBackup = async (record) => {
+    if (!record?.id) return;
+    const confirmed = window.confirm(
+      'Delete this backup permanently? This removes the history record and the stored backup data. This cannot be undone.'
+    );
+    if (!confirmed) return;
+    setBusy(true);
+    try {
+      await api.delete('/app-backup/history/' + encodeURIComponent(record.id));
+      setHistory((current) => current.filter((item) => item.id !== record.id));
+      toast.success('Backup history record and stored backup data deleted.');
+    } catch (error) {
+      toast.error(normalizeBackupDetail(error?.response?.data?.detail) || error?.message || 'Unable to delete backup history record');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   useEffect(() => {
     loadInfo();
+    void loadHistory();
   }, []);
 
   const moduleCollections = info?.modules?.[selectedModule] || [];
@@ -366,12 +442,36 @@ export default function BackupRestore() {
               <p className="text-xs text-white/70 mt-0.5">Portable encrypted backup of your complete Taskosphere tenant</p>
             </div>
           </div>
-          <button type="button" onClick={loadInfo} disabled={loadingInfo || busy} className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold disabled:opacity-50">
-            <RefreshCw className={loadingInfo ? 'h-3.5 w-3.5 animate-spin' : 'h-3.5 w-3.5'} /> Refresh
+          <button type="button" onClick={() => { void loadInfo(); void loadHistory(); }} disabled={loadingInfo || historyLoading || busy} className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold disabled:opacity-50">
+            <RefreshCw className={loadingInfo || historyLoading ? 'h-3.5 w-3.5 animate-spin' : 'h-3.5 w-3.5'} /> Refresh
           </button>
         </div>
       </div>
 
+      <div className={'rounded-2xl border p-1 ' + card}>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-1">
+          {[
+            ['backup', 'Backup', HardDriveDownload],
+            ['restore', 'Restore', RotateCcw],
+            ['history', 'History', History],
+          ].map(([value, label, Icon]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => { setActiveTab(value); if (value === 'history') void loadHistory(); }}
+              className={'flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold transition-all ' + (
+                activeTab === value
+                  ? (isDark ? 'bg-slate-700 text-white shadow-sm' : 'bg-blue-50 text-blue-700 shadow-sm')
+                  : (isDark ? 'text-slate-400 hover:bg-slate-800' : 'text-slate-500 hover:bg-slate-50')
+              )}
+            >
+              <Icon className="h-4 w-4" />
+              {label}
+              {value === 'history' && history.length > 0 && <span className="ml-1 rounded-full bg-blue-600 px-2 py-0.5 text-[10px] font-extrabold text-white">{history.length}</span>}
+            </button>
+          ))}
+        </div>
+      </div>
 
       {transfer.phase && (
         <div className={'rounded-2xl border p-4 ' + card}>
@@ -417,6 +517,7 @@ export default function BackupRestore() {
         </div>
       </div>
 
+      {activeTab === 'backup' && (
       <div className={'rounded-2xl border p-5 ' + card}>
         <div className="flex items-start gap-3">
           <HardDriveDownload className="h-5 w-5 text-blue-500 mt-0.5" />
@@ -467,6 +568,9 @@ export default function BackupRestore() {
         </div>
       </div>
 
+      )}
+
+      {activeTab === 'restore' && (
       <div className={'rounded-2xl border p-5 ' + card}>
         <div className="flex items-start gap-3"><RotateCcw className="h-5 w-5 text-amber-500 mt-0.5" /><div><h2 className={'font-bold ' + heading}>Restore Backup</h2><p className={'text-xs mt-1 ' + muted}>Restore into this license/company or another license. The target company identity and the current administrator's live authentication credentials are preserved.</p></div></div>
         <div className={'mt-4 rounded-xl border p-3 flex gap-2 ' + (isDark ? 'border-amber-900/50 bg-amber-950/20' : 'border-amber-200 bg-amber-50')}><AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" /><p className={'text-xs leading-relaxed ' + (isDark ? 'text-amber-300' : 'text-amber-800')}>Restore replaces data covered by the backup. It is intentionally restricted to administrators and requires the exact word <b>RESTORE</b>.</p></div>
@@ -477,6 +581,69 @@ export default function BackupRestore() {
           <div className="flex items-end"><button type="button" onClick={restoreBackup} disabled={busy} className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-amber-600 text-white text-sm font-bold hover:bg-amber-700 disabled:opacity-50 w-full"><RotateCcw className="h-4 w-4" />{busy ? 'Restoring…' : 'Restore Backup'}</button></div>
         </div>
       </div>
+
+      )}
+
+      {activeTab === 'history' && (
+        <div className={'rounded-2xl border p-5 ' + card}>
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-3 min-w-0">
+              <History className="h-5 w-5 text-blue-500 mt-0.5 shrink-0" />
+              <div>
+                <h2 className={'font-bold ' + heading}>Backup History</h2>
+                <p className={'text-xs mt-1 ' + muted}>Every completed backup round is stored here as an encrypted, tenant-scoped artifact. Deleting a record permanently removes the history entry and its stored backup data.</p>
+              </div>
+            </div>
+            <button type="button" onClick={() => void loadHistory()} disabled={historyLoading || busy} className={'inline-flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-semibold disabled:opacity-50 ' + (isDark ? 'border-slate-700 hover:bg-slate-700' : 'border-slate-200 hover:bg-slate-50')}>
+              <RefreshCw className={historyLoading ? 'h-3.5 w-3.5 animate-spin' : 'h-3.5 w-3.5'} /> Refresh
+            </button>
+          </div>
+
+          {historyLoading ? (
+            <div className={'py-12 text-center text-sm ' + muted}>Loading backup history…</div>
+          ) : history.length === 0 ? (
+            <div className={'mt-4 rounded-xl border p-8 text-center ' + (isDark ? 'border-slate-700' : 'border-slate-200')}>
+              <History className="mx-auto h-9 w-9 text-slate-400" />
+              <p className={'mt-3 text-sm font-bold ' + heading}>No completed backups yet</p>
+              <p className={'mt-1 text-xs ' + muted}>Newly completed backups will appear here automatically.</p>
+            </div>
+          ) : (
+            <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
+              <table className="w-full min-w-[860px] text-left">
+                <thead className={isDark ? 'bg-slate-900' : 'bg-slate-50'}>
+                  <tr>
+                    {['Date & Time', 'Created By', 'Type', 'Collections', 'Documents', 'Size', 'Actions'].map((label) => (
+                      <th key={label} className={'px-3 py-2.5 text-[10px] uppercase tracking-wider font-extrabold ' + muted}>{label}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {history.map((record) => (
+                    <tr key={record.id} className={'border-t ' + (isDark ? 'border-slate-700' : 'border-slate-100')}>
+                      <td className={'px-3 py-3 text-xs font-semibold ' + heading}>{record.created_at ? new Date(record.created_at).toLocaleString('en-IN') : '—'}</td>
+                      <td className={'px-3 py-3 text-xs ' + muted}>{record.created_by || 'Administrator'}</td>
+                      <td className={'px-3 py-3 text-xs font-semibold capitalize ' + heading}>{record.mode || 'full'}</td>
+                      <td className={'px-3 py-3 text-xs ' + muted}>{record.collection_count ?? 0}</td>
+                      <td className={'px-3 py-3 text-xs ' + muted}>{Number(record.document_count || 0).toLocaleString('en-IN')}</td>
+                      <td className={'px-3 py-3 text-xs ' + muted}>{record.file_size_bytes ? formatBytes(record.file_size_bytes) : '—'}</td>
+                      <td className="px-3 py-3">
+                        <div className="flex items-center gap-2">
+                          <button type="button" onClick={() => void downloadHistoryBackup(record)} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-[11px] font-bold text-white hover:bg-blue-700 disabled:opacity-50">
+                            <Download className="h-3.5 w-3.5" /> Download
+                          </button>
+                          <button type="button" onClick={() => void deleteHistoryBackup(record)} disabled={busy || !record.deletable} className="inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-3 py-2 text-[11px] font-bold text-white hover:bg-red-700 disabled:opacity-50">
+                            <Trash2 className="h-3.5 w-3.5" /> Delete
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className={'rounded-2xl border p-4 ' + card}><div className="flex items-start gap-2.5"><ShieldCheck className="h-4 w-4 text-emerald-500 mt-0.5" /><div><p className={'text-xs font-bold ' + heading}>Recommended backup policy</p><p className={'text-[11px] mt-1 leading-relaxed ' + muted}>Keep at least one full encrypted backup outside the application server. The .taskosphere file is portable and includes MongoDB data automatically; because hosted app disks can be ephemeral, long-term automatic retention should use your MongoDB provider/object-storage backup facility rather than relying on local server files.</p></div></div></div>
     </div>
