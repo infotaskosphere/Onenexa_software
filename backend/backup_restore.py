@@ -746,10 +746,19 @@ async def _restore(manifest: dict, collections: list[tuple[str, str]], current_u
     target_company_id, target_company, target_user_ids, target_identities = await _tenant_context(current_user)
     source_company = _s(manifest.get("source_company_id"))
     source_owner = _s(manifest.get("owner_user_id"))
-    if not source_company or not source_owner:
-        raise HTTPException(status_code=400, detail="Backup is missing tenant ownership metadata.")
+    source_company_doc = None
 
-    replacements = {source_company: target_company_id, source_owner: _s(current_user.id)}
+    if legacy_migration:
+        if not source_owner:
+            raise HTTPException(status_code=400, detail="Legacy backup is missing the source administrator identity.")
+        source_company, source_company_doc = await _legacy_source_context(zip_path, collections)
+        replacements = await _legacy_user_replacements(
+            zip_path, collections, current_user, _raw_db(), target_company_id, source_owner
+        )
+    else:
+        if not source_company or not source_owner:
+            raise HTTPException(status_code=400, detail="Backup is missing tenant ownership metadata.")
+        replacements = {source_company: target_company_id, source_owner: _s(current_user.id)}
     source_license = _s(manifest.get("source_license_id"))
     source_customer = _s(manifest.get("source_commercial_customer_id"))
     target_license = next(iter(target_identities["license_id"]), "")
