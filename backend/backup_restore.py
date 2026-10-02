@@ -142,17 +142,6 @@ def _read_header(handle):
         raise HTTPException(status_code=400, detail=f"Invalid backup header: {exc}") from exc
 
 
-def _encrypt(zip_path: str, output_path: str, password: str) -> None:
-    salt, nonce = secrets.token_bytes(16), secrets.token_bytes(12)
-    encryptor = Cipher(algorithms.AES(_key(password, salt)), modes.GCM(nonce)).encryptor()
-    with open(output_path, "wb") as out, open(zip_path, "rb") as source:
-        out.write(_header(salt, nonce))
-        while chunk := source.read(CHUNK_SIZE):
-            out.write(encryptor.update(chunk))
-        out.write(encryptor.finalize())
-        out.write(encryptor.tag)
-
-
 def _decrypt(source_path: str, password: str) -> str:
     with open(source_path, "rb") as source:
         salt, nonce = _read_header(source)
@@ -249,46 +238,6 @@ async def _resolve_collections(user: User, requested: list[str] | None):
             raise HTTPException(status_code=400, detail="No valid backup collections were selected.")
         selected = sorted(requested_set)
     return company_id, company, user_ids, identities, selected
-
-
-async def _build_archive(user: User, password: str, requested: list[str] | None):
-    company_id, company, user_ids, identities, selected = await _resolve_collections(user, requested)
-    raw = _raw_db()
-    manifest = {"format": "taskosphere-backup", "version": FORMAT_VERSION, "created_at": datetime.now(timezone.utc).isoformat(), "database": DB_NAME, "scope": "single_customer_tenant", "source_company_id": company_id, "source_license_id": next(iter(identities["license_id"]), None), "source_commercial_customer_id": next(iter(identities["commercial_customer_id"]), None), "owner_user_id": _s(user.id), "company_name": (company or {}).get("name"), "bson_encoding": "MongoDB Extended JSON v2 canonical", "encryption": "AES-256-GCM + PBKDF2-HMAC-SHA256", "selection": "full" if not requested else "custom", "collections": {}, "excluded_collections": sorted(EXCLUDED_COLLECTIONS)}
-    fd, zip_path = tempfile.mkstemp(prefix="taskosphere-backup-", suffix=".zip")
-    os.close(fd)
-    try:
-        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
-            for name in selected:
-                docs = await _collection_docs(raw, name, company_id, user_ids, identities, company)
-                if not docs:
-                    continue
-                safe = name.replace("/", "_")
-                archive.writestr(f"collections/{safe}.jsonl", "".join(_dump(d) + "\n" for d in docs))
-                try:
-                    indexes = await raw[name].list_indexes().to_list(1000)
-                    indexes = [idx for idx in indexes if idx.get("name") != "_id_"]
-                    if indexes:
-                        archive.writestr(f"indexes/{safe}.json", _dump(indexes))
-                except Exception:
-                    pass
-                manifest["collections"][name] = {"documents": len(docs), "safe_name": safe}
-            archive.writestr("manifest.json", json.dumps(manifest, indent=2, sort_keys=True))
-        fd, output = tempfile.mkstemp(prefix="taskosphere-backup-", suffix=".taskosphere")
-        os.close(fd)
-        _encrypt(zip_path, output, password)
-        return output, manifest
-    except Exception:
-        try:
-            os.unlink(locals().get("output", ""))
-        except (FileNotFoundError, TypeError):
-            pass
-        raise
-    finally:
-        try:
-            os.unlink(zip_path)
-        except FileNotFoundError:
-            pass
 
 
 @router.get("/info")
@@ -500,139 +449,6 @@ async def restore_backup(backup: UploadFile = File(...), password: str = Form(..
 # production builder only changes how documents are written: one document at
 # a time directly into the ZIP member rather than building a giant in-memory
 # string with join(). Tenant/company/license remapping remains unchanged.
-async def _build_archive_streaming(user: User, password: str, requested: list[str] | None):
-    company_id, company, user_ids, identities, selected = await _resolve_collections(user, requested)
-    raw = _raw_db()
-    manifest = {
-        "format": "taskosphere-backup",
-        "version": FORMAT_VERSION,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "database": DB_NAME,
-        "scope": "single_customer_tenant",
-        "source_company_id": company_id,
-        "source_license_id": next(iter(identities["license_id"]), None),
-        "source_commercial_customer_id": next(iter(identities["commercial_customer_id"]), None),
-        "owner_user_id": _s(user.id),
-        "company_name": (company or {}).get("name"),
-        "bson_encoding": "MongoDB Extended JSON v2 canonical",
-        "encryption": "AES-256-GCM + PBKDF2-HMAC-SHA256",
-        "selection": "full" if not requested else "custom",
-        "collections": {},
-        "excluded_collections": sorted(EXCLUDED_COLLECTIONS),
-    }
-
-    fd, zip_path = tempfile.mkstemp(prefix="taskosphere-backup-", suffix=".zip")
-    os.close(fd)
-    output = None
-
-    try:
-        with zipfile.ZipFile(
-            zip_path,
-            "w",
-            compression=zipfile.ZIP_DEFLATED,
-            compresslevel=6,
-            allowZip64=True,
-        ) as archive:
-            for name in selected:
-                docs_cursor = raw[name].find({})
-                document_count = 0
-
-                with archive.open(
-                    f"collections/{name.replace('/', '_')}.jsonl",
-                    mode="w",
-                    force_zip64=True,
-                ) as entry:
-                    # Filter tenant-linked records while streaming. This keeps
-                    # the commercial tenant isolation rules intact.
-                    async for doc in docs_cursor:
-                        if name in EXCLUDED_COLLECTIONS:
-                            continue
-
-                        include_doc = False
-                        if name == "companies":
-                            include_doc = (
-                                _s(doc.get("id")) == company_id
-                                or (
-                                    company
-                                    and company.get("_id") is not None
-                                    and doc.get("_id") == company.get("_id")
-                                )
-                            )
-                        elif name == "users" or name in TENANT_COLLECTIONS:
-                            include_doc = (
-                                _s(doc.get("company_id")) == company_id
-                                or (
-                                    doc.get("company_id") is not None
-                                    and str(doc.get("company_id")) == str(company_id)
-                                )
-                            )
-                        else:
-                            include_doc = _linked(doc, user_ids, identities)
-
-                        if not include_doc:
-                            continue
-
-                        entry.write((_dump(doc) + "\n").encode("utf-8"))
-                        document_count += 1
-
-                        if document_count % 250 == 0:
-                            await asyncio.sleep(0)
-
-                try:
-                    list_indexes = getattr(raw[name], "list_indexes", None)
-                    indexes = (
-                        await list_indexes().to_list(1000)
-                        if callable(list_indexes)
-                        else []
-                    )
-                    indexes = [idx for idx in indexes if idx.get("name") != "_id_"]
-                    if indexes:
-                        archive.writestr(
-                            f"indexes/{name.replace('/', '_')}.json",
-                            _dump(indexes),
-                        )
-                except Exception:
-                    pass
-
-                if document_count:
-                    manifest["collections"][name] = {
-                        "documents": document_count,
-                        "safe_name": name.replace("/", "_"),
-                    }
-
-            archive.writestr(
-                "manifest.json",
-                json.dumps(manifest, indent=2, sort_keys=True),
-            )
-
-        fd, output = tempfile.mkstemp(
-            prefix="taskosphere-backup-",
-            suffix=".taskosphere",
-        )
-        os.close(fd)
-        _encrypt(zip_path, output, password)
-        return output, manifest
-
-    except Exception:
-        if output:
-            try:
-                os.unlink(output)
-            except FileNotFoundError:
-                pass
-        raise
-    finally:
-        try:
-            os.unlink(zip_path)
-        except FileNotFoundError:
-            pass
-
-
-# The route resolves _build_archive when the request is handled, so this
-# preserves the existing endpoint and tenant-aware behavior while replacing
-# only the memory-heavy archive construction strategy.
-_build_archive = _build_archive_streaming
-
-
 # ---------------------------------------------------------------------------
 # Live backup progress
 # ---------------------------------------------------------------------------
@@ -870,8 +686,15 @@ async def _build_archive_with_progress(
             current_collection=None,
         )
 
-        # Use the already memory-safe file-to-file encryption loop.
-        _encrypt(zip_path, output, password)
+        _encrypt_with_progress(
+            zip_path,
+            output,
+            password,
+            progress_id=progress_id,
+            progress_start=90.0,
+            progress_end=100.0,
+            started_at=started_at,
+        )
 
         elapsed = max(0.001, time.monotonic() - started_at)
         _set_backup_progress(
