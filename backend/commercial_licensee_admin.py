@@ -484,32 +484,47 @@ async def ensure_licensee_admin(
         "licensed_modules": licensed_modules,
         "selected_features": selected_features,
         "permissions": admin_permissions,
-        "status": "active",
-        "is_active": True,
     }
 
     if existing_user:
+        # Preserve an already-established administrator login. If the existing
+        # record is only the license-issued placeholder, keep it pending until
+        # the licensee explicitly chooses credentials.
         if password and len(password) >= 6:
             update_fields["password"] = pwd_context.hash(password)
+            update_fields["status"] = "active"
+            update_fields["is_active"] = True
+            update_fields["admin_credentials_pending"] = False
+            update_fields["approved_by"] = "commercial-license"
+            update_fields["approved_at"] = now_iso
+        elif not existing_user.get("password"):
+            update_fields["status"] = "pending_admin_setup"
+            update_fields["is_active"] = False
+            update_fields["admin_credentials_pending"] = True
         await raw_db.users.update_one({"_id": existing_user.get("_id")}, {"$set": update_fields})
         updated = await raw_db.users.find_one({"_id": existing_user.get("_id")}, {"_id": 0, "password": 0})
         logger.info("Updated licensee admin %s for customer %s/license %s", email, customer_id, license_id)
         return updated
 
-    default_password = password or customer.get("password") or os.getenv("DEFAULT_TENANT_ADMIN_PASSWORD") or "Admin@123"
+    # License issuance creates the tenant administrator identity, but it must
+    # not silently create a usable login or assign a shared/default password.
+    # The licensee will complete the credentials from the public license setup
+    # screen through /create-admin.
+    credentials_pending = not (password and len(password) >= 6)
     user_doc = {
         "id": str(uuid.uuid4()),
         "email": email,
         "full_name": customer.get("contact_name") or f"{company_name} Admin",
         "role": "admin",
-        "password": pwd_context.hash(default_password),
+        "password": pwd_context.hash(password) if password and len(password) >= 6 else None,
         "permissions": admin_permissions,
         "departments": [],
         "phone": customer.get("phone"),
-        "is_active": True,
-        "status": "active",
-        "approved_by": "commercial-license",
-        "approved_at": now_iso,
+        "is_active": not credentials_pending,
+        "status": "pending_admin_setup" if credentials_pending else "active",
+        "admin_credentials_pending": credentials_pending,
+        "approved_by": "commercial-license" if not credentials_pending else None,
+        "approved_at": now_iso if not credentials_pending else None,
         "created_at": now_iso,
         "company_id": company_id,
         "company_name": company_name,
