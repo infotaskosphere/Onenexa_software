@@ -5510,6 +5510,27 @@ export default function Clients() {
     XLSX.writeFile(wb, `clients_export_${format(new Date(), 'dd-MMM-yyyy')}.xlsx`);
     toast.success(`Exported ${sortedClients.length} clients to Excel`);
   }, [sortedClients]);
+  const handleExportCSV = useCallback(() => {
+    if (sortedClients.length === 0) { toast.error('No clients to export'); return; }
+    const headers = ['#', 'Company', 'Type', 'Email', 'Phone', 'City', 'State', 'Services', 'Status', 'Referred By', 'Added'];
+    const rows = sortedClients.map((c, i) => [
+      i + 1, c.company_name, c.client_type, c.email || '', c.phone || '',
+      c.city || '', c.state || '', (c.services || []).join(', '),
+      c.status || 'active', c.referred_by || '',
+      c.created_at ? format(new Date(c.created_at), 'dd-MMM-yyyy') : '',
+    ]);
+    const csv = Papa.unparse([headers, ...rows], { newline: '\r\n' });
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `clients_export_${format(new Date(), 'dd-MMM-yyyy')}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    toast.success(`Exported ${sortedClients.length} clients to CSV`);
+  }, [sortedClients]);
 
   // ── Delete with undo ────────────────────────────────────────────────────
   const handleDelete = useCallback((client) => {
@@ -5952,13 +5973,23 @@ export default function Clients() {
   // ── CSV / Excel imports ───────────────────────────────────────────────────
   const downloadTemplate = useCallback(() => {
     const headers = ['company_name','client_type','client_type_label','email','phone','birthday','address','city','state','referred_by','services','notes','status','contact_name_1','contact_designation_1','contact_email_1','contact_phone_1','contact_birthday_1','contact_din_1'];
-    const sample  = ['ABC Pvt Ltd','pvt_ltd','','abc@example.com','9876543210','2015-04-01','123 MG Road','Surat','Gujarat','John Smith','GST,ROC','Sample notes','active','Rahul Mehta','Director','rahul@example.com','9876500001','1985-06-15','DIN00001234'];
-    const csv = headers.join(',') + '\n' + sample.join(',') + '\n';
+    const sample  = ['ABC Pvt Ltd','pvt_ltd','','abc@example.com','9876543210','2015-04-01','123 MG Road','Surat','Gujarat','John Smith','GST, ROC','Sample notes','active','Rahul Mehta','Director','rahul@example.com','9876500001','1985-06-15','DIN00001234'];
+    const csv = Papa.unparse([headers, sample], { newline: '\r\n' }) + '\r\n';
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url  = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url; link.download = 'client_import_template.csv';
     document.body.appendChild(link); link.click(); document.body.removeChild(link); URL.revokeObjectURL(url);
+  }, []);
+
+  const downloadExcelTemplate = useCallback(async () => {
+    const headers = ['company_name','client_type','client_type_label','email','phone','birthday','address','city','state','referred_by','services','notes','status','contact_name_1','contact_designation_1','contact_email_1','contact_phone_1','contact_birthday_1','contact_din_1'];
+    const sample  = ['ABC Pvt Ltd','pvt_ltd','','abc@example.com','9876543210','2015-04-01','123 MG Road','Surat','Gujarat','John Smith','GST, ROC','Sample notes','active','Rahul Mehta','Director','rahul@example.com','9876500001','1985-06-15','DIN00001234'];
+    const XLSX = await getXLSX();
+    const ws = XLSX.utils.aoa_to_sheet([headers, sample]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Clients');
+    XLSX.writeFile(wb, 'client_import_template.xlsx');
   }, []);
 
   const handleImportCSV = useCallback(async (event) => {
@@ -5971,6 +6002,34 @@ export default function Clients() {
       fetchClients();
     } catch (e) { toast.error(e.response?.data?.detail || 'Import failed'); }
     finally { setImportLoading(false); if (fileInputRef.current) fileInputRef.current.value = ''; }
+  }, [fetchClients]);
+  const handleImportClientFile = useCallback(async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const name = String(file.name || '').toLowerCase();
+    if (!name.endsWith('.csv') && !name.endsWith('.xlsx') && !name.endsWith('.xls')) {
+      toast.error('Please select a CSV or Excel file (.csv, .xlsx, .xls)');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+    setImportLoading(true);
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+      const r = await api.post('/clients/import', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      const created = Number(r.data?.clients_created || 0);
+      const skipped = Number(r.data?.clients_skipped || 0);
+      const errors = Array.isArray(r.data?.errors) ? r.data.errors.length : 0;
+      toast.success(r.data?.message || `${created} clients imported`, {
+        description: `Created: ${created} · Skipped: ${skipped}${errors ? ` · Errors: ${errors}` : ''}`,
+      });
+      await fetchClients();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Import failed');
+    } finally {
+      setImportLoading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
   }, [fetchClients]);
 
   const handleImportExcel = useCallback(async (event) => {
@@ -6439,8 +6498,11 @@ export default function Clients() {
             </div>
           </div>
           <div className="flex flex-nowrap items-center gap-2">
-            <Button variant="outline" onClick={downloadTemplate} className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 !rounded-none gap-2 backdrop-blur-sm whitespace-nowrap" style={{ borderRadius: 0 }}><FileText className="h-4 w-4" /> CSV Template</Button>
-            {canEditClients && <Button variant="outline" onClick={() => fileInputRef.current?.click()} disabled={importLoading} className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 !rounded-none backdrop-blur-sm whitespace-nowrap" style={{ borderRadius: 0 }}>{importLoading ? 'Importing…' : 'Import CSV'}</Button>}
+            <div className="flex flex-nowrap items-center gap-1">
+              <Button variant="outline" onClick={downloadTemplate} className="h-9 px-3 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 !rounded-none gap-2 backdrop-blur-sm whitespace-nowrap" style={{ borderRadius: 0 }}><FileText className="h-4 w-4" /> CSV Template</Button>
+              <Button variant="outline" onClick={downloadExcelTemplate} className="h-9 px-3 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 !rounded-none gap-2 backdrop-blur-sm whitespace-nowrap" style={{ borderRadius: 0 }}><FileSpreadsheet className="h-4 w-4" /> Excel Template</Button>
+            </div>
+            {canEditClients && <Button variant="outline" onClick={() => fileInputRef.current?.click()} disabled={importLoading} className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 !rounded-none backdrop-blur-sm whitespace-nowrap" style={{ borderRadius: 0 }}>{importLoading ? 'Importing…' : 'Import Excel / CSV'}</Button>}
 
             {/* ── AI Duplicate Detector ── */}
             <Button
@@ -7411,10 +7473,14 @@ export default function Clients() {
           <div className={`h-9 px-3 flex items-center rounded-xl text-xs font-bold border whitespace-nowrap flex-shrink-0 ${isDark ? 'bg-slate-700 text-slate-300 border-slate-600' : 'bg-slate-50 text-slate-600 border-slate-200'}`}>
             {sortedClients.length} <span className="ml-1 font-normal text-slate-400">{sortedClients.length !== 1 ? 'clients' : 'client'}</span>
           </div>
-          {/* Export button */}
-          <button onClick={handleExportList} title="Export filtered list to Excel"
-            className={`h-9 w-9 flex items-center justify-center rounded-xl border transition-colors flex-shrink-0 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-300 hover:text-white hover:bg-slate-600' : 'bg-slate-50 border-slate-200 text-slate-500 hover:text-slate-700 hover:bg-slate-100'}`}>
-            <Download className="h-4 w-4" />
+          {/* Export buttons */}
+          <button onClick={handleExportList} title="Export filtered clients to Excel (.xlsx)"
+            className={`h-9 px-3 flex items-center justify-center gap-1.5 rounded-xl border transition-colors flex-shrink-0 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-300 hover:text-white hover:bg-slate-600' : 'bg-slate-50 border-slate-200 text-slate-500 hover:text-slate-700 hover:bg-slate-100'}`}>
+            <FileSpreadsheet className="h-4 w-4" /><span className="hidden xl:inline text-[11px] font-semibold">Excel</span>
+          </button>
+          <button onClick={handleExportCSV} title="Export filtered clients to CSV (.csv)"
+            className={`h-9 px-3 flex items-center justify-center gap-1.5 rounded-xl border transition-colors flex-shrink-0 ${isDark ? 'bg-slate-700 border-slate-600 text-slate-300 hover:text-white hover:bg-slate-600' : 'bg-slate-50 border-slate-200 text-slate-500 hover:text-slate-700 hover:bg-slate-100'}`}>
+            <FileText className="h-4 w-4" /><span className="hidden xl:inline text-[11px] font-semibold">CSV</span>
           </button>
           <div className={`flex items-center border rounded-xl p-0.5 gap-0.5 flex-shrink-0 ${isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
             <button onClick={() => setViewMode('board')} className={`w-8 h-8 flex items-center justify-center rounded-lg transition-all ${viewMode === 'board' ? (isDark ? 'bg-slate-500 shadow-sm text-white' : 'bg-white shadow-sm text-slate-700') : 'text-slate-400 hover:text-slate-600'}`} title="Board view"><LayoutGrid className="h-4 w-4" /></button>
@@ -7863,7 +7929,7 @@ export default function Clients() {
 
       {/* GST IMPORT DIALOG */}
       {/* HIDDEN FILE INPUTS */}
-      <input type="file" ref={fileInputRef}  accept=".csv"       onChange={handleImportCSV}   className="hidden" />
+      <input type="file" ref={fileInputRef} accept=".csv,.xlsx,.xls" onChange={handleImportClientFile} className="hidden" />
       <input type="file" ref={excelInputRef} accept=".xlsx,.xls" onChange={handleImportExcel} className="hidden" />
 
       {/* CSV PREVIEW DIALOG */}
