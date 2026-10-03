@@ -635,14 +635,38 @@ async def create_backup(request: Request, current_user: User = Depends(get_curre
     if not progress_id:
         progress_id = secrets.token_urlsafe(24)
 
-    _set_backup_progress(progress_id, owner_user_id=_s(current_user.id), phase="queued", percent=0.0, processed_documents=0, total_documents=0, eta_seconds=None, elapsed_seconds=0.0, current_collection=None, download_ready=False)
+    _set_backup_progress(
+        progress_id,
+        owner_user_id=_s(current_user.id),
+        phase="preparing",
+        percent=2.0,
+        processed_documents=0,
+        total_documents=0,
+        eta_seconds=None,
+        elapsed_seconds=0.0,
+        current_collection="Initializing application backup…",
+        download_ready=False,
+    )
     task = asyncio.create_task(_run_backup_job(progress_id, current_user, password, requested))
     _BACKUP_TASKS[progress_id] = task
-    return {"success": True, "progress_id": progress_id, "status": "queued", "message": "Backup job started."}
+    return {
+        "success": True,
+        "progress_id": progress_id,
+        "status": "running",
+        "phase": "preparing",
+        "message": "Backup job started.",
+    }
 
 
 async def _run_backup_job(progress_id: str, current_user: User, password: str, requested: list[str] | None):
     try:
+        _set_backup_progress(
+            progress_id,
+            owner_user_id=_s(current_user.id),
+            phase="preparing",
+            percent=5.0,
+            current_collection="Scanning collections…",
+        )
         output, manifest = await _build_archive(current_user, password, requested, progress_id)
         filename = f"onenexa-backup-{datetime.now().strftime('%Y%m%d-%H%M%S')}{NEW_BACKUP_EXTENSION}"
         _BACKUP_OUTPUTS[progress_id] = {
@@ -1161,30 +1185,37 @@ async def backup_create_progress(progress_id: str, current_user: User = Depends(
 
 
 async def _count_commercial_backup_documents(raw, name, company_id, company, user_ids, identities):
-    cursor = raw[name].find({})
-    count = 0
-    async for doc in cursor:
-        if name in EXCLUDED_COLLECTIONS:
-            continue
-
-        include_doc = False
+    if name in EXCLUDED_COLLECTIONS:
+        return 0
+    try:
+        collection = raw[name]
         if name == "companies":
-            include_doc = (
-                _s(doc.get("id")) == company_id
-                or (
-                    company
-                    and company.get("_id") is not None
-                    and doc.get("_id") == company.get("_id")
-                )
-            )
+            q = {"$or": [{"id": company_id}]}
+            if company and company.get("_id") is not None:
+                q["$or"].append({"_id": company["_id"]})
+            try:
+                return int(await asyncio.wait_for(collection.count_documents(q), timeout=1.0))
+            except Exception:
+                pass
         elif name == "users" or name in TENANT_COLLECTIONS:
-            include_doc = _s(doc.get("company_id")) == company_id
-        else:
-            include_doc = _linked(doc, user_ids, identities)
+            try:
+                return int(await asyncio.wait_for(collection.count_documents({"company_id": company_id}), timeout=1.0))
+            except Exception:
+                pass
 
-        if include_doc:
-            count += 1
-    return count
+        count = 0
+        cursor = collection.find(
+            {"$or": [{"company_id": {"$exists": True}}, {"user_id": {"$exists": True}}]},
+            {"company_id": 1, "user_id": 1, "_id": 1}
+        )
+        async for doc in cursor:
+            if _linked(doc, user_ids, identities):
+                count += 1
+            if count > 20000:
+                break
+        return count
+    except Exception:
+        return 0
 
 
 async def _build_archive(
@@ -1291,10 +1322,12 @@ async def _build_archive(
                         pending_lines.append(doc)
                         document_count += 1
                         processed_documents += 1
-                        if len(pending_lines) >= 500:
+                        if len(pending_lines) >= 150:
                             payload = await asyncio.to_thread(_dump_batch, pending_lines)
-                            await asyncio.to_thread(entry.write, payload)
+                            entry.write(payload)
                             pending_lines.clear()
+                            del payload
+                            await asyncio.sleep(0.005)
                         if processed_documents % 500 == 0 or processed_documents == total_documents:
                             elapsed = max(0.001, time.monotonic() - started_at)
                             ratio = (
