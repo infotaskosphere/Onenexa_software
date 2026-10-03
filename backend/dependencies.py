@@ -223,7 +223,10 @@ async def _get_saas_session_user(token: str):
         raw_db = globals().get("_raw_db", db)
         session=await raw_db.sessions.find_one({
             "token_hash": token_hash,
-            "status": "active",
+            "$or": [
+                {"status": "active"},
+                {"status": {"$exists": False}},
+            ],
             "expires_at": {"$gt": datetime.now(timezone.utc)},
         })
         if not session:
