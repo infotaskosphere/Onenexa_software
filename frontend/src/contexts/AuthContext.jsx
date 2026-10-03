@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import api from "../lib/api";
 import { autoAuthenticateAgent, resetAgentAuth } from "../lib/agentAutoAuth";
 import { isPlatformOwner as matrixIsPlatformOwner, hasEffectivePermission } from "../lib/commercialPermissionMatrix";
+import { toast } from "sonner";
 
 const AuthContext = createContext(null);
 export const useAuth = () => { const context = useContext(AuthContext); if (!context) throw new Error("useAuth must be used within an AuthProvider"); return context; };
@@ -150,8 +151,21 @@ export const AuthProvider = ({ children }) => {
     resetAgentAuth();
     window.__STOP_ACTIVITY__ = true;
     setUser(null);
-    try { window.alert("You were logged out because this account was signed in on another device or browser. Only one active login is allowed."); } catch {}
-    if (window.location.pathname !== "/login") window.location.replace("/login");
+
+    // Use the application's toast system instead of window.alert. The native
+    // alert can be suppressed during rapid navigation/auth cleanup, while the
+    // Sonner notification remains visible in the application shell.
+    try {
+      toast.error("You have been logged out", {
+        description:
+          "This account was signed in on another device or browser. Only one active login is allowed.",
+        duration: 7000,
+      });
+    } catch {}
+
+    if (window.location.pathname !== "/login") {
+      setTimeout(() => window.location.replace("/login"), 250);
+    }
   }, [user, isPlatformOwnerAccount]);
 
   useEffect(() => {
