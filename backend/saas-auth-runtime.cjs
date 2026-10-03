@@ -9,6 +9,32 @@ const BOOTSTRAP_PASSWORD = String(process.env.SAAS_BOOTSTRAP_ADMIN_PASSWORD || "
 const BOOTSTRAP_COMPANY = String(process.env.SAAS_BOOTSTRAP_COMPANY_NAME || "Taskosphere Commercial").trim();
 const BOOTSTRAP_PACKAGE = String(process.env.SAAS_BOOTSTRAP_PACKAGE_ID || "professional").trim();
 
+const PLATFORM_OWNER_EMAILS = new Set(
+  String(
+    process.env.PLATFORM_OWNER_EMAILS ||
+    process.env.PLATFORM_OWNER_EMAIL ||
+    BOOTSTRAP_EMAIL ||
+    "info.taskosphere@gmail.com,infotaskosphere@gmail.com,admin@taskosphere.com"
+  )
+    .split(",")
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean)
+);
+
+function isPlatformOwnerAccount(user) {
+  if (!user) return false;
+  const role = String(user.role || "").trim().toLowerCase();
+  const email = String(user.email || "").trim().toLowerCase();
+  return Boolean(
+    user.is_platform_owner ||
+    user.isPlatformOwner ||
+    ["platform_owner", "superadmin", "saas_admin"].includes(role) ||
+    (email && PLATFORM_OWNER_EMAILS.has(email))
+  );
+}
+
+
+
 let client = null;
 let db = null;
 let bootstrapPromise = null;
@@ -357,16 +383,21 @@ async function login(email, password) {
   // replaces all older active sessions for the same user. The authentication
   // middleware checks status=active, so those older browsers immediately lose
   // access on their next API request.
-  await database.collection("sessions").updateMany(
-    { user_id: user._id, status: "active" },
-    {
-      $set: {
-        status: "replaced",
-        replaced_at: now,
-        revoked_reason: "new_login"
+  // Platform Owner is the only identity allowed to keep multiple active
+  // sessions. Every other account gets exactly one active browser/device
+  // session at a time.
+  if (!isPlatformOwnerAccount(user)) {
+    await database.collection("sessions").updateMany(
+      { user_id: user._id, status: "active" },
+      {
+        $set: {
+          status: "replaced",
+          replaced_at: now,
+          revoked_reason: "new_login"
+        }
       }
-    }
-  );
+    );
+  }
 
   await database.collection("sessions").insertOne({
     user_id: user._id,
