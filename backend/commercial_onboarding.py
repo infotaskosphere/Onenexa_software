@@ -530,10 +530,17 @@ async def create_custom_admin(payload: Dict[str, Any]):
     # chosen credentials. Complete that existing placeholder instead of
     # attempting to create a second administrator.
     if existing_admin:
+        legacy_license_placeholder = (
+            str(existing_admin.get("approved_by") or "") == "commercial-license"
+            and str(existing_admin.get("email") or "").strip().lower()
+            == str(customer.get("email") or "").strip().lower()
+            and not existing_admin.get("admin_credentials_pending") is False
+        )
         pending_setup = bool(
             existing_admin.get("admin_credentials_pending")
             or not existing_admin.get("password")
             or existing_admin.get("status") == "pending_admin_setup"
+            or legacy_license_placeholder
         )
         if not pending_setup:
             raise HTTPException(
