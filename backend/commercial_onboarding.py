@@ -548,16 +548,22 @@ async def create_custom_admin(payload: Dict[str, Any]):
                 detail="The company administrator has already been created. Please sign in with the existing administrator account.",
             )
 
-        conflicting_email = await db.users.find_one(
-            {
-                "email": email,
-                "_id": {"$ne": existing_admin.get("_id")},
-                "status": {"$ne": "deleted"},
-            },
-            {"_id": 1},
-        )
-        if conflicting_email:
-            raise HTTPException(status_code=409, detail="An account already exists for this email address.")
+        existing_admin_id = str(existing_admin.get("id") or "").strip()
+        existing_admin_email = str(existing_admin.get("email") or "").strip().lower()
+        # The email already attached to the license-created administrator is
+        # intentionally reusable here: the licensee is completing that same
+        # administrator account, not creating another account.
+        if email != existing_admin_email:
+            conflicting_email = await db.users.find_one(
+                {
+                    "email": email,
+                    "id": {"$ne": existing_admin_id},
+                    "status": {"$ne": "deleted"},
+                },
+                {"_id": 1},
+            )
+            if conflicting_email:
+                raise HTTPException(status_code=409, detail="An account already exists for this email address.")
 
         now = _now().isoformat()
         from backend.commercial_licensee_admin import get_all_admin_permissions
@@ -578,13 +584,13 @@ async def create_custom_admin(payload: Dict[str, Any]):
             "licensed_modules": list(license_doc.get("modules") or []),
             "selected_features": license_doc.get("selected_features") or {},
         }
-        await db.users.update_one({"_id": existing_admin.get("_id")}, {"$set": updates})
+        await db.users.update_one({"id": existing_admin_id}, {"$set": updates})
         await db.commercial_license_customers.update_one(
             {"id": customer.get("id")},
             {"$set": {"email": email, "admin_name": full_name, "contact_name": full_name}},
         )
         user_doc = await db.users.find_one(
-            {"_id": existing_admin.get("_id")},
+            {"id": existing_admin_id},
             {"_id": 0, "password": 0},
         )
         user_id = str(user_doc.get("id") or "")
