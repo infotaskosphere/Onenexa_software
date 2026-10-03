@@ -79,6 +79,7 @@ export default function ReminderPopupManager() {
   const { user } = useAuth();
   const [queue, setQueue] = useState([]);
   const pollRef = useRef(null);
+  const fetchInFlightRef = useRef(false);
 
   // Ask for desktop-notification permission once per session (a no-op if
   // already granted/denied, and browsers ignore repeated prompts anyway).
