@@ -5982,7 +5982,7 @@ export default function Clients() {
     document.body.appendChild(link); link.click(); document.body.removeChild(link); URL.revokeObjectURL(url);
   }, []);
 
-event) => {
+  const handleImportCSV = useCallback(async (event) => {
     const file = event.target.files[0]; if (!file) return;
     setImportLoading(true);
     const fd = new FormData(); fd.append('file', file);
