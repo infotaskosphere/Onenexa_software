@@ -179,9 +179,11 @@ export const AuthProvider = ({ children }) => {
     if (!user) return undefined;
     if (isPlatformOwnerAccount(user)) return undefined;
     let cancelled = false;
+    let sessionCheckInFlight = false;
     const checkCurrentSession = async () => {
       const token = sessionStorage.getItem("token") || localStorage.getItem("token");
-      if (!token || cancelled || window.__TASKO_LOGOUT_IN_PROGRESS__) return;
+      if (!token || cancelled || window.__TASKO_LOGOUT_IN_PROGRESS__ || sessionCheckInFlight) return;
+      sessionCheckInFlight = true;
       try {
         const response = await api.get("/auth/me", { _silent: true, _skipReadyGate: true });
         if (cancelled || window.__TASKO_LOGOUT_IN_PROGRESS__) return;
@@ -210,11 +212,14 @@ export const AuthProvider = ({ children }) => {
         } catch {}
       } catch (error) {
         if (cancelled) return;
+      } finally {
+        sessionCheckInFlight = false;
       }
     };
     // Permission changes are security-sensitive; keep the active session
-    // synchronized quickly without requiring logout/login.
-    const interval = setInterval(checkCurrentSession, 2000);
+    // synchronized without hammering the backend every few seconds. A
+    // visibility-change check still runs immediately when the user returns.
+    const interval = setInterval(checkCurrentSession, 60 * 1000);
     const handleVisibility = () => { if (document.visibilityState === "visible") checkCurrentSession(); };
     document.addEventListener("visibilitychange", handleVisibility);
     return () => { cancelled = true; clearInterval(interval); document.removeEventListener("visibilitychange", handleVisibility); };
