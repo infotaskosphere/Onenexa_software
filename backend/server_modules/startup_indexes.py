@@ -91,6 +91,16 @@ async def initialize_startup_indexes(
         await db.tasks.create_index("created_by")
         await db.tasks.create_index("due_date")
         await db.users.create_index("email")
+        # SaaS authentication/session indexes: every authenticated API request
+        # looks up by token_hash and session replacement updates by user_id/status.
+        # Keep these indexed so session enforcement does not degrade as the
+        # sessions collection grows.
+        await db.sessions.create_index(
+            [("token_hash", 1), ("expires_at", 1)], background=True
+        )
+        await db.sessions.create_index(
+            [("user_id", 1), ("status", 1)], background=True
+        )
         await db.staff_activity.create_index("user_id")
         await db.staff_activity.create_index("timestamp")
         await db.staff_activity.create_index([("user_id", 1), ("timestamp", -1)])
