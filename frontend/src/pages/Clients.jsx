@@ -7382,7 +7382,7 @@ export default function Clients() {
                       <Button type="button" variant="outline" onClick={downloadTemplate} className="h-9 px-4 text-sm rounded-xl border-slate-200 text-slate-600">CSV Template</Button>
                     </div>
                     <div className="flex gap-2">
-                      <Button type="button" variant="outline" className="h-9 px-4 text-sm rounded-xl border-slate-200" onClick={() => fileInputRef.current?.click()}>Import CSV</Button>
+                      <Button type="button" variant="outline" className="h-9 px-4 text-sm rounded-xl border-slate-200" onClick={() => fileInputRef.current?.click()}>Import Excel / CSV</Button>
                       <Button type="submit" disabled={loading} className="h-9 px-6 text-sm rounded-xl text-white font-semibold shadow-sm" style={{ background: loading ? '#94a3b8' : 'linear-gradient(135deg, #0D3B66, #1F6FB2)' }}>{loading ? 'Saving…' : editingClient ? 'Update Client' : 'Create Client'}</Button>
                     </div>
                   </div>
