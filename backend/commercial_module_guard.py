@@ -368,6 +368,12 @@ def feature_for_path(
     if normalized == "/users" or normalized.startswith("/users/"):
         return "people_matrix", "can_view_user_page"
 
+    # Client APIs belong to the Records module. The Clients endpoints enforce
+    # their own action-level permissions, so the commercial guard only needs
+    # to establish that the Records module itself is licensed.
+    if normalized == "/clients" or normalized.startswith("/clients/"):
+        return "records", "can_access_records"
+
     if method == "GET":
         if normalized in ("/clients", "/clients/search"):
             return None
