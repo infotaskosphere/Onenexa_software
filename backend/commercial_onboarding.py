@@ -621,22 +621,34 @@ async def delete_commercial_company(license_id: str, current_user: User = Depend
     if remaining == 0 and customer_id:
         await db.commercial_license_customers.delete_one({"id": customer_id})
         await db.companies.delete_one({"id": customer_id, "source": "commercial-license"})
-        # Soft-delete (rather than hard-delete) so historical records — invoices,
-        # audit logs — keep resolving to a real user document. But the email
-        # must be freed up here, otherwise it stays "taken" forever and blocks
-        # re-registering a brand-new admin/license under the same email later
-        # (the create-admin/create-staff conflict checks match on email).
-        deleted_at = _now().isoformat()
-        stale_users = await db.users.find(
-            {"company_id": customer_id, "email": {"$nin": owner_emails}}, {"_id": 0, "id": 1, "email": 1}
-        ).to_list(1000)
-        for stale_user in stale_users:
-            original_email = stale_user.get("email")
-            update_fields = {"is_active": False, "status": "deleted", "commercial_deleted_at": deleted_at}
-            if original_email:
-                update_fields["original_email"] = original_email
-                update_fields["email"] = f"deleted+{uuid.uuid4().hex[:8]}+{original_email}"
-            await db.users.update_one({"id": stale_user["id"]}, {"$set": update_fields})
+
+        # Commercial tenant users are owned by the customer/license. When the
+        # last license is removed, remove those MongoDB user documents too.
+        # Platform-owner and internal control-plane identities are protected.
+        customer_user_filter = {
+            "$and": [
+                {
+                    "$or": [
+                        {"company_id": customer_id},
+                        {"commercial_customer_id": customer_id},
+                    ]
+                },
+                {"email": {"$nin": owner_emails}},
+                {"is_internal_commercial_admin": {"$ne": True}},
+                {"role": {"$ne": "superadmin"}},
+            ]
+        }
+        await db.users.delete_many(customer_user_filter)
+
+        # Also remove any legacy commercial-company records that may still
+        # reference this customer through an alternate company identifier.
+        await db.companies.delete_many(
+            {
+                "source": "commercial-license",
+                "commercial_customer_id": customer_id,
+            }
+        )
+
     return {"deleted": True, "license_id": license_id, "company_name": (customer or {}).get("company_name"), "remaining_licenses": remaining, "historical_invoices_preserved": True}
 
 
