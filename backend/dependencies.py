@@ -221,7 +221,11 @@ async def _get_saas_session_user(token: str):
         import hashlib
         token_hash=hashlib.sha256(token.encode("utf-8")).hexdigest()
         raw_db = globals().get("_raw_db", db)
-        session=await raw_db.sessions.find_one({"token_hash": token_hash, "expires_at": {"$gt": datetime.now(timezone.utc)}})
+        session=await raw_db.sessions.find_one({
+            "token_hash": token_hash,
+            "status": "active",
+            "expires_at": {"$gt": datetime.now(timezone.utc)},
+        })
         if not session:
             return None
         user_id=session.get("user_id")
