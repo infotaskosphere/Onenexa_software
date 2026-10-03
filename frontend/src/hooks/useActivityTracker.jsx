@@ -16,6 +16,7 @@ export const useActivityTracker = (enabled = true) => {
   const activeSeconds = useRef(0);
   const isActive = useRef(true);
   const intervalRef = useRef(null);
+  const syncInFlightRef = useRef(false);
 
   const IDLE_THRESHOLD = 60000; // 1 min
   const SYNC_INTERVAL = 30000;  // 30 sec
@@ -81,8 +82,9 @@ export const useActivityTracker = (enabled = true) => {
       return;
     }
 
-    if (activeSeconds.current <= 0) return;
+    if (activeSeconds.current <= 0 || syncInFlightRef.current) return;
 
+    syncInFlightRef.current = true;
     try {
       const currentPage = window.location.pathname;
       const pageName = getPageName(currentPage);
@@ -103,6 +105,8 @@ export const useActivityTracker = (enabled = true) => {
       if (error.response?.status !== 401 && error.response?.status !== 403) {
         console.error('Activity sync error:', error);
       }
+    } finally {
+      syncInFlightRef.current = false;
     }
   }, []);
 
