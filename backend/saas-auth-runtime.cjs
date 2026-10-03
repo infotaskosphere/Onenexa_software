@@ -352,7 +352,10 @@ async function findSession(token) {
   const database = await getDb();
   const session = await database.collection("sessions").findOne({
     token_hash: hashToken(token),
-    status: "active",
+    $or: [
+      { status: "active" },
+      { status: { $exists: false } }
+    ],
     expires_at: { $gt: new Date() }
   });
   if (!session) return null;
@@ -388,7 +391,13 @@ async function login(email, password) {
   // session at a time.
   if (!isPlatformOwnerAccount(user)) {
     await database.collection("sessions").updateMany(
-      { user_id: user._id, status: "active" },
+      {
+        user_id: user._id,
+        $or: [
+          { status: "active" },
+          { status: { $exists: false } }
+        ]
+      },
       {
         $set: {
           status: "replaced",
