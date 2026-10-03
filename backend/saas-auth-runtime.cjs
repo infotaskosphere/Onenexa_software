@@ -324,7 +324,11 @@ async function ensureBootstrap() {
 async function findSession(token) {
   if (!token) return null;
   const database = await getDb();
-  const session = await database.collection("sessions").findOne({ token_hash: hashToken(token), expires_at: { $gt: new Date() } });
+  const session = await database.collection("sessions").findOne({
+    token_hash: hashToken(token),
+    status: "active",
+    expires_at: { $gt: new Date() }
+  });
   if (!session) return null;
   const user = await database.collection("users").findOne({ _id: session.user_id, status: "active" });
   if (!user) return null;
@@ -348,10 +352,27 @@ async function login(email, password) {
 
   const token = crypto.randomBytes(32).toString("base64url");
   const now = new Date();
+
+  // Single-login policy: every new login for a non-platform-owner account
+  // replaces all older active sessions for the same user. The authentication
+  // middleware checks status=active, so those older browsers immediately lose
+  // access on their next API request.
+  await database.collection("sessions").updateMany(
+    { user_id: user._id, status: "active" },
+    {
+      $set: {
+        status: "replaced",
+        replaced_at: now,
+        revoked_reason: "new_login"
+      }
+    }
+  );
+
   await database.collection("sessions").insertOne({
     user_id: user._id,
     company_id: user.company_id,
     token_hash: hashToken(token),
+    status: "active",
     expires_at: new Date(now.getTime() + SESSION_TTL_DAYS * 86400000),
     created_at: now,
     last_seen_at: now
@@ -383,8 +404,24 @@ function attach(app) {
     if (["/api/health", "/api/auth/login"].includes(req.path)) return next();
 
     try {
-      const session = await findSession(bearerToken(req));
-      if (!session) return sendJson(res, 401, { detail: "Authentication required" });
+      const suppliedToken = bearerToken(req);
+      const session = await findSession(suppliedToken);
+      if (!session) {
+        // Distinguish a replaced session from a random/expired token so the
+        // frontend can coordinate a forced logout without silently treating
+        // the account as invalid.
+        if (suppliedToken) {
+          const database = await getDb();
+          const replaced = await database.collection("sessions").findOne({
+            token_hash: hashToken(suppliedToken),
+            status: "replaced"
+          });
+          if (replaced) {
+            return sendJson(res, 401, { detail: "SESSION_REPLACED" });
+          }
+        }
+        return sendJson(res, 401, { detail: "Authentication required" });
+      }
       req.saas = session;
       return next();
     } catch (error) {
