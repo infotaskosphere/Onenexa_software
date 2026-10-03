@@ -513,27 +513,90 @@ async def lookup_custom_license(payload: Dict[str, Any]):
 @router.post("/create-admin")
 async def create_custom_admin(payload: Dict[str, Any]):
     customer, license_doc = await _find_customer_for_license(payload.get("license_key"), payload.get("company_name"))
-    existing_admin = await db.users.find_one({"company_id": customer.get("id"), "role": "admin"}, {"_id": 1})
-    if existing_admin:
-        raise HTTPException(status_code=409, detail="The company administrator has already been created. Please sign in with the existing administrator account.")
     full_name = str(payload.get("full_name") or "").strip()
     email = str(payload.get("email") or "").strip().lower()
     password = str(payload.get("password") or "")
     if not full_name or not email or len(password) < 8:
         raise HTTPException(status_code=400, detail="Full name, email and a password of at least 8 characters are required.")
+
+    company = await _ensure_company_master(customer, license_doc)
+    company_id = str(company.get("id") or customer.get("id") or "")
+    existing_admin = await db.users.find_one(
+        {"company_id": company_id, "role": "admin"},
+        {"_id": 0},
+    )
+
+    # A license creates the administrator identity before the customer has
+    # chosen credentials. Complete that existing placeholder instead of
+    # attempting to create a second administrator.
+    if existing_admin:
+        pending_setup = bool(
+            existing_admin.get("admin_credentials_pending")
+            or not existing_admin.get("password")
+            or existing_admin.get("status") == "pending_admin_setup"
+        )
+        if not pending_setup:
+            raise HTTPException(
+                status_code=409,
+                detail="The company administrator has already been created. Please sign in with the existing administrator account.",
+            )
+
+        conflicting_email = await db.users.find_one(
+            {
+                "email": email,
+                "_id": {"$ne": existing_admin.get("_id")},
+                "status": {"$ne": "deleted"},
+            },
+            {"_id": 1},
+        )
+        if conflicting_email:
+            raise HTTPException(status_code=409, detail="An account already exists for this email address.")
+
+        now = _now().isoformat()
+        from backend.commercial_licensee_admin import get_all_admin_permissions
+        permissions = get_all_admin_permissions(license_doc)
+        updates = {
+            "email": email,
+            "full_name": full_name,
+            "password": pwd_context.hash(password),
+            "permissions": permissions,
+            "phone": customer.get("phone"),
+            "is_active": True,
+            "status": "active",
+            "admin_credentials_pending": False,
+            "approved_by": "commercial-license",
+            "approved_at": now,
+            "license_id": license_doc.get("id"),
+            "license_key": license_doc.get("license_key"),
+            "licensed_modules": list(license_doc.get("modules") or []),
+            "selected_features": license_doc.get("selected_features") or {},
+        }
+        await db.users.update_one({"_id": existing_admin.get("_id")}, {"$set": updates})
+        await db.commercial_license_customers.update_one(
+            {"id": customer.get("id")},
+            {"$set": {"email": email, "admin_name": full_name, "contact_name": full_name}},
+        )
+        user_doc = await db.users.find_one(
+            {"_id": existing_admin.get("_id")},
+            {"_id": 0, "password": 0},
+        )
+        user_id = str(user_doc.get("id") or "")
+        return {"access_token": create_access_token({"sub": user_id}), "token_type": "bearer", "user": user_doc, "company": company, "license": _public_license(license_doc)}
+
     if await db.users.find_one({"email": email, "status": {"$ne": "deleted"}}):
         raise HTTPException(status_code=409, detail="An account already exists for this email address.")
-    company = await _ensure_company_master(customer, license_doc)
+
     now = _now().isoformat()
     user_id = str(uuid.uuid4())
     from backend.commercial_licensee_admin import get_all_admin_permissions
-    permissions = get_all_admin_permissions()
+    permissions = get_all_admin_permissions(license_doc)
     user_doc = {
         "id": user_id, "email": email, "full_name": full_name, "role": "admin",
         "password": pwd_context.hash(password), "permissions": permissions, "departments": [],
         "phone": customer.get("phone"), "is_active": True, "status": "active",
+        "admin_credentials_pending": False,
         "approved_by": "commercial-license", "approved_at": now, "created_at": now,
-        "company_id": company.get("id"), "company_name": customer.get("company_name"),
+        "company_id": company_id, "company_name": customer.get("company_name"),
         "commercial_customer_id": str(customer.get("id") or ""),
         "license_id": license_doc.get("id"), "license_key": license_doc.get("license_key"),
         "licensed_modules": list(license_doc.get("modules") or []),
