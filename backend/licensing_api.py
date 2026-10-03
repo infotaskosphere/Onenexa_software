@@ -142,8 +142,43 @@ async def list_license_state() -> Dict[str, Any]:
     packages = await db.commercial_license_packages.find({"active": True}, {"_id": 0}).to_list(100)
     if not packages:
         packages = [dict(p) for p in DEFAULT_LICENSE_PACKAGES]
-    customers = await db.commercial_license_customers.find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+
+    # The customer registry is derived from real commercial license ownership.
+    # Do not expose stale/orphan customer documents in the Master Console.
+    # A customer with no remaining license is no longer a commercial tenant.
     licenses = await db.commercial_licenses.find({}, {"_id": 0}).sort("issued_at", -1).to_list(1000)
+    licensed_customer_ids = sorted(
+        {
+            str(license_doc.get("customer_id") or "").strip()
+            for license_doc in licenses
+            if str(license_doc.get("customer_id") or "").strip()
+        }
+    )
+
+    if licensed_customer_ids:
+        # Hard-clean orphan commercial customer/company records left by older
+        # deletion flows. This is safe because every retained customer still
+        # has at least one commercial license document.
+        await db.commercial_license_customers.delete_many(
+            {"id": {"$nin": licensed_customer_ids}}
+        )
+        await db.companies.delete_many(
+            {
+                "source": "commercial-license",
+                "commercial_customer_id": {"$nin": licensed_customer_ids},
+            }
+        )
+        customers = await db.commercial_license_customers.find(
+            {"id": {"$in": licensed_customer_ids}},
+            {"_id": 0},
+        ).sort("created_at", -1).to_list(1000)
+    else:
+        # No commercial licenses means there must be no commercial customer
+        # registry records left behind.
+        await db.commercial_license_customers.delete_many({})
+        await db.companies.delete_many({"source": "commercial-license"})
+        customers = []
+
     return {"packages": packages, "customers": customers, "licenses": licenses}
 
 
