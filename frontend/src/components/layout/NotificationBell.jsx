@@ -150,11 +150,14 @@ export const NotificationBell = () => {
   const navigate = useNavigate();
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount]     = useState(0);
+  const fetchInFlightRef = React.useRef(false);
   const [open, setOpen]                   = useState(false);
   const [loading, setLoading]             = useState(false);
 
   // ── Fetch ──────────────────────────────────────────────────────────────────
   const fetchNotifications = useCallback(async () => {
+    if (fetchInFlightRef.current) return;
+    fetchInFlightRef.current = true;
     try {
       const { data } = await api.get("/notifications");
       // The API can answer with [] , { items: [] } or — when the endpoint is
@@ -171,6 +174,8 @@ export const NotificationBell = () => {
       setUnreadCount(list.filter((n) => !n.is_read).length);
     } catch (err) {
       console.error("Failed to fetch notifications:", err);
+    } finally {
+      fetchInFlightRef.current = false;
     }
   }, []);
 
