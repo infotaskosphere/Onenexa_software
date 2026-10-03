@@ -386,14 +386,53 @@ def _company_query(company_id: str) -> dict:
 
 
 async def _tenant_context(user: User):
+    is_owner = is_platform_owner(user)
     company_id = _s(getattr(user, "company_id", None))
+
+    # Platform Owner is intentionally outside the commercial customer-tenant
+    # model. Give the owner a deterministic control-plane scope even when the
+    # authentication record has no company_id, so owner backup/restore can work
+    # without ever falling into a licensee tenant.
+    if is_owner and not company_id:
+        company_id = _s(
+            os.getenv("PLATFORM_OWNER_BACKUP_SCOPE_ID")
+            or "platform-owner-48fe785fdd75127f"
+        )
+
     if not company_id:
-        raise HTTPException(status_code=403, detail="Your account is not attached to a customer company.")
+        raise HTTPException(
+            status_code=403,
+            detail="Your account is not attached to a customer company.",
+        )
+
     raw = _raw_db()
     company = await raw.companies.find_one({"id": company_id})
     if not company and ObjectId.is_valid(company_id):
         company = await raw.companies.find_one({"_id": ObjectId(company_id)})
-    users = await raw.users.find(_company_query(company_id), {"_id": 1, "id": 1}).to_list(100000)
+
+    if is_owner:
+        # Include the owner identity even when the control-plane company record
+        # has not been created, while avoiding all commercial customer users.
+        owner_user_id = _s(getattr(user, "id", None))
+        owner_user_query = {
+            "$or": [
+                _company_query(company_id),
+                {"id": owner_user_id},
+                {"_id": ObjectId(owner_user_id)}
+                if ObjectId.is_valid(owner_user_id)
+                else {"id": "__never__"},
+            ]
+        }
+        users = await raw.users.find(
+            owner_user_query,
+            {"_id": 1, "id": 1},
+        ).to_list(100000)
+    else:
+        users = await raw.users.find(
+            _company_query(company_id),
+            {"_id": 1, "id": 1},
+        ).to_list(100000)
+
     user_ids = {_s(u.get("id")) for u in users if u.get("id")}
     user_ids.update(_s(u.get("_id")) for u in users if u.get("_id") is not None)
     identities = {field: {_s(getattr(user, field, None))} for field in IDENTITY_FIELDS}
