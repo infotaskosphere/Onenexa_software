@@ -5982,17 +5982,7 @@ export default function Clients() {
     document.body.appendChild(link); link.click(); document.body.removeChild(link); URL.revokeObjectURL(url);
   }, []);
 
-  const downloadExcelTemplate = useCallback(async () => {
-    const headers = ['company_name','client_type','client_type_label','email','phone','birthday','address','city','state','referred_by','services','notes','status','contact_name_1','contact_designation_1','contact_email_1','contact_phone_1','contact_birthday_1','contact_din_1'];
-    const sample  = ['ABC Pvt Ltd','pvt_ltd','','abc@example.com','9876543210','2015-04-01','123 MG Road','Surat','Gujarat','John Smith','GST, ROC','Sample notes','active','Rahul Mehta','Director','rahul@example.com','9876500001','1985-06-15','DIN00001234'];
-    const XLSX = await getXLSX();
-    const ws = XLSX.utils.aoa_to_sheet([headers, sample]);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Clients');
-    XLSX.writeFile(wb, 'client_import_template.xlsx');
-  }, []);
-
-  const handleImportCSV = useCallback(async (event) => {
+event) => {
     const file = event.target.files[0]; if (!file) return;
     setImportLoading(true);
     const fd = new FormData(); fd.append('file', file);
@@ -6498,10 +6488,7 @@ export default function Clients() {
             </div>
           </div>
           <div className="flex flex-nowrap items-center gap-2">
-            <div className="flex flex-nowrap items-center gap-1">
-              <Button variant="outline" onClick={downloadTemplate} className="h-9 px-3 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 !rounded-none gap-2 backdrop-blur-sm whitespace-nowrap" style={{ borderRadius: 0 }}><FileText className="h-4 w-4" /> CSV Template</Button>
-              <Button variant="outline" onClick={downloadExcelTemplate} className="h-9 px-3 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 !rounded-none gap-2 backdrop-blur-sm whitespace-nowrap" style={{ borderRadius: 0 }}><FileSpreadsheet className="h-4 w-4" /> Excel Template</Button>
-            </div>
+            <Button variant="outline" onClick={downloadTemplate} className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 !rounded-none gap-2 backdrop-blur-sm whitespace-nowrap" style={{ borderRadius: 0 }}><FileText className="h-4 w-4" /> CSV Template</Button>
             {canEditClients && <Button variant="outline" onClick={() => fileInputRef.current?.click()} disabled={importLoading} className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 !rounded-none backdrop-blur-sm whitespace-nowrap" style={{ borderRadius: 0 }}>{importLoading ? 'Importing…' : 'Import Excel / CSV'}</Button>}
 
             {/* ── AI Duplicate Detector ── */}
