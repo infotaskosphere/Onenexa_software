@@ -168,6 +168,17 @@ async def list_license_state() -> Dict[str, Any]:
                 "commercial_customer_id": {"$nin": licensed_customer_ids},
             }
         )
+        # Permanently remove legacy soft-deleted commercial users belonging to
+        # customer tenants that no longer have any license. This cleans records
+        # created by the previous soft-delete implementation without touching
+        # active users or platform-owner/internal accounts.
+        await db.users.delete_many(
+            {
+                "status": "deleted",
+                "commercial_customer_id": {"$nin": licensed_customer_ids},
+                "is_internal_commercial_admin": {"$ne": True},
+            }
+        )
         customers = await db.commercial_license_customers.find(
             {"id": {"$in": licensed_customer_ids}},
             {"_id": 0},
