@@ -108,7 +108,11 @@ MODULE_COLLECTION_MAP = {
 
 
 def _is_admin(user: User) -> bool:
-    return str(getattr(user, "role", "")).lower() == "admin" or is_platform_owner(user)
+    role = getattr(user, "role", "")
+    # User.role is a UserRole enum in the canonical model. Use .value when
+    # available so UserRole.admin is treated exactly like the literal "admin".
+    role_value = getattr(role, "value", role)
+    return str(role_value).lower() == "admin" or is_platform_owner(user)
 
 
 def _require_backup_access(user: User) -> None:
