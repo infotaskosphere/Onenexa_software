@@ -181,6 +181,38 @@ def _normalize_permissions(d):
     d["permissions"]=normalized
     return d
 
+async def _touch_saas_session_if_due(raw_db, session):
+    """Refresh SaaS session activity at most once per minute."""
+    try:
+        session_id = session.get("_id")
+        if session_id is None:
+            return
+        last_seen = session.get("last_seen_at")
+        if isinstance(last_seen, str):
+            try:
+                last_seen = datetime.fromisoformat(last_seen.replace("Z", "+00:00"))
+            except Exception:
+                last_seen = None
+        now = datetime.now(timezone.utc)
+        if (
+            isinstance(last_seen, datetime)
+            and last_seen.tzinfo is None
+        ):
+            last_seen = last_seen.replace(tzinfo=timezone.utc)
+        if (
+            isinstance(last_seen, datetime)
+            and (now - last_seen).total_seconds() < 60
+        ):
+            return
+        await raw_db.sessions.update_one(
+            {"_id": session_id},
+            {"$set": {"last_seen_at": now}},
+        )
+        session["last_seen_at"] = now
+    except Exception:
+        logger.warning("SaaS session heartbeat update skipped.", exc_info=True)
+
+
 async def _get_saas_session_user(token: str):
     """Resolve the opaque SaaS session token created by saas-auth-runtime.cjs."""
     if not token or not MONGO_URL:
@@ -209,7 +241,7 @@ async def _get_saas_session_user(token: str):
         # licensed customer users). Mirrors the same exemption already
         # applied in _create_saas_session() at login time.
         if is_platform_owner(user):
-            await raw_db.sessions.update_one({"_id": session.get("_id")}, {"$set": {"last_seen_at": datetime.now(timezone.utc)}})
+            await _touch_saas_session_if_due(raw_db, session)
             user_data={k:v for k,v in user.items() if k != "_id"}
             user_data["id"]=str(user.get("_id") or user.get("id"))
             user_data["company_id"]=None
@@ -236,7 +268,7 @@ async def _get_saas_session_user(token: str):
         if expires_at:
             if expires_at.tzinfo is None: expires_at=expires_at.replace(tzinfo=timezone.utc)
             if expires_at <= datetime.now(timezone.utc): return None
-        await raw_db.sessions.update_one({"_id": session.get("_id")}, {"$set": {"last_seen_at": datetime.now(timezone.utc)}})
+        await _touch_saas_session_if_due(raw_db, session)
         user_data={k:v for k,v in user.items() if k != "_id"}
         user_data["id"]=str(user.get("_id") or user.get("id"))
         user_data["company_id"]=str(company_id)
