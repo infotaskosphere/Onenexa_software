@@ -593,10 +593,28 @@ async def delete_platform_company_user(
         raise HTTPException(status_code=404, detail="Company user not found.")
 
     now = _now()
-    update = {"status": "deleted", "is_active": False, "deleted_at": now, "deleted_by": current_user.id}
-    await db.users.update_one({"id": user_id}, {"$set": update})
-    await create_audit_log(current_user, "DELETE_PLATFORM_COMPANY_USER", "company_master_users", user_id, old_data=_clean_user(existing), new_data=update)
-    return {"message": "User moved to Deleted Users", "user_id": user_id, "status": "deleted"}
+
+    # Hard-delete the MongoDB user. Deleted users are no longer retained in a
+    # soft-deleted state and therefore cannot consume seats or remain in the
+    # Deleted Users registry. Platform/internal accounts are protected above.
+    hard_delete_audit = {
+        "deleted_at": now,
+        "deleted_by": current_user.id,
+        "hard_deleted": True,
+    }
+    await create_audit_log(
+        current_user,
+        "DELETE_PLATFORM_COMPANY_USER",
+        "company_master_users",
+        user_id,
+        old_data=_clean_user(existing),
+        new_data=hard_delete_audit,
+    )
+    deleted_result = await db.users.delete_one({"id": user_id})
+    if deleted_result.deleted_count != 1:
+        raise HTTPException(status_code=409, detail="User could not be deleted from MongoDB.")
+
+    return {"message": "User permanently deleted", "user_id": user_id, "status": "deleted"}
 
 
 @router.post("/users", status_code=201)
@@ -793,10 +811,30 @@ async def delete_company_user(user_id: str, current_user: User = Depends(get_cur
     if str(existing.get("email") or "").strip().lower() in platform_owner_emails() or existing.get("is_internal_commercial_admin") is True:
         raise HTTPException(status_code=403, detail="Platform/internal accounts cannot be deleted from a customer tenant.")
     now = _now()
-    update = {"status": "deleted", "is_active": False, "deleted_at": now, "deleted_by": current_user.id}
-    await db.users.update_one({"id": user_id, "company_id": company_id}, {"$set": update})
-    await create_audit_log(current_user, "DELETE_COMPANY_USER", "company_master_users", user_id, old_data=_clean_user(existing), new_data=update)
-    return {"message": "User moved to Deleted Users", "user_id": user_id, "status": "deleted"}
+
+    # Hard-delete the MongoDB user instead of moving it to a soft-deleted
+    # registry. Historical audit logs keep the event without retaining the
+    # login/user document itself.
+    hard_delete_audit = {
+        "deleted_at": now,
+        "deleted_by": current_user.id,
+        "hard_deleted": True,
+    }
+    await create_audit_log(
+        current_user,
+        "DELETE_COMPANY_USER",
+        "company_master_users",
+        user_id,
+        old_data=_clean_user(existing),
+        new_data=hard_delete_audit,
+    )
+    deleted_result = await db.users.delete_one(
+        {"id": user_id, "company_id": company_id}
+    )
+    if deleted_result.deleted_count != 1:
+        raise HTTPException(status_code=409, detail="User could not be deleted from MongoDB.")
+
+    return {"message": "User permanently deleted", "user_id": user_id, "status": "deleted"}
 
 @router.get("/users/deleted")
 async def list_deleted_company_users(current_user: User = Depends(get_current_user)):
