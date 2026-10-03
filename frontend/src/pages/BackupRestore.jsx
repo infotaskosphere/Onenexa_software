@@ -1,8 +1,26 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Archive, AlertTriangle, Database, Download, HardDriveDownload, History, LockKeyhole, RefreshCw, RotateCcw, ShieldCheck, Trash2, Upload, Users } from 'lucide-react';
+import {
+  Archive,
+  AlertTriangle,
+  Database,
+  Download,
+  HardDriveDownload,
+  History,
+  LockKeyhole,
+  Maximize2,
+  Minimize2,
+  RefreshCw,
+  RotateCcw,
+  ShieldCheck,
+  Trash2,
+  Upload,
+  Users,
+  X,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import api, { BASE_URL, getToken } from '@/lib/api';
 import { useDark } from '@/hooks/useDark';
+import { useBackupManager } from '@/contexts/BackupContext';
 
 const MODULE_LABELS = {
   taskosphere: 'Taskosphere',
@@ -24,7 +42,59 @@ function downloadBlob(blob, filename) {
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  URL.revokeObjectURL(url);
+}
+
+function normalizeBackupDetail(detail) {
+  if (typeof detail === 'string' && detail.trim()) return detail;
+
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map((item) => {
+        if (typeof item === 'string') return item;
+        if (!item || typeof item !== 'object') return String(item);
+        const field = Array.isArray(item.loc) && item.loc.length
+          ? String(item.loc[item.loc.length - 1])
+          : 'field';
+        return item.msg
+          ? field + ': ' + item.msg
+          : item.message || JSON.stringify(item);
+      })
+      .filter(Boolean);
+
+    if (messages.length) return messages.join(' · ');
+  }
+
+  if (detail && typeof detail === 'object') {
+    return detail.msg || detail.message || JSON.stringify(detail);
+  }
+
+  return '';
+}
+
+async function getBackupErrorMessage(error) {
+  const responseData = error?.response?.data;
+
+  if (typeof Blob !== 'undefined' && responseData instanceof Blob) {
+    try {
+      const raw = await responseData.text();
+      const parsed = JSON.parse(raw);
+      return (
+        normalizeBackupDetail(parsed?.detail) ||
+        normalizeBackupDetail(parsed?.message) ||
+        'Backup failed'
+      );
+    } catch {
+      return error?.message || 'Backup failed';
+    }
+  }
+
+  return (
+    normalizeBackupDetail(responseData?.detail) ||
+    normalizeBackupDetail(responseData?.message) ||
+    error?.message ||
+    'Backup failed'
+  );
 }
 
 
@@ -53,24 +123,47 @@ function formatBytes(value) {
   return amount.toFixed(index === 0 ? 0 : amount >= 100 ? 0 : amount >= 10 ? 1 : 2) + ' ' + units[index];
 }
 
-function normalizeBackupDetail(detail) {
-  if (typeof detail === 'string' && detail.trim()) return detail;
-  if (Array.isArray(detail)) {
-    return detail.map((item) => {
-      if (typeof item === 'string') return item;
-      if (!item || typeof item !== 'object') return String(item);
-      const field = Array.isArray(item.loc) && item.loc.length
-        ? String(item.loc[item.loc.length - 1])
-        : 'field';
-      return item.msg
-        ? field + ': ' + item.msg
-        : item.message || JSON.stringify(item);
-    }).filter(Boolean).join(' · ');
+async function readResponseWithProgress(response, onProgress) {
+  const total = Number(response.headers.get('content-length')) || 0;
+  if (!response.body || !response.body.getReader) {
+    const blob = await response.blob();
+    onProgress({ loaded: blob.size, total: total || blob.size, percent: 100, etaSeconds: 0 });
+    return blob;
   }
-  if (detail && typeof detail === 'object') {
-    return detail.msg || detail.message || JSON.stringify(detail);
+
+  const reader = response.body.getReader();
+  const chunks = [];
+  let loaded = 0;
+  const started = performance.now();
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    loaded += value.byteLength;
+
+    const elapsed = Math.max(0.001, (performance.now() - started) / 1000);
+    const speed = loaded / elapsed;
+    const percent = total > 0 ? Math.min(100, (loaded / total) * 100) : 0;
+    const remaining = total > 0 ? Math.max(0, total - loaded) : 0;
+    onProgress({
+      loaded,
+      total,
+      percent,
+      etaSeconds: speed > 0 && total > 0 ? remaining / speed : null,
+    });
   }
-  return '';
+
+  const blob = new Blob(chunks, {
+    type: response.headers.get('content-type') || 'application/octet-stream',
+  });
+  onProgress({
+    loaded,
+    total: total || loaded,
+    percent: 100,
+    etaSeconds: 0,
+  });
+  return blob;
 }
 
 const BACKUP_RETRY_STATUSES = new Set([0, 408, 425, 429, 500, 502, 503, 504]);
@@ -176,15 +269,16 @@ export default function BackupRestore() {
   const [activeTab, setActiveTab] = useState('backup');
   const [history, setHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
-  const [transfer, setTransfer] = useState({
-    active: false,
-    phase: '',
-    percent: 0,
-    etaSeconds: null,
-    processed: 0,
-    total: 0,
-    detail: '',
-  });
+  const {
+    transfer,
+    patchTransfer,
+    minimize,
+    maximize,
+    toggleMinimize,
+    dismiss,
+    cancelBackup,
+    startBackup,
+  } = useBackupManager();
 
   const loadInfo = async () => {
     setLoadingInfo(true);
@@ -197,6 +291,11 @@ export default function BackupRestore() {
       setLoadingInfo(false);
     }
   };
+
+  useEffect(() => {
+    loadInfo();
+    void loadHistory();
+  }, []);
 
   const loadHistory = async () => {
     setHistoryLoading(true);
@@ -218,62 +317,50 @@ export default function BackupRestore() {
           const loaded = Number(event.loaded || 0);
           const total = Number(event.total || record.file_size_bytes || 0);
           const percent = total > 0 ? Math.min(100, (loaded / total) * 100) : 0;
-          setTransfer((current) => ({
-            ...current,
+          patchTransfer({
             active: percent < 100,
+            visible: true,
+            isMinimized: false,
             phase: 'Downloading stored backup…',
             percent,
             processed: loaded,
             total,
             detail: total ? formatBytes(loaded) + ' / ' + formatBytes(total) : formatBytes(loaded) + ' downloaded',
-          }));
+          });
         },
       });
-      const filename = record.filename || ('onenexa-backup-' + record.id + '.onenexa');
-      downloadBlob(response.data, filename);
-      setTransfer({
+      downloadBlob(response.data, record.filename || ('onenexa-backup-' + record.id + '.onenexa'));
+      patchTransfer({
         active: false,
+        visible: true,
         phase: 'Complete',
         percent: 100,
         etaSeconds: 0,
-        processed: record.file_size_bytes || response.data?.size || 0,
-        total: record.file_size_bytes || response.data?.size || 0,
+        processed: record.file_size_bytes || 0,
+        total: record.file_size_bytes || 0,
         detail: 'Historical backup downloaded successfully.',
       });
       toast.success('Historical backup downloaded.');
     } catch (error) {
-      setTransfer((current) => ({
-        ...current,
-        active: false,
-        phase: 'Failed',
-        etaSeconds: null,
-      }));
-      toast.error(normalizeBackupDetail(error?.response?.data?.detail) || error?.message || 'Unable to download historical backup');
+      patchTransfer({ active: false, phase: 'Failed', etaSeconds: null });
+      toast.error(await getBackupErrorMessage(error));
     }
   };
 
   const deleteHistoryBackup = async (record) => {
     if (!record?.id) return;
-    const confirmed = window.confirm(
-      'Delete this backup permanently? This removes the history record and the stored backup data. This cannot be undone.'
-    );
-    if (!confirmed) return;
+    if (!window.confirm('Delete this backup permanently? This removes the history record and the stored backup data. This cannot be undone.')) return;
     setBusy(true);
     try {
       await api.delete('/app-backup/history/' + encodeURIComponent(record.id));
       setHistory((current) => current.filter((item) => item.id !== record.id));
       toast.success('Backup history record and stored backup data deleted.');
     } catch (error) {
-      toast.error(normalizeBackupDetail(error?.response?.data?.detail) || error?.message || 'Unable to delete backup history record');
+      toast.error(await getBackupErrorMessage(error));
     } finally {
       setBusy(false);
     }
   };
-
-  useEffect(() => {
-    loadInfo();
-    void loadHistory();
-  }, []);
 
   const moduleCollections = info?.modules?.[selectedModule] || [];
   const customSelection = useMemo(() => {
@@ -298,100 +385,35 @@ export default function BackupRestore() {
       return;
     }
 
-    const progressId =
-      (typeof crypto !== 'undefined' && crypto.randomUUID)
-        ? crypto.randomUUID()
-        : Date.now() + '-' + Math.random().toString(36).slice(2);
-
     setBusy(true);
-    setTransfer({ active: true, phase: 'Preparing backup…', percent: 0, etaSeconds: null, processed: 0, total: 0, detail: 'Starting background backup job…' });
-    let stopped = false;
-    let pollTimer = null;
-
     try {
-      const form = new FormData();
-      form.append('password', password);
-      if (mode !== 'full') form.append('collections', customSelection.join(','));
-
-      const response = await fetch(BASE_URL + '/app-backup/create', {
-        method: 'POST',
-        headers: { Authorization: getToken() ? 'Bearer ' + getToken() : '', 'X-Backup-Progress-ID': progressId },
-        body: form,
+      startBackup({
+        password,
+        mode,
+        collections: customSelection,
+      }).catch((err) => {
+        toast.error(err?.message || 'Backup failed');
+      }).finally(() => {
+        void loadHistory();
       });
-      const rawResponse = await response.text();
-      let data = {};
-      try { data = rawResponse ? JSON.parse(rawResponse) : {}; } catch { data = {}; }
-      if (!response.ok) throw new Error(normalizeBackupDetail(data?.detail) || normalizeBackupDetail(data?.message) || rawResponse || 'Backup could not be started (' + response.status + ')');
-      const serverProgressId = String(data?.progress_id || progressId);
-
-      const pollProgress = async () => {
-        if (stopped) return null;
-        const { data: progress } = await api.get('/app-backup/create/progress/' + encodeURIComponent(serverProgressId), { _skipReadyGate: true, _silent: true, timeout: 5000 });
-        if (!progress) return null;
-        const phase = progress.phase;
-        setTransfer((current) => ({ ...current, active: !['ready', 'error'].includes(phase), phase: phase === 'creating' ? 'Creating backup…' : phase === 'encrypting' ? 'Encrypting backup…' : phase === 'preparing' ? 'Preparing backup…' : phase === 'queued' ? 'Backup queued…' : phase === 'ready' ? 'Backup ready. Starting download…' : phase === 'error' ? 'Failed' : phase || current.phase, percent: Number.isFinite(Number(progress.percent)) ? Number(progress.percent) : current.percent, etaSeconds: progress.eta_seconds ?? current.etaSeconds, processed: progress.processed_documents ?? progress.processed_bytes ?? current.processed, total: progress.total_documents ?? progress.total_bytes ?? current.total, detail: progress.error || (progress.current_collection ? 'Collection: ' + progress.current_collection : progress.download_ready ? 'Backup is ready for download.' : current.detail) }));
-        if (phase === 'error') throw new Error(progress.error || 'Backup creation failed on the server.');
-        return phase === 'ready' && progress.download_ready ? progress : null;
-      };
-
-      const readyState = await new Promise((resolve, reject) => {
-        let transientFailures = 0;
-        const finish = async () => {
-          try { const ready = await pollProgress(); transientFailures = 0; if (ready?.download_ready) { window.clearInterval(pollTimer); stopped = true; resolve(ready); } }
-          catch (error) {
-            const status = error?.response?.status;
-            if (!error?.response || [502, 503, 504].includes(status)) { transientFailures += 1; if (transientFailures < 15) return; }
-            window.clearInterval(pollTimer); stopped = true; reject(error);
-          }
-        };
-        pollTimer = window.setInterval(finish, 700);
-        void finish();
-      });
-
-      setTransfer((current) => ({ ...current, active: true, phase: 'Downloading backup…', percent: 0, etaSeconds: null, processed: 0, total: 0, detail: 'Transferring encrypted backup to your device…' }));
-      const downloadUrl = readyState?.history_id
-        ? BASE_URL + '/app-backup/history/' + encodeURIComponent(readyState.history_id) + '/download'
-        : BASE_URL + '/app-backup/create/download/' + encodeURIComponent(serverProgressId);
-      const backupBlob = await downloadBackupWithResume(
-        downloadUrl,
-        ({ loaded, total, percent, etaSeconds, attempt }) => {
-          setTransfer((current) => ({
-            ...current,
-            active: true,
-            phase: 'Downloading backup…',
-            percent,
-            etaSeconds,
-            processed: loaded,
-            total,
-            detail: (total ? formatBytes(loaded) + ' / ' + formatBytes(total) : formatBytes(loaded) + ' downloaded')
-              + (attempt > 0 ? ' · resumed after interruption' : ''),
-          }));
-        }
-      );
-
-      const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
-      downloadBlob(backupBlob, 'onenexa-backup-' + timestamp + '.onenexa');
-      setTransfer({ active: false, phase: 'Complete', percent: 100, etaSeconds: 0, processed: backupBlob.size, total: backupBlob.size, detail: 'Backup downloaded successfully.' });
-      toast.success(mode === 'full' ? 'Full application backup downloaded.' : 'Custom backup downloaded.');
-      void loadHistory();
+      setTimeout(() => setBusy(false), 500);
     } catch (error) {
-      setTransfer((current) => ({ ...current, active: false, phase: 'Failed', etaSeconds: null, detail: error?.message || '' }));
       toast.error(error?.message || 'Backup failed');
-    } finally {
-      stopped = true;
-      if (pollTimer) window.clearInterval(pollTimer);
       setBusy(false);
     }
   };
+
   const restoreBackup = async () => {
-    if (!restoreFile) return toast.error('Choose a .onenexa backup file, or a legacy .taskosphere file from the old application.');
+    if (!restoreFile) return toast.error('Choose a .onenexa backup file, or a legacy .taskosphere backup file.');
     if (restorePassword.length < 8) return toast.error('Enter the backup password.');
     if (restoreConfirm !== 'RESTORE') return toast.error('Type RESTORE exactly to confirm.');
-    if (!window.confirm('Restore will replace the selected tenant data from this backup. Continue?')) return;
+    if (!window.confirm('Restore will replace the application data covered by this backup. Continue?')) return;
 
     setBusy(true);
-    setTransfer({
+    patchTransfer({
       active: true,
+      visible: true,
+      isMinimized: false,
       phase: 'Uploading backup…',
       percent: 0,
       etaSeconds: null,
@@ -408,11 +430,6 @@ export default function BackupRestore() {
       const uploadStarted = performance.now();
 
       const { data } = await api.post('/app-backup/restore', form, {
-        headers: {
-          // FormData must let the browser/axios generate multipart/form-data with its boundary.
-          // The shared API instance defaults to application/json, which causes FastAPI to return 422.
-          'Content-Type': undefined,
-        },
         onUploadProgress: (event) => {
           const loaded = Number(event.loaded || 0);
           const total = Number(event.total || restoreFile.size || 0);
@@ -421,7 +438,7 @@ export default function BackupRestore() {
           const percent = total > 0 ? Math.min(100, (loaded / total) * 100) : 0;
           const remaining = total > 0 ? Math.max(0, total - loaded) : 0;
 
-          setTransfer({
+          patchTransfer({
             active: true,
             phase: percent >= 100 ? 'Restoring backup…' : 'Uploading backup…',
             percent,
@@ -435,8 +452,9 @@ export default function BackupRestore() {
         },
       });
 
-      setTransfer({
+      patchTransfer({
         active: false,
+        visible: true,
         phase: 'Complete',
         percent: 100,
         etaSeconds: 0,
@@ -452,17 +470,7 @@ export default function BackupRestore() {
       if (fileRef.current) fileRef.current.value = '';
       await loadInfo();
     } catch (error) {
-      setTransfer((current) => ({
-        ...current,
-        active: false,
-        phase: 'Failed',
-        etaSeconds: null,
-      }));
-      const detail =
-        normalizeBackupDetail(error?.response?.data?.detail) ||
-        error?.message ||
-        'Restore failed';
-      toast.error(detail);
+      toast.error(error?.response?.data?.detail || 'Restore failed');
     } finally {
       setBusy(false);
     }
@@ -471,28 +479,43 @@ export default function BackupRestore() {
   const card = isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200';
   const muted = isDark ? 'text-slate-400' : 'text-slate-500';
   const heading = isDark ? 'text-slate-100' : 'text-slate-800';
-  const input = 'w-full rounded-xl border px-3 py-2.5 text-sm outline-none ' + (isDark ? 'bg-slate-900 border-slate-700 text-slate-100' : 'bg-slate-50 border-slate-200 text-slate-800');
-  const modeButton = (value) => 'text-left rounded-xl border p-3 transition-all ' + (mode === value ? 'border-blue-500 ring-2 ring-blue-500/20' : (isDark ? 'border-slate-700 hover:border-slate-600' : 'border-slate-200 hover:border-slate-300'));
+  const input = 'w-full rounded-none border px-3 py-2.5 text-sm outline-none ' + (isDark ? 'bg-slate-900 border-slate-700 text-slate-100' : 'bg-slate-50 border-slate-200 text-slate-800');
+  const modeButton = (value) => 'text-left rounded-none border p-3 transition-all ' + (mode === value ? 'border-blue-500 ring-2 ring-blue-500/20' : (isDark ? 'border-slate-700 hover:border-slate-600' : 'border-slate-200 hover:border-slate-300'));
   const radio = (value) => 'h-3.5 w-3.5 rounded-full border-2 ' + (mode === value ? 'border-blue-500 bg-blue-500' : 'border-slate-400');
 
   return (
     <div className="space-y-4 w-full min-w-0">
-      <div className="rounded-2xl overflow-hidden border border-blue-900/20 shadow-sm" style={{ background: 'linear-gradient(135deg,#0D3B66 0%,#1F6FB2 100%)' }}>
+      <div className="rounded-none overflow-hidden border border-blue-900/20 shadow-sm" style={{ background: 'linear-gradient(135deg,#0D3B66 0%,#1F6FB2 100%)' }}>
         <div className="px-5 py-5 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="h-11 w-11 rounded-xl bg-white/15 flex items-center justify-center shrink-0"><Archive className="h-5 w-5 text-white" /></div>
+            <div className="h-11 w-11 rounded-none bg-white/15 flex items-center justify-center shrink-0"><Archive className="h-5 w-5 text-white" /></div>
             <div>
               <h1 className="text-xl font-bold text-white">Backup &amp; Restore</h1>
-              <p className="text-xs text-white/70 mt-0.5">Portable encrypted backup of your complete Taskosphere tenant</p>
+              <p className="text-xs text-white/70 mt-0.5">Portable encrypted backup of your complete Taskosphere application</p>
             </div>
           </div>
-          <button type="button" onClick={() => { void loadInfo(); void loadHistory(); }} disabled={loadingInfo || historyLoading || busy} className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold disabled:opacity-50">
-            <RefreshCw className={loadingInfo || historyLoading ? 'h-3.5 w-3.5 animate-spin' : 'h-3.5 w-3.5'} /> Refresh
-          </button>
+          <div className="flex items-center gap-2">
+            <a
+              href="/tasko-commercial-backup-update.zip"
+              download="tasko-commercial-backup-update.zip"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-none bg-white/10 hover:bg-white/20 text-white text-xs font-semibold"
+              title="Download updated files for tasko-commercial repository"
+            >
+              <Download className="h-3.5 w-3.5" /> Download Commercial Files (.zip)
+            </a>
+            <button
+              type="button"
+              onClick={loadInfo}
+              disabled={loadingInfo || busy}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-none bg-white/10 hover:bg-white/20 text-white text-xs font-semibold disabled:opacity-50"
+            >
+              <RefreshCw className={loadingInfo ? 'h-3.5 w-3.5 animate-spin' : 'h-3.5 w-3.5'} /> Refresh
+            </button>
+          </div>
         </div>
       </div>
 
-      <div className={'rounded-2xl border p-1 ' + card}>
+      <div className={'rounded-none border p-1 ' + card}>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-1">
           {[
             ['backup', 'Backup', HardDriveDownload],
@@ -503,53 +526,150 @@ export default function BackupRestore() {
               key={value}
               type="button"
               onClick={() => { setActiveTab(value); if (value === 'history') void loadHistory(); }}
-              className={'flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold transition-all ' + (
+              className={'flex items-center justify-center gap-2 rounded-none px-4 py-2.5 text-sm font-bold transition-all border-b-2 ' + (
                 activeTab === value
-                  ? (isDark ? 'bg-slate-700 text-white shadow-sm' : 'bg-blue-50 text-blue-700 shadow-sm')
-                  : (isDark ? 'text-slate-400 hover:bg-slate-800' : 'text-slate-500 hover:bg-slate-50')
+                  ? (isDark ? 'bg-slate-700/80 text-white border-blue-500' : 'bg-blue-50 text-blue-700 border-blue-600')
+                  : (isDark ? 'text-slate-400 border-transparent hover:bg-slate-700/40' : 'text-slate-500 border-transparent hover:bg-slate-50')
               )}
             >
               <Icon className="h-4 w-4" />
               {label}
-              {value === 'history' && history.length > 0 && <span className="ml-1 rounded-full bg-blue-600 px-2 py-0.5 text-[10px] font-extrabold text-white">{history.length}</span>}
+              {value === 'history' && history.length > 0 && <span className="ml-1 rounded-none bg-blue-600 px-2 py-0.5 text-[10px] font-extrabold text-white">{history.length}</span>}
             </button>
           ))}
         </div>
       </div>
 
       {transfer.phase && (
-        <div className={'rounded-2xl border p-4 ' + card}>
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className={'text-sm font-bold ' + heading}>{transfer.phase}</p>
-              <p className={'text-[11px] mt-1 ' + muted}>{transfer.detail || 'Working…'}</p>
+        transfer.isMinimized ? (
+          /* Minimized Compact Card */
+          <div className={'rounded-2xl border p-3.5 flex items-center justify-between gap-4 transition-all ' + card}>
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="h-9 w-9 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+                <HardDriveDownload className="h-4 w-4 animate-pulse" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className={'text-xs font-bold truncate ' + heading}>{transfer.phase}</span>
+                  <span className="text-xs font-extrabold text-blue-600 dark:text-blue-400">
+                    {Math.min(100, Math.max(0, Number(transfer.percent || 0))).toFixed(1)}%
+                  </span>
+                  <span className={'text-[10px] px-2 py-0.5 rounded-full font-medium bg-slate-100 dark:bg-slate-700 ' + muted}>
+                    Minimized · Running in background
+                  </span>
+                </div>
+                <p className={'text-[11px] truncate ' + muted}>
+                  {transfer.detail || 'Backup is progressing safely… You can continue using the application.'}
+                </p>
+              </div>
             </div>
-            <div className="text-right shrink-0">
-              <p className="text-lg font-extrabold text-blue-600">{Math.min(100, Math.max(0, Number(transfer.percent || 0))).toFixed(2)}%</p>
-              <p className={'text-[10px] ' + muted}>{transfer.percent >= 100 ? 'Complete' : formatEta(transfer.etaSeconds)}</p>
+
+            <div className="flex items-center gap-3 shrink-0">
+              <div className="w-28 sm:w-44 h-2 rounded-full overflow-hidden bg-slate-200 dark:bg-slate-700 hidden sm:block">
+                <div
+                  className="h-full rounded-full bg-blue-600 transition-all duration-300"
+                  style={{ width: `${Math.min(100, Math.max(0, Number(transfer.percent || 0)))}%` }}
+                />
+              </div>
+              <button
+                type="button"
+                onClick={maximize}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-blue-500/30 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-slate-700/60 text-xs font-bold transition-all shadow-sm"
+                title="Expand backup view"
+              >
+                <Maximize2 className="h-3.5 w-3.5" /> Expand
+              </button>
+              <button
+                type="button"
+                onClick={transfer.active ? cancelBackup : dismiss}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                title={transfer.active ? "Cancel backup operation" : "Dismiss"}
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
             </div>
           </div>
-          <div className="mt-3 h-2.5 rounded-full overflow-hidden bg-slate-200 dark:bg-slate-700">
-            <div
-              className="h-full rounded-full bg-blue-600 transition-[width] duration-300"
-              style={{ width: Math.min(100, Math.max(0, Number(transfer.percent || 0))) + '%' }}
-            />
+        ) : (
+          /* Full Expanded Card */
+          <div className={'rounded-2xl border p-4 sm:p-5 transition-all ' + card}>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <p className={'text-sm font-bold ' + heading}>{transfer.phase}</p>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 font-bold uppercase">
+                    {transfer.mode || 'full'} backup
+                  </span>
+                </div>
+                <p className={'text-[11px] mt-1 ' + muted}>{transfer.detail || 'Working…'}</p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <div className="text-right mr-1">
+                  <p className="text-lg font-extrabold text-blue-600 dark:text-blue-400">
+                    {Math.min(100, Math.max(0, Number(transfer.percent || 0))).toFixed(2)}%
+                  </p>
+                  <p className={'text-[10px] ' + muted}>
+                    {transfer.percent >= 100 ? 'Complete' : formatEta(transfer.etaSeconds)}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={minimize}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/60 text-xs font-semibold transition-all"
+                  title="Minimize backup card so you can work while backup runs"
+                >
+                  <Minimize2 className="h-3.5 w-3.5" /> Minimize
+                </button>
+                {transfer.active && (
+                  <button
+                    type="button"
+                    onClick={cancelBackup}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-red-200 dark:border-red-900/40 text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 text-xs font-semibold transition-all"
+                    title="Cancel backup operation"
+                  >
+                    <X className="h-3.5 w-3.5" /> Cancel
+                  </button>
+                )}
+                {!transfer.active && (
+                  <button
+                    type="button"
+                    onClick={dismiss}
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                    title="Dismiss"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="mt-3.5 h-2.5 rounded-full overflow-hidden bg-slate-200 dark:bg-slate-700">
+              <div
+                className="h-full rounded-full bg-blue-600 transition-[width] duration-300"
+                style={{ width: Math.min(100, Math.max(0, Number(transfer.percent || 0))) + '%' }}
+              />
+            </div>
+
+            <div className="mt-2.5 flex items-center justify-between text-[11px]">
+              <span className={muted}>
+                {transfer.total > 0
+                  ? (['queued', 'preparing', 'creating'].includes(String(transfer.phase || '').toLowerCase())
+                      ? `${Number(transfer.processed || 0).toLocaleString('en-IN')} / ${Number(transfer.total || 0).toLocaleString('en-IN')} documents`
+                      : `${formatBytes(transfer.processed)} / ${formatBytes(transfer.total)}`)
+                  : 'Processing application data…'}
+              </span>
+              <span className={'text-[10px] italic ' + muted}>
+                💡 You can minimize this card or use other pages — backup continues in background
+              </span>
+            </div>
           </div>
-          {transfer.total > 0 && (
-            <p className={'text-[10px] mt-2 ' + muted}>
-              {['queued', 'preparing', 'creating'].includes(String(transfer.phase || '').toLowerCase())
-                ? Number(transfer.processed || 0).toLocaleString('en-IN') + ' / ' + Number(transfer.total || 0).toLocaleString('en-IN') + ' documents'
-                : formatBytes(transfer.processed) + ' / ' + formatBytes(transfer.total)}
-            </p>
-          )}
-        </div>
+        )
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className={'rounded-2xl border p-4 ' + card}>
           <div className="flex items-center gap-2"><Database className="h-4 w-4 text-blue-500" /><span className={'text-xs font-bold uppercase tracking-wider ' + muted}>MongoDB</span></div>
           <p className={'mt-2 text-sm font-semibold ' + heading}>Included automatically</p>
-          <p className={'mt-1 text-xs ' + muted}>Tenant collections are captured in BSON-preserving Extended JSON.</p>
+          <p className={'mt-1 text-xs ' + muted}>Application collections are captured in BSON-preserving Extended JSON.</p>
         </div>
         <div className={'rounded-2xl border p-4 ' + card}>
           <div className="flex items-center gap-2"><LockKeyhole className="h-4 w-4 text-emerald-500" /><span className={'text-xs font-bold uppercase tracking-wider ' + muted}>Security</span></div>
@@ -557,9 +677,9 @@ export default function BackupRestore() {
           <p className={'mt-1 text-xs ' + muted}>Password protected. Live sessions and reset tokens are never exported.</p>
         </div>
         <div className={'rounded-2xl border p-4 ' + card}>
-          <div className="flex items-center gap-2"><Users className="h-4 w-4 text-violet-500" /><span className={'text-xs font-bold uppercase tracking-wider ' + muted}>Tenant</span></div>
-          <p className={'mt-2 text-sm font-semibold ' + heading}>{info?.company_name || 'Current company'}</p>
-          <p className={'mt-1 text-xs ' + muted}>{info?.user_count ?? '—'} users · cross-license restore supported</p>
+          <div className="flex items-center gap-2"><Users className="h-4 w-4 text-violet-500" /><span className={'text-xs font-bold uppercase tracking-wider ' + muted} >Application</span></div>
+          <p className={'mt-2 text-sm font-semibold ' + heading}>Standalone application</p>
+          <p className={'mt-1 text-xs ' + muted}>{info?.user_count ?? '—'} users · restore preserves the active administrator</p>
         </div>
       </div>
 
@@ -567,12 +687,12 @@ export default function BackupRestore() {
       <div className={'rounded-2xl border p-5 ' + card}>
         <div className="flex items-start gap-3">
           <HardDriveDownload className="h-5 w-5 text-blue-500 mt-0.5" />
-          <div className="flex-1"><h2 className={'font-bold ' + heading}>Create Backup</h2><p className={'text-xs mt-1 ' + muted}>Full backup is the recommended one-click migration/DR format. Custom mode lets you export only selected modules or MongoDB collections.</p></div>
+          <div className="flex-1"><h2 className={'font-bold ' + heading}>Create Backup</h2><p className={'text-xs mt-1 ' + muted}>Full backup is the recommended one-click backup/DR format. Custom mode lets you export only selected modules or MongoDB collections.</p></div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 mt-5">
           {[
-            ['full', 'Full Application', 'All tenant MongoDB data, users, settings, permissions and tenant-linked collections'],
+            ['full', 'Full Application', 'All application MongoDB data, users, settings, permissions and application collections'],
             ['module', 'One Module', 'All available collections mapped to one application module'],
             ['collections', 'Selected Data', 'Choose individual MongoDB collections'],
           ].map(([value, label, desc]) => (
@@ -610,7 +730,27 @@ export default function BackupRestore() {
 
         <div className="mt-4 flex flex-col sm:flex-row gap-3 items-end">
           <div className="flex-1 w-full"><label className={'text-xs font-bold ' + heading}>Backup password</label><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className={input + ' mt-1.5'} placeholder="Minimum 8 characters" autoComplete="new-password" /></div>
-          <button type="button" onClick={createBackup} disabled={busy || loadingInfo} className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-bold hover:bg-blue-700 disabled:opacity-50 w-full sm:w-auto"><Download className="h-4 w-4" />{busy ? 'Preparing…' : mode === 'full' ? 'Download Full Backup' : 'Download Custom Backup'}</button>
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <button
+              type="button"
+              onClick={createBackup}
+              disabled={busy || loadingInfo || transfer.active}
+              className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-bold hover:bg-blue-700 disabled:opacity-50 w-full sm:w-auto"
+            >
+              <Download className="h-4 w-4" />
+              {busy ? 'Starting…' : transfer.active ? 'Backup in Progress…' : mode === 'full' ? 'Download Full Backup' : 'Download Custom Backup'}
+            </button>
+            {transfer.active && (
+              <button
+                type="button"
+                onClick={cancelBackup}
+                className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl border border-red-300 dark:border-red-800 text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 text-xs font-bold transition-all w-full sm:w-auto"
+                title="Cancel ongoing backup"
+              >
+                <X className="h-3.5 w-3.5" /> Cancel
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -618,7 +758,7 @@ export default function BackupRestore() {
 
       {activeTab === 'restore' && (
       <div className={'rounded-2xl border p-5 ' + card}>
-        <div className="flex items-start gap-3"><RotateCcw className="h-5 w-5 text-amber-500 mt-0.5" /><div><h2 className={'font-bold ' + heading}>Restore Backup</h2><p className={'text-xs mt-1 ' + muted}>Restore into this license/company or another license. The target company identity and the current administrator's live authentication credentials are preserved.</p></div></div>
+        <div className="flex items-start gap-3"><RotateCcw className="h-5 w-5 text-amber-500 mt-0.5" /><div><h2 className={'font-bold ' + heading}>Restore Backup</h2><p className={'text-xs mt-1 ' + muted}>Restore the application from an encrypted backup. The current administrator's live authentication credentials are preserved.</p></div></div>
         <div className={'mt-4 rounded-xl border p-3 flex gap-2 ' + (isDark ? 'border-amber-900/50 bg-amber-950/20' : 'border-amber-200 bg-amber-50')}><AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" /><p className={'text-xs leading-relaxed ' + (isDark ? 'text-amber-300' : 'text-amber-800')}>Restore replaces data covered by the backup. It is intentionally restricted to administrators and requires the exact word <b>RESTORE</b>.</p></div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">
           <div><label className={'text-xs font-bold ' + heading}>Backup file</label><div className="mt-1.5 flex gap-2"><input ref={fileRef} type="file" accept=".onenexa,.taskosphere,application/octet-stream" onChange={(e) => setRestoreFile(e.target.files?.[0] || null)} className={input + ' file:mr-3 file:rounded-lg file:border-0 file:px-2 file:py-1 file:text-xs'} /><Upload className="h-4 w-4 text-slate-400 shrink-0 mt-3 -ml-10 pointer-events-none" /></div>{restoreFile && <p className={'text-[11px] mt-1 ' + muted}>{restoreFile.name}</p>}</div>
@@ -633,11 +773,11 @@ export default function BackupRestore() {
       {activeTab === 'history' && (
         <div className={'rounded-2xl border p-5 ' + card}>
           <div className="flex items-start justify-between gap-3">
-            <div className="flex items-start gap-3 min-w-0">
-              <History className="h-5 w-5 text-blue-500 mt-0.5 shrink-0" />
+            <div className="flex items-start gap-3">
+              <History className="h-5 w-5 text-blue-500 mt-0.5" />
               <div>
                 <h2 className={'font-bold ' + heading}>Backup History</h2>
-                <p className={'text-xs mt-1 ' + muted}>Every completed backup round is stored here as an encrypted, tenant-scoped artifact. Deleting a record permanently removes the history entry and its stored backup data.</p>
+                <p className={'text-xs mt-1 ' + muted}>Every completed backup is stored as an encrypted artifact. Deleting a record permanently removes its history entry and stored backup data.</p>
               </div>
             </div>
             <button type="button" onClick={() => void loadHistory()} disabled={historyLoading || busy} className={'inline-flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-semibold disabled:opacity-50 ' + (isDark ? 'border-slate-700 hover:bg-slate-700' : 'border-slate-200 hover:bg-slate-50')}>
@@ -655,7 +795,7 @@ export default function BackupRestore() {
             </div>
           ) : (
             <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
-              <table className="w-full min-w-[860px] text-left">
+              <table className="w-full min-w-[820px] text-left">
                 <thead className={isDark ? 'bg-slate-900' : 'bg-slate-50'}>
                   <tr>
                     {['Date & Time', 'Created By', 'Type', 'Collections', 'Documents', 'Size', 'Actions'].map((label) => (
@@ -668,8 +808,8 @@ export default function BackupRestore() {
                     <tr key={record.id} className={'border-t ' + (isDark ? 'border-slate-700' : 'border-slate-100')}>
                       <td className={'px-3 py-3 text-xs font-semibold ' + heading}>{record.created_at ? new Date(record.created_at).toLocaleString('en-IN') : '—'}</td>
                       <td className={'px-3 py-3 text-xs ' + muted}>{record.created_by || 'Administrator'}</td>
-                      <td className={'px-3 py-3 text-xs font-semibold capitalize ' + heading}>{record.mode || 'full'}</td>
-                      <td className={'px-3 py-3 text-xs ' + muted}>{record.collection_count ?? 0}</td>
+                      <td className={'px-3 py-3 text-xs font-semibold ' + heading}>{record.mode || 'full'}</td>
+                      <td className={'px-3 py-3 text-xs ' + muted}>{record.collection_count || 0}</td>
                       <td className={'px-3 py-3 text-xs ' + muted}>{Number(record.document_count || 0).toLocaleString('en-IN')}</td>
                       <td className={'px-3 py-3 text-xs ' + muted}>{record.file_size_bytes ? formatBytes(record.file_size_bytes) : '—'}</td>
                       <td className="px-3 py-3">
@@ -691,7 +831,7 @@ export default function BackupRestore() {
         </div>
       )}
 
-      <div className={'rounded-2xl border p-4 ' + card}><div className="flex items-start gap-2.5"><ShieldCheck className="h-4 w-4 text-emerald-500 mt-0.5" /><div><p className={'text-xs font-bold ' + heading}>Recommended backup policy</p><p className={'text-[11px] mt-1 leading-relaxed ' + muted}>Keep at least one full encrypted backup outside the application server. The .onenexa file is portable and includes MongoDB data automatically; legacy .taskosphere files from the old application are accepted for migration; because hosted app disks can be ephemeral, long-term automatic retention should use your MongoDB provider/object-storage backup facility rather than relying on local server files.</p></div></div></div>
+      <div className={'rounded-2xl border p-4 ' + card}><div className="flex items-start gap-2.5"><ShieldCheck className="h-4 w-4 text-emerald-500 mt-0.5" /><div><p className={'text-xs font-bold ' + heading}>Recommended backup policy</p><p className={'text-[11px] mt-1 leading-relaxed ' + muted}>Keep at least one full encrypted backup outside the application server. The .onenexa file is portable and includes MongoDB data automatically; legacy .taskosphere files remain accepted for migration; because hosted app disks can be ephemeral, long-term retention should use your MongoDB provider/object-storage backup facility rather than relying on local server files.</p></div></div></div>
     </div>
   );
 }
