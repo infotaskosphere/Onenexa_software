@@ -33,6 +33,18 @@ def _contract(
     )
 
 
+CORE = _contract(
+    owns=("users", "role_definitions", "access_requests"),
+    consumes=("companies", "subscriptions", "audit_logs"),
+    current_sources=(
+        "backend/dependencies.py",
+        "backend/security/session_manager.py",
+        "backend/permission_governance.py",
+        "backend/roles_admin.py",
+        "backend/commercial_module_guard.py",
+    ),
+)
+
 TASKOSPHERE = _contract(
     owns=("tasks", "attendance", "holidays", "dsc_register"),
     consumes=("users", "clients", "audit_logs", "documents"),
@@ -158,6 +170,7 @@ TRADEMARK = _contract(
 
 DOMAIN_CONTRACTS: Mapping[str, Mapping[str, tuple[str, ...]]] = MappingProxyType(
     {
+        "core": CORE,
         "taskosphere": TASKOSPHERE,
         "finix_ai": FINIX_AI,
         "aiweave": AIWEAVE,
