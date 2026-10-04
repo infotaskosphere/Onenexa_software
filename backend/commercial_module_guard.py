@@ -1060,7 +1060,7 @@ async def get_current_user_with_commercial_guard(
             )
 
         explicit_ai_feature_grant = None
-        if feature_module == "aiweave" and _is_admin_role(user):
+        if feature_module == "aiweave":
             explicit_ai_feature_grant = (
                 pre_hydration_ai_view
                 if feature_flag == "can_view_aiweave"
