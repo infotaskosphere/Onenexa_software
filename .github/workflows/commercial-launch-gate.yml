@@ -36,6 +36,12 @@ jobs:
       - name: Audit Python dependencies
         run: pip-audit -r requirements.txt
 
+      - name: Audit WhatsApp bridge dependencies
+        run: |
+          cd wa-bridge
+          npm install --package-lock-only
+          npm audit --audit-level=high
+
       - name: Run commercial security gates
         env:
           ENV_MODE: test
