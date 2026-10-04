@@ -10,15 +10,19 @@ SSE event stream without changing the WhatsApp message/inbox behavior.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
+import secrets
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
-from fastapi import HTTPException, Request
+from fastapi import Depends, HTTPException, Request
 from fastapi.dependencies.utils import get_dependant
 from fastapi.responses import StreamingResponse
 from jose import JWTError, jwt
 
 from backend import whatsapp_hub
+from backend import dependencies as _dependencies
 from backend.dependencies import (
     ALGORITHM,
     JWT_SECRET,
@@ -26,14 +30,64 @@ from backend.dependencies import (
 )
 
 
+async def _consume_stream_token(raw_token: str):
+    """Consume a short-lived, single-use SSE credential atomically."""
+    if not raw_token:
+        return None
+    raw_db = getattr(_dependencies, "_raw_db", None)
+    if raw_db is None:
+        return None
+    token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+    now = datetime.now(timezone.utc)
+    record = await raw_db.whatsapp_sse_tokens.find_one({
+        "token_hash": token_hash,
+        "used": False,
+        "expires_at": {"$gt": now},
+    })
+    if not record:
+        return None
+    result = await raw_db.whatsapp_sse_tokens.update_one(
+        {"_id": record.get("_id"), "used": False},
+        {"$set": {"used": True, "used_at": now}},
+    )
+    if getattr(result, "modified_count", 0) != 1:
+        return None
+    return record
+
+
 async def _resolve_user(request: Request, token: Optional[str]):
     auth_header = request.headers.get("Authorization", "")
-    raw_token = auth_header[7:] if auth_header.startswith("Bearer ") else token
-    if not raw_token:
+    bearer_token = auth_header[7:] if auth_header.startswith("Bearer ") else None
+
+    # Preferred path: the query parameter contains only a 60-second, single-use
+    # stream credential, never the long-lived bearer/session token.
+    if token:
+        record = await _consume_stream_token(token)
+        if record:
+            raw_db = getattr(_dependencies, "_raw_db", None)
+            user_doc = None
+            if raw_db is not None:
+                user_doc = await raw_db.users.find_one(
+                    {"id": str(record.get("user_id") or ""), "status": "active"}
+                )
+            if user_doc:
+                stored_company_id = str(user_doc.get("company_id") or "").strip()
+                minted_company_id = str(record.get("company_id") or "").strip()
+                if minted_company_id and stored_company_id and minted_company_id != stored_company_id:
+                    raise HTTPException(401, "Invalid stream credential")
+                user_doc.pop("_id", None)
+                user_doc = _dependencies._normalize_permissions(user_doc)
+                try:
+                    return _dependencies.User(**user_doc)
+                except Exception:
+                    pass
+        raise HTTPException(401, "Invalid or expired stream credential")
+
+    if not bearer_token:
         raise HTTPException(401, "Authentication required")
 
-    # Commercial SaaS sessions are opaque tokens stored hashed in sessions.
-    user = await _get_saas_session_user(raw_token)
+    # Authorization-header path remains available for trusted internal callers.
+    user = await _get_saas_session_user(bearer_token)
     if user is not None:
         return user
 
@@ -104,7 +158,28 @@ async def hub_events_compat(request: Request, token: Optional[str] = None):
 
 
 def install() -> None:
-    """Replace only the existing SSE route endpoint before server includes it."""
+    """Install the short-lived SSE credential endpoint and stream handler."""
+    async def issue_stream_token(current_user=Depends(_dependencies.get_current_user)):
+        raw_db = getattr(_dependencies, "_raw_db", None)
+        if raw_db is None:
+            raise HTTPException(503, "Session store unavailable")
+        raw_token = secrets.token_urlsafe(32)
+        token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+        now = datetime.now(timezone.utc)
+        await raw_db.whatsapp_sse_tokens.insert_one({
+            "token_hash": token_hash,
+            "user_id": str(getattr(current_user, "id", "") or ""),
+            "company_id": str(getattr(current_user, "company_id", "") or ""),
+            "created_at": now,
+            "expires_at": now + timedelta(seconds=60),
+            "used": False,
+        })
+        return {"stream_token": raw_token, "expires_in": 60}
+
+    token_path = "/whatsapp/hub/events-token"
+    if not any(getattr(route, "path", "") == token_path for route in whatsapp_hub.router.routes):
+        whatsapp_hub.router.add_api_route(token_path, issue_stream_token, methods=["POST"])
+
     for route in whatsapp_hub.router.routes:
         if getattr(route, "path", "") == "/whatsapp/hub/events":
             route.endpoint = hub_events_compat
