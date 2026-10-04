@@ -20,12 +20,19 @@ from bson import ObjectId
 
 from backend.dependencies import get_current_user, db, check_module_permission, get_team_user_ids
 
+_EMAIL_ENCRYPTION_PRODUCTION = str(os.environ.get("ENV_MODE") or "").strip().lower() == "production"
 try:
     from cryptography.fernet import Fernet
     import os as _os
     _fernet_key = _os.environ.get("EMAIL_ENCRYPT_KEY", "").encode()
     _fernet = Fernet(_fernet_key) if len(_fernet_key) == 44 else None
+    if _EMAIL_ENCRYPTION_PRODUCTION and _fernet is None:
+        raise RuntimeError(
+            "EMAIL_ENCRYPT_KEY must be configured with a valid Fernet key in production."
+        )
 except Exception:
+    if _EMAIL_ENCRYPTION_PRODUCTION:
+        raise
     _fernet = None
 
 try:
@@ -221,6 +228,8 @@ class SenderWhitelistOut(BaseModel):
 def _encrypt(plain: str) -> str:
     if _fernet:
         return _fernet.encrypt(plain.encode()).decode()
+    if _EMAIL_ENCRYPTION_PRODUCTION:
+        raise RuntimeError("Email credential encryption is unavailable in production.")
     return plain
 
 def _decrypt(stored: str) -> str:
@@ -228,7 +237,11 @@ def _decrypt(stored: str) -> str:
         try:
             return _fernet.decrypt(stored.encode()).decode()
         except Exception:
+            # Legacy plaintext records can still be read during migration while
+            # a valid production encryption key remains configured.
             return stored
+    if _EMAIL_ENCRYPTION_PRODUCTION:
+        raise RuntimeError("Email credential decryption is unavailable in production.")
     return stored
 
 def _infer_provider(email_address: str):
