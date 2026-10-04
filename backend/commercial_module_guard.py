@@ -589,6 +589,13 @@ async def _commercial_license(
 
 def _hydrate_tenant_user(user: User, license_doc: dict) -> User:
     data = user.model_dump()
+    original_permissions = getattr(user, "permissions", None)
+    if hasattr(original_permissions, "model_dump"):
+        original_permissions = original_permissions.model_dump()
+    if not isinstance(original_permissions, dict):
+        original_permissions = {}
+    explicit_ai_access = bool(original_permissions.get("can_access_aiweave", False))
+    explicit_ai_view = bool(original_permissions.get("can_view_aiweave", False))
 
     data["commercial_customer_id"] = (
         data.get("commercial_customer_id")
@@ -647,7 +654,14 @@ def _hydrate_tenant_user(user: User, license_doc: dict) -> User:
         admin_permissions["can_view_aiweave"] = False
     data["permissions"] = admin_permissions
 
-    return User.model_validate(data)
+    hydrated_user = User.model_validate(data)
+    # Re-apply the explicit tenant-admin AIWeave grant to the final Pydantic
+    # permission object. AIWeave remains user-governed and is never recreated
+    # merely because the commercial license contains the module.
+    if "aiweave" in resolve_license_modules(license_doc):
+        hydrated_user.permissions.can_access_aiweave = explicit_ai_access
+        hydrated_user.permissions.can_view_aiweave = explicit_ai_view
+    return hydrated_user
 
 
 def _hydrate_admin(user: User, license_doc: dict) -> User:
