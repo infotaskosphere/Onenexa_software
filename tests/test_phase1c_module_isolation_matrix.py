@@ -100,8 +100,8 @@ def _license(modules):
     }
 
 
-async def _run_guard(monkeypatch, path: str, license_modules):
-    user = _admin_user()
+async def _run_guard(monkeypatch, path: str, license_modules, user=None):
+    user = user or _admin_user()
     license_doc = _license(license_modules)
 
     async def fake_base(_credentials):
@@ -222,7 +222,7 @@ async def test_aiweave_only_requires_explicit_user_ai_permission(monkeypatch):
         "can_access_aiweave": True,
         "can_view_aiweave": True,
     }
-    await _run_guard(monkeypatch, "/aiweave", ["aiweave"])
+    await _run_guard(monkeypatch, "/aiweave", ["aiweave"], user=user)
 
     user.permissions = {
         "can_access_aiweave": False,
