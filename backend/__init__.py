@@ -37,6 +37,12 @@ import backend.commercial_license_entitlement_compat  # noqa: F401
 import backend.commercial_module_guard as _commercial_module_guard
 _commercial_module_guard.install()
 
+# Phase 1 commercial security foundation: identity/user administration is CORE,
+# not a billable People Matrix dependency. Production also refuses the legacy
+# in-memory Mongo fallback before any route captures get_current_user.
+import backend.commercial_core_isolation as _commercial_core_isolation  # noqa: F401
+_commercial_core_isolation.install()
+
 # FastAPI compatibility shim: the original commercial guard's Request
 # annotation was being interpreted as a required query parameter in the
 # deployed runtime, causing authenticated GET endpoints to return 422.
