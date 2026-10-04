@@ -218,5 +218,28 @@ export function hasEffectivePermission(user, permission) {
   return user.permissions?.[permission] === true;
 }
 
-export function canAccessPath(user, pathname) { if (!user) return false; if (isPlatformOwner(user)) return true; const moduleId = moduleForPath(pathname); if (!moduleId) return true; const flag = pageFlagForPath(pathname); if (!flag) return false; return hasEffectivePermission(user, flag); }
+export function canAccessPath(user, pathname) {
+  if (!user) return false;
+  if (isPlatformOwner(user)) return true;
+
+  // Licensee Admin control-plane/shared-master-data pages are tenant-wide
+  // administration surfaces, not separately purchased operational modules.
+  // Keep them reachable even when the tenant buys only one module.
+  const normalizedPath = String(pathname || "").split("?", 1)[0];
+  if (
+    String(user.role || "").trim().toLowerCase() === "admin" &&
+    user.company_id &&
+    ["/users", "/clients", "/reports"].some(
+      (prefix) => normalizedPath === prefix || normalizedPath.startsWith(prefix + "/")
+    )
+  ) {
+    return true;
+  }
+
+  const moduleId = moduleForPath(normalizedPath);
+  if (!moduleId) return true;
+  const flag = pageFlagForPath(normalizedPath);
+  if (!flag) return false;
+  return hasEffectivePermission(user, flag);
+}
 export function firstAccessiblePath(user, preferredModule = null) { if (!user) return "/login"; if (isPlatformOwner(user)) return "/dashboard"; const ordered = preferredModule ? [preferredModule, ...Object.keys(MODULES).filter((id) => id !== preferredModule)] : Object.keys(MODULES); for (const moduleId of ordered) { if (!hasModuleAccess(user, moduleId)) continue; const page = PAGE_MATRIX.find(([id, flag, path]) => id === moduleId && hasEffectivePermission(user, flag)); if (page) return page[2]; } return "/login"; }
