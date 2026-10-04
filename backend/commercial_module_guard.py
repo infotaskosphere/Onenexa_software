@@ -637,8 +637,8 @@ def _hydrate_tenant_user(user: User, license_doc: dict) -> User:
         if isinstance(fallback_permissions, dict):
             stored_permissions = dict(fallback_permissions)
     if "aiweave" in resolve_license_modules(license_doc):
-        admin_permissions["can_access_aiweave"] = bool(stored_permissions.get("can_access_aiweave", False))
-        admin_permissions["can_view_aiweave"] = bool(stored_permissions.get("can_view_aiweave", False))
+        admin_permissions["can_access_aiweave"] = explicit_ai_access
+        admin_permissions["can_view_aiweave"] = explicit_ai_view
         matrix = dict(stored_permissions.get("governance_matrix") or {})
         ai_matrix = {
             key: value for key, value in matrix.items()
@@ -654,14 +654,7 @@ def _hydrate_tenant_user(user: User, license_doc: dict) -> User:
         admin_permissions["can_view_aiweave"] = False
     data["permissions"] = admin_permissions
 
-    hydrated_user = User.model_validate(data)
-    # Re-apply the explicit tenant-admin AIWeave grant to the final Pydantic
-    # permission object. AIWeave remains user-governed and is never recreated
-    # merely because the commercial license contains the module.
-    if "aiweave" in resolve_license_modules(license_doc):
-        hydrated_user.permissions.can_access_aiweave = explicit_ai_access
-        hydrated_user.permissions.can_view_aiweave = explicit_ai_view
-    return hydrated_user
+    return User.model_validate(data)
 
 
 def _hydrate_admin(user: User, license_doc: dict) -> User:
@@ -953,7 +946,6 @@ async def get_current_user_with_commercial_guard(
     COMMERCIAL_ADMIN_SHARED_DATA_PREFIXES = (
         "/users",
         "/clients",
-        "/reports",
     )
     if _is_admin_role(user) and any(
         normalized_request_path == prefix
