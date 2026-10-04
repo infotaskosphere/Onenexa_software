@@ -8,6 +8,7 @@ Handles forgot-password OTP flow and password resets:
 
 import os
 import secrets
+import hashlib
 import logging
 from datetime import datetime, timezone, timedelta
 from passlib.context import CryptContext
@@ -24,6 +25,11 @@ from backend.email_service.recovery_service import AccountRecoveryService
 logger      = logging.getLogger(__name__)
 router      = APIRouter()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+
+def _hash_reset_token(token: str) -> str:
+    """Hash reset OTPs before persistence so the reset secret is never stored plaintext."""
+    return hashlib.sha256(str(token or "").encode("utf-8")).hexdigest()
 
 
 # ── Pydantic models ───────────────────────────────────────────────────────────
@@ -98,10 +104,10 @@ async def forgot_password(data: ForgotPasswordRequest, request: Request):
 
         await db.password_reset_tokens.delete_many({"email": email})
         await db.password_reset_tokens.insert_one({
-            "email":      email,
-            "token":      otp,
-            "expires_at": expires_at,
-            "user_id":    str(user.get("id") or user.get("_id")),
+            "email":       email,
+            "token_hash":  _hash_reset_token(otp),
+            "expires_at":  expires_at,
+            "user_id":     str(user.get("id") or user.get("_id")),
         })
 
         base_url = (request.base_url._url if request and request.base_url else "http://localhost:3000").rstrip("/")
@@ -147,8 +153,16 @@ async def reset_password(data: ResetPasswordRequest, request: Request):
     email = data.email.strip().lower()
     await _enforce_otp_rate_limit(request, email, limit_per_minute=10)
 
+    supplied_token = data.token.strip()
     record = await db.password_reset_tokens.find_one(
-        {"email": email, "token": data.token.strip()}
+        {
+            "email": email,
+            "$or": [
+                {"token_hash": _hash_reset_token(supplied_token)},
+                # Temporary compatibility for reset codes issued before Phase 2.
+                {"token": supplied_token},
+            ],
+        }
     )
 
     if not record:
@@ -180,7 +194,6 @@ async def reset_password(data: ResetPasswordRequest, request: Request):
     # If user has SaaS scrypt hashes, update them as well
     updates = {"password": hashed}
     if user.get("password_salt"):
-        import hashlib
         salt = secrets.token_hex(16)
         scrypt_hash = hashlib.scrypt(
             data.new_password.encode("utf-8"),
@@ -193,6 +206,7 @@ async def reset_password(data: ResetPasswordRequest, request: Request):
         updates["password_hash"] = scrypt_hash
         updates["password_salt"] = salt
 
+    updates["password_version"] = int(user.get("password_version") or 1) + 1
     await db.users.update_one({"email": email}, {"$set": updates})
     await db.password_reset_tokens.delete_many({"email": email})
 
