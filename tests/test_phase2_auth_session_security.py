@@ -172,3 +172,21 @@ def test_saas_session_rejects_user_session_company_mismatch(monkeypatch):
     monkeypatch.setattr(dependencies, "MONGO_URL", "mongodb://test", raising=False)
     result = asyncio.run(dependencies._get_saas_session_user("session-token"))
     assert result is None
+
+
+def test_non_platform_owner_jwt_without_sid_is_rejected(monkeypatch):
+    from backend.security import session_manager
+
+    class U:
+        id = "user-legacy"
+        email = "legacy@example.com"
+
+    # Session lookup is not needed for the unbound-token rule, but keep the
+    # database dependency deterministic for future guard changes.
+    monkeypatch.setattr(session_manager, "_raw_db", lambda: _FakeDb())
+    monkeypatch.setattr(session_manager, "is_platform_owner", lambda user: False, raising=False)
+
+    replaced = asyncio.run(
+        session_manager._session_was_replaced(U(), "legacy-jwt-without-sid")
+    )
+    assert replaced is True
