@@ -34,6 +34,7 @@ const QRCode     = require("qrcode");
 const axios      = require("axios");
 const path       = require("path");
 const fs         = require("fs");
+const crypto      = require("crypto");
 const multer     = require("multer");
 const {
   default: makeWASocket,
@@ -60,6 +61,33 @@ async function getWAVersion() {
 const PORT              = parseInt(process.env.PORT || process.env.WA_BRIDGE_PORT || "3002");
 const BACKEND_URL       = process.env.BACKEND_URL    || "http://localhost:8000";
 const BRIDGE_PUBLIC_URL = (process.env.BRIDGE_PUBLIC_URL || `http://localhost:${PORT}`).replace(/\/$/, "");
+const BRIDGE_SECRET     = String(process.env.WA_BRIDGE_SECRET || "").trim();
+const IS_PRODUCTION     = String(process.env.NODE_ENV || "").toLowerCase() === "production";
+if (IS_PRODUCTION && !BRIDGE_SECRET) {
+  throw new Error("WA_BRIDGE_SECRET is required in production.");
+}
+
+function bridgeSecretMatches(value) {
+  if (!BRIDGE_SECRET || !value) return false;
+  const a = Buffer.from(String(value));
+  const b = Buffer.from(BRIDGE_SECRET);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+function signMedia(filename, expiresAt) {
+  const payload = `${filename}.${expiresAt}`;
+  return crypto.createHmac("sha256", BRIDGE_SECRET).update(payload).digest("hex");
+}
+
+function mediaSignatureValid(filename, expiresAt, signature) {
+  if (!BRIDGE_SECRET || !filename || !signature) return false;
+  const exp = Number(expiresAt || 0);
+  if (!Number.isFinite(exp) || exp < Math.floor(Date.now() / 1000)) return false;
+  const expected = signMedia(filename, exp);
+  const a = Buffer.from(String(signature));
+  const b = Buffer.from(expected);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
 const SESSIONS_DIR      = path.join(__dirname, "sessions");
 const UPLOAD_DIR        = path.join(__dirname, "uploads");
 const logger            = pino({ level: "warn" });
@@ -241,10 +269,18 @@ function pushSSE(event, data) {
 }
 
 // ── Resilient webhook post (retries on failure) ──────────────────────────────
+function requireBridgeAuth(req, res, next) {
+  if (!BRIDGE_SECRET || !bridgeSecretMatches(req.get("X-WA-Bridge-Secret"))) {
+    return res.status(401).json({ error: "Bridge authentication required" });
+  }
+  next();
+}
+
+
 async function webhookPost(url, data, description = "webhook") {
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      await axios.post(url, data, { timeout: 15000 });
+      await axios.post(url, data, { timeout: 15000, headers: { "X-WA-Bridge-Secret": BRIDGE_SECRET } });
       return;
     } catch (e) {
       const status = e.response?.status;
@@ -287,7 +323,11 @@ async function downloadAndSaveMedia(sessionId, msg) {
 
     fs.writeFileSync(filepath, buffer);
     return {
-      url:      `${BRIDGE_PUBLIC_URL}/media/${filename}`,
+      url: (() => {
+        const expiresAt = Math.floor(Date.now() / 1000) + 900;
+        const sig = signMedia(filename, expiresAt);
+        return `${BRIDGE_PUBLIC_URL}/media/${filename}?expires=${expiresAt}&sig=${sig}`;
+      })(),
       filename: m.documentMessage?.fileName || mediaMsg.fileName || filename,
       mimeType,
       size:     buffer.length,
@@ -333,12 +373,18 @@ async function drainQ(q) {
 
 // ── Express ──────────────────────────────────────────────────────────────────
 const app = express();
-app.use(cors({ origin: "*", exposedHeaders: ["Content-Disposition"] }));
+app.use(cors({ origin: IS_PRODUCTION ? false : "*", exposedHeaders: ["Content-Disposition"] }));
 app.use(express.json({ limit: "2mb" }));
 
-app.use("/media", express.static(UPLOAD_DIR, {
+app.use("/media", (req, res, next) => {
+  const filename = path.basename(req.path || "");
+  if (!mediaSignatureValid(filename, req.query.expires, req.query.sig)) {
+    return res.status(401).json({ error: "Media authorization required or expired" });
+  }
+  next();
+}, express.static(UPLOAD_DIR, {
   setHeaders: (res) => {
-    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Origin", IS_PRODUCTION ? "https://taskosphere.com" : "*");
     res.setHeader("Cache-Control", "public, max-age=86400");
   },
 }));
@@ -617,446 +663,3 @@ async function fetchAndSyncLiveHistory(sessionId) {
         if (!c.id || c.id.endsWith("@broadcast") || c.id.endsWith("@lid")) continue;
         chats.push({ id: c.id, name: c.name, lastMsgTimestamp: Math.floor(Date.now() / 1000) });
       }
-
-      // Add group chats
-      for (const g of groupArr) {
-        chats.push({ id: g.id, name: g.subject, lastMsgTimestamp: g.creation || Math.floor(Date.now() / 1000) });
-      }
-
-      if (chats.length > 0) {
-        console.log(`[${sessionId}] Pushing ${chats.length} contacts from store (no message history)`);
-        await syncHubHistory(sessionId, label, chats, [], storeContacts);
-      } else {
-        console.log(`[${sessionId}] No data available — messaging-history.set hasn't fired yet. User must wait or Force Sync.`);
-      }
-    }
-  } catch (e) {
-    console.warn(`[${sessionId}] fetchAndSyncLiveHistory failed:`, e.message);
-  }
-}
-
-// ── Start a session ──────────────────────────────────────────────────────────
-async function startSession(sessionId, webhookOnConnect = true, pairingPhone = null) {
-  const sessionDir = path.join(SESSIONS_DIR, sessionId);
-  if (!fs.existsSync(sessionDir)) fs.mkdirSync(sessionDir, { recursive: true });
-
-  sessions[sessionId] = sessions[sessionId] || {};
-  Object.assign(sessions[sessionId], { status: "connecting", qrBase64: null, pairCode: null });
-  sessions[sessionId].retryCount    = sessions[sessionId].retryCount    || 0;
-  sessions[sessionId].groupSubjects = sessions[sessionId].groupSubjects || {};
-
-  const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
-  const version = await getWAVersion();
-
-  const sock = makeWASocket({
-    version, auth: state, logger,
-    printQRInTerminal: false,
-    browser: ["Taskosphere", "Chrome", "1.0"],
-    generateHighQualityLinkPreview: false,
-    retryRequestDelayMs: 2000,
-    syncFullHistory: true,
-  });
-  sessions[sessionId].socket = sock;
-
-  if (pairingPhone && !state.creds?.registered) {
-    setTimeout(async () => {
-      try {
-        if (sessions[sessionId]?.status === "connected") return;
-        const code = await sock.requestPairingCode(pairingPhone);
-        sessions[sessionId].pairCode = code;
-        sessions[sessionId].status   = "awaiting_pairing";
-        console.log(`[${sessionId}] Pairing code: ${code}`);
-      } catch (e) {
-        console.error(`[${sessionId}] requestPairingCode failed:`, e.message);
-        if (sessions[sessionId]) { sessions[sessionId].status = "error"; sessions[sessionId].error = e.message; }
-      }
-    }, 3000);
-  }
-
-  sock.ev.on("connection.update", async (update) => {
-    const { connection, lastDisconnect, qr } = update;
-    if (qr) {
-      try {
-        sessions[sessionId].qrBase64 = await QRCode.toDataURL(qr);
-        sessions[sessionId].status   = "awaiting_scan";
-      } catch (e) { console.error(`[${sessionId}] QR error:`, e.message); }
-    }
-    if (connection === "open") {
-      const info = sock.user;
-      Object.assign(sessions[sessionId], {
-        status: "connected", qrBase64: null,
-        phoneNumber: info?.id?.split(":")[0] || "",
-        displayName: info?.name || info?.verifiedName || "",
-        connectedAt: new Date().toISOString(),
-        retryCount:  0,
-      });
-      console.log(`[${sessionId}] Connected as ${sessions[sessionId].displayName} (${sessions[sessionId].phoneNumber})`);
-      pushSSE("connected", { session_id: sessionId, phone: sessions[sessionId].phoneNumber });
-
-      // FIX: Delayed history push — always fetch real data, not just cache
-      // Uses a longer delay (12s) to let Baileys complete its internal load
-      setTimeout(async () => {
-        await fetchAndSyncLiveHistory(sessionId);
-      }, 12000);
-
-      if (webhookOnConnect) {
-        webhookPost(`${BACKEND_URL}/api/whatsapp/webhook/connected`, {
-          sessionId,
-          phoneNumber: sessions[sessionId].phoneNumber,
-          displayName: sessions[sessionId].displayName,
-          connectedAt: sessions[sessionId].connectedAt,
-        }, `${sessionId}:connected-webhook`);
-      }
-    }
-    if (connection === "close") {
-      const code   = lastDisconnect?.error?.output?.statusCode;
-      const should = code !== DisconnectReason.loggedOut;
-      sessions[sessionId].status = should ? "reconnecting" : "disconnected";
-      sessions[sessionId].socket = null;
-      pushSSE("disconnected", { session_id: sessionId });
-      webhookPost(`${BACKEND_URL}/api/whatsapp/webhook/disconnected`, { sessionId, reason: DisconnectReason[code] || code }, `${sessionId}:disconnected-webhook`);
-      if (should && sessions[sessionId].retryCount < 5) {
-        sessions[sessionId].retryCount++;
-        const delay = Math.min(8000 * sessions[sessionId].retryCount, 60000);
-        setTimeout(() => startSession(sessionId, false), delay);
-      } else if (!should) {
-        try { fs.rmSync(path.join(SESSIONS_DIR, sessionId), { recursive: true, force: true }); } catch (_) {}
-        delete sessions[sessionId];
-      }
-    }
-  });
-
-  sock.ev.on("creds.update", saveCreds);
-  sock.ev.on("contacts.upsert", (list) => {
-    updateLidMap(sessionId, list);
-    const changed = cacheContactNames(sessionId, list);
-    queueContactNameSync(sessionId, sessions[sessionId]?.displayName || sessionId, changed);
-  });
-  sock.ev.on("contacts.update", (list) => {
-    updateLidMap(sessionId, list);
-    const changed = cacheContactNames(sessionId, list);
-    queueContactNameSync(sessionId, sessions[sessionId]?.displayName || sessionId, changed);
-  });
-
-  sock.ev.on("messaging-history.set", async ({ chats, messages, contacts, isLatest }) => {
-    const label = sessions[sessionId]?.displayName || sessionId;
-    updateLidMap(sessionId, contacts);
-    cacheContactNames(sessionId, contacts);
-
-    if (!historyCache[sessionId]) historyCache[sessionId] = { chats: [], messages: [], contacts: [] };
-    const cache = historyCache[sessionId];
-    cache.chats    = mergeById(cache.chats,    chats    || [], c => c.id);
-    cache.contacts = mergeById(cache.contacts, contacts || [], c => c.id);
-    cache.messages = mergeById(cache.messages, messages || [], m => m.key?.id);
-
-    console.log(`[${sessionId}] messaging-history.set: ${(chats||[]).length} chats, ${(messages||[]).length} msgs, isLatest=${isLatest}`);
-    syncHubHistory(sessionId, label, chats, messages, contacts).catch(() => {});
-  });
-
-  sock.ev.on("messages.upsert", async ({ messages: msgs, type }) => {
-    if (type !== "notify") return;
-    const label = sessions[sessionId]?.displayName || sessionId;
-    if (!historyCache[sessionId]) historyCache[sessionId] = { chats: [], messages: [], contacts: [] };
-    historyCache[sessionId].messages = mergeById(historyCache[sessionId].messages, msgs || [], m => m.key?.id);
-    for (const msg of msgs) {
-      captureLidFromMessage(sessionId, msg);
-      notifyHubIncoming(sessionId, label, msg).catch(() => {});
-    }
-  });
-
-  sock.ev.on("messages.update", (updates) => {
-    for (const u of updates) {
-      if (u.key?.id) {
-        pushSSE("message_status", {
-          message_id: u.key.id,
-          jid:        u.key.remoteJid,
-          status:     u.update?.status,
-        });
-      }
-    }
-  });
-
-  sock.ev.on("groups.upsert", (groups) => {
-    const label = sessions[sessionId]?.displayName || sessionId;
-    notifyHubGroups(sessionId, label, groups).catch(() => {});
-  });
-  sock.ev.on("groups.update", async (updates) => {
-    try {
-      const label = sessions[sessionId]?.displayName || sessionId;
-      const full  = [];
-      for (const u of updates) {
-        if (!u.id) continue;
-        try { const meta = await sock.groupMetadata(u.id); full.push(meta); } catch (_) {}
-      }
-      if (full.length) notifyHubGroups(sessionId, label, full).catch(() => {});
-    } catch (_) {}
-  });
-}
-
-// ── Boot persisted sessions ──────────────────────────────────────────────────
-async function bootPersistedSessions() {
-  if (!fs.existsSync(SESSIONS_DIR)) return;
-  const dirs = fs.readdirSync(SESSIONS_DIR).filter(d =>
-    fs.statSync(path.join(SESSIONS_DIR, d)).isDirectory()
-  );
-  console.log(`Booting ${dirs.length} persisted session(s)…`);
-  for (const sid of dirs) await startSession(sid, false);
-}
-
-function pickSession(sessionId) {
-  if (sessionId && sessions[sessionId]?.status === "connected") return sessions[sessionId];
-  return Object.values(sessions).find(s => s.status === "connected");
-}
-
-function buildMediaPayload(buffer, mimeType, filename, caption) {
-  if (mimeType.startsWith("image/")) return { image: buffer, caption: caption || undefined };
-  if (mimeType.startsWith("video/")) return { video: buffer, caption: caption || undefined };
-  if (mimeType.startsWith("audio/")) return { audio: buffer, mimetype: mimeType, ptt: false };
-  return { document: buffer, mimetype: mimeType, fileName: filename || "file", caption: caption || undefined };
-}
-
-async function buildSendJid(sessionId, to) {
-  if (!to) return null;
-  let jid = to.includes("@") ? to : `${to.replace(/\D/g, "")}@s.whatsapp.net`;
-  if (jid.endsWith("@g.us"))           return jid;
-  if (jid.endsWith("@s.whatsapp.net")) return jid;
-  if (jid.endsWith("@lid")) {
-    const resolved = await resolveJidStrict(sessionId, jid);
-    if (!resolved || resolved.endsWith("@lid")) return null;
-    return resolved;
-  }
-  return jid;
-}
-
-// ─── REST API ────────────────────────────────────────────────────────────────
-
-app.get("/sessions", throttle("get_sessions", 1500), (req, res) => {
-  res.json({ sessions: Object.entries(sessions).map(([id, s]) => ({
-    id, sessionId: id, status: s.status, label: s.displayName || id,
-    phoneNumber: s.phoneNumber || null, displayName: s.displayName || null,
-    connectedAt: s.connectedAt || null, qrAvailable: !!s.qrBase64,
-  })) });
-});
-
-app.post("/sessions", async (req, res) => {
-  const sessionId    = req.body.sessionId    || `session_${Date.now()}`;
-  const pairingPhone = req.body.pairingPhone || null;
-  if (sessions[sessionId]?.status === "connected")
-    return res.status(409).json({ error: "Session already connected" });
-  try {
-    await startSession(sessionId, true, pairingPhone);
-    res.json({ sessionId, status: "connecting" });
-  } catch (e) {
-    res.status(500).json({ error: `Failed: ${e.message}` });
-  }
-});
-
-app.get("/sessions/:id", (req, res) => {
-  const s = sessions[req.params.id];
-  if (!s) return res.status(404).json({ error: "Session not found" });
-  res.json({ id: req.params.id, sessionId: req.params.id, status: s.status,
-    label: s.displayName || req.params.id, phoneNumber: s.phoneNumber || null,
-    displayName: s.displayName || null, connectedAt: s.connectedAt || null });
-});
-
-app.get("/sessions/:id/qr", (req, res) => {
-  const s = sessions[req.params.id];
-  if (!s) return res.status(404).json({ error: "Session not found" });
-  res.json({ qr: s.qrBase64 || null, status: s.status });
-});
-
-app.get("/sessions/:id/pair-code", (req, res) => {
-  const s = sessions[req.params.id];
-  if (!s) return res.status(404).json({ error: "Session not found" });
-  if (s.status === "connected") return res.json({ code: null, status: "connected" });
-  res.json({ code: s.pairCode || null, status: s.status || "waiting", error: s.error || null });
-});
-
-app.delete("/sessions/:id", async (req, res) => {
-  const s = sessions[req.params.id];
-  if (!s) return res.status(404).json({ error: "Session not found" });
-  try { if (s.socket) await s.socket.logout(); } catch (_) {}
-  try { fs.rmSync(path.join(SESSIONS_DIR, req.params.id), { recursive: true, force: true }); } catch (_) {}
-  delete sessions[req.params.id];
-  delete historyCache[req.params.id];
-  res.json({ message: "Session deleted" });
-});
-
-// FIX: Force sync now calls fetchAndSyncLiveHistory which actually fetches
-// real data from Baileys instead of just re-pushing an empty in-memory cache.
-app.post("/sessions/:id/sync", async (req, res) => {
-  const id  = req.params.id;
-  const s   = sessions[id];
-  if (!s || s.status !== "connected" || !s.socket)
-    return res.status(503).json({ error: "Session not connected" });
-  try {
-    // Always fetch fresh data on explicit sync request
-    await fetchAndSyncLiveHistory(id);
-    res.json({
-      ok: true,
-      message: "Sync triggered — fetching live data from WhatsApp",
-    });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.get("/sessions/:id/resolve-jid", async (req, res) => {
-  const jid = req.query.jid || "";
-  if (!jid) return res.status(400).json({ error: "jid query param required" });
-  const resolved = await resolveJidStrict(req.params.id, jid);
-  res.json({
-    jid, resolved_jid: resolved || jid, resolved: !!resolved && resolved !== jid,
-    safe_to_send: !!resolved && !resolved.endsWith("@lid"),
-    lid_map_size: Object.keys(lidMaps[req.params.id] || {}).length,
-  });
-});
-
-app.get("/sessions/:id/contacts/:jid/profile-pic", async (req, res) => {
-  const s = sessions[req.params.id];
-  if (!s || s.status !== "connected" || !s.socket)
-    return res.status(503).json({ error: "Session not connected" });
-  try {
-    let jid = decodeURIComponent(req.params.jid);
-    if (!jid.includes("@")) jid = `${jid}@s.whatsapp.net`;
-    jid = resolveJid(req.params.id, jid);
-    const url = await s.socket.profilePictureUrl(jid, "image");
-    res.json({ url: url || null, jid });
-  } catch (e) {
-    res.json({ url: null, jid: req.params.jid, error: e.message });
-  }
-});
-
-app.get("/sessions/:id/groups", async (req, res) => {
-  const s = sessions[req.params.id];
-  if (!s || s.status !== "connected" || !s.socket)
-    return res.status(503).json({ error: "Session not connected" });
-  try {
-    const groups = await s.socket.groupFetchAllParticipating();
-    const out = Object.values(groups || {}).map(g => ({
-      jid: g.id, subject: g.subject, description: g.desc || null, owner: g.owner || null,
-      size: g.size || (g.participants?.length || 0),
-      participants: (g.participants || []).map(p => ({ jid: resolveJid(req.params.id, p.id), admin: p.admin || null })),
-      created_at: g.creation || null,
-    }));
-    res.json({ groups: out });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.get("/sessions/:id/groups/:gjid/participants", async (req, res) => {
-  const s = sessions[req.params.id];
-  if (!s || s.status !== "connected" || !s.socket)
-    return res.status(503).json({ error: "Session not connected" });
-  try {
-    const gjid = decodeURIComponent(req.params.gjid);
-    const meta = await s.socket.groupMetadata(gjid);
-    res.json({
-      jid: meta.id, subject: meta.subject,
-      participants: (meta.participants || []).map(p => ({
-        jid:   resolveJid(req.params.id, p.id),
-        phone: resolveJid(req.params.id, p.id).split("@")[0],
-        admin: p.admin || null,
-      })),
-    });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.post("/send", async (req, res) => {
-  const { to, message, sessionId } = req.body;
-  if (!to || !message) return res.status(400).json({ error: "to and message required" });
-  const session = pickSession(sessionId);
-  if (!session || !session.socket) return res.status(503).json({ error: "No connected session" });
-  const sid = sessionId || Object.keys(sessions).find(k => sessions[k] === session) || "default";
-  const jid = await buildSendJid(sid, to);
-  if (!jid) return res.status(422).json({ error: "Could not resolve @lid recipient to a real phone JID." });
-  try {
-    const result = await enqueueSend(sid, () => session.socket.sendMessage(jid, { text: message }));
-    res.json({ success: true, messageId: result?.key?.id, sentTo: jid });
-  } catch (e) {
-    const status = e?.output?.statusCode || e?.status || 500;
-    res.status(status === 429 ? 429 : 500).json({ error: e.message, retryable: status === 429 });
-  }
-});
-
-app.post("/send-media", upload.single("file"), async (req, res) => {
-  try {
-    const { to, sessionId, caption } = req.body;
-    if (!to || !req.file) return res.status(400).json({ error: "to and file required" });
-    const session = pickSession(sessionId);
-    if (!session || !session.socket) return res.status(503).json({ error: "No connected session" });
-    const sid = sessionId || Object.keys(sessions).find(k => sessions[k] === session) || "default";
-    const jid = await buildSendJid(sid, to);
-    if (!jid) return res.status(422).json({ error: "Could not resolve @lid recipient." });
-    const buffer = fs.readFileSync(req.file.path);
-    fs.unlink(req.file.path, () => {});
-    const result = await enqueueSend(sid, () =>
-      session.socket.sendMessage(jid, buildMediaPayload(buffer, req.file.mimetype, req.file.originalname, caption))
-    );
-    res.json({ success: true, messageId: result?.key?.id });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-app.post("/send-media-base64", express.json({ limit: "25mb" }), async (req, res) => {
-  try {
-    const { to, sessionId, caption, base64, mimeType, filename } = req.body;
-    if (!to || !base64 || !mimeType) return res.status(400).json({ error: "to, base64, mimeType required" });
-    const session = pickSession(sessionId);
-    if (!session || !session.socket) return res.status(503).json({ error: "No connected session" });
-    const sid = sessionId || Object.keys(sessions).find(k => sessions[k] === session) || "default";
-    const jid = await buildSendJid(sid, to);
-    if (!jid) return res.status(422).json({ error: "Could not resolve @lid recipient." });
-    const buffer = Buffer.from(base64, "base64");
-    const result = await enqueueSend(sid, () =>
-      session.socket.sendMessage(jid, buildMediaPayload(buffer, mimeType, filename || "file", caption))
-    );
-    res.json({ success: true, messageId: result?.key?.id, filename: filename || "file", mimeType });
-  } catch (e) {
-    const status = e?.output?.statusCode || e?.status || 500;
-    res.status(status === 429 ? 429 : 500).json({ error: e.message, retryable: status === 429 });
-  }
-});
-
-app.get("/status", (req, res) => {
-  res.json({
-    connected:       !!Object.values(sessions).find(s => s.status === "connected"),
-    sessionsCount:   Object.keys(sessions).length,
-    bridgePublicUrl: BRIDGE_PUBLIC_URL,
-  });
-});
-
-// ── Health check ─────────────────────────────────────────────────────────────
-app.get("/health", (req, res) => res.json({ ok: true }));
-
-app.listen(PORT, async () => {
-  console.log(`WA Bridge v4.0 running on port ${PORT}`);
-  console.log(`BACKEND_URL  : ${BACKEND_URL}`);
-  console.log(`BRIDGE_PUBLIC_URL: ${BRIDGE_PUBLIC_URL}`);
-
-  // Critical env var warnings
-  if (BRIDGE_PUBLIC_URL.includes("localhost") && process.env.NODE_ENV !== "development") {
-    console.error(`⚠️  WARNING: BRIDGE_PUBLIC_URL is "${BRIDGE_PUBLIC_URL}" — media URLs sent to the backend will be localhost URLs which the browser CANNOT reach.`);
-    console.error(`   Set BRIDGE_PUBLIC_URL to your public Render/cloud URL e.g. https://your-wa-bridge.onrender.com`);
-  }
-
-  // Startup connectivity check to backend
-  try {
-    const probe = await axios.get(`${BACKEND_URL}/health`, { timeout: 8000 }).catch(e => e.response || null);
-    if (!probe) {
-      console.error(`\n⚠️  CRITICAL: Cannot reach backend at BACKEND_URL="${BACKEND_URL}".`);
-      console.error(`   ALL webhook calls (chat history, incoming messages) will FAIL silently.`);
-      console.error(`   Fix: set BACKEND_URL to your actual backend URL in environment variables.\n`);
-    } else if (probe.status >= 400) {
-      console.warn(`⚠️  BACKEND_URL responded with HTTP ${probe.status} — backend may be misconfigured.`);
-    } else {
-      console.log(`✓ Backend reachable at ${BACKEND_URL} (HTTP ${probe.status})`);
-    }
-  } catch (e) {
-    console.warn("Startup backend check error:", e.message);
-  }
-
-  await bootPersistedSessions();
-});
