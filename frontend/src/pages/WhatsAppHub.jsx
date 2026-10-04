@@ -1458,16 +1458,19 @@ export default function WhatsAppHub() {
     const eventSourceRef = useRef(null);
     const reconnectTimerRef = useRef(null);
 
-    const connectSSE = useCallback(() => {
+    const connectSSE = useCallback(async () => {
       try {
         if (eventSourceRef.current) { try { eventSourceRef.current.close(); } catch(_){} }
-        const token = getToken()
-          || document.cookie.match(/token=([^;]+)/)?.[1]
-          || sessionStorage.getItem('token');
+        // EventSource cannot set Authorization headers. Mint a short-lived,
+        // single-use stream credential through the normal authenticated API.
+        const tokenResponse = await api.post('/whatsapp/hub/events-token', null, {
+          _silent: true,
+          _skipReadyGate: true,
+        });
+        const streamToken = tokenResponse?.data?.stream_token;
+        if (!streamToken) throw new Error('Missing SSE stream credential');
         const sseBase = `${BASE_URL}/whatsapp/hub/events`;
-        const url = token
-          ? `${sseBase}?token=${encodeURIComponent(token)}`
-          : sseBase;
+        const url = `${sseBase}?token=${encodeURIComponent(streamToken)}`;
         const es = new EventSource(url, { withCredentials: true });
         es.addEventListener('message', () => { loadContacts(); });
         es.addEventListener('sync',    () => { loadContacts(); });
@@ -1475,12 +1478,13 @@ export default function WhatsAppHub() {
         es.onerror = () => {
           try { es.close(); } catch(_){}
           eventSourceRef.current = null;
-          reconnectTimerRef.current = setTimeout(connectSSE, 8000);
+          reconnectTimerRef.current = setTimeout(() => { connectSSE(); }, 8000);
         };
         eventSourceRef.current = es;
-      } catch(_) {}
+      } catch(_) {
+        reconnectTimerRef.current = setTimeout(() => { connectSSE(); }, 8000);
+      }
     }, [loadContacts]);
-
     // Connect SSE on mount; auto-reload active thread on new message
     useEffect(() => {
       connectSSE();
