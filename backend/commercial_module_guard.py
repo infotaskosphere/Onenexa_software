@@ -67,6 +67,12 @@ CORE_PREFIXES = (
     "/settings",
 )
 
+CORE_REPORT_PREFIXES = (
+    "/reports/efficiency",
+    "/reports/performance-rankings",
+    "/reports/export",
+)
+
 COMMERCIAL_BLOCKED_PREFIXES = (
     "/v2/search",
     "/v2/platform",
@@ -84,9 +90,6 @@ MODULE_PREFIXES = {
         "/visits",
         "/client-portal-manager",
         "/dashboard",
-        "/reports/efficiency",
-        "/reports/performance-rankings",
-        "/reports/export",
     ),
     "finix": (
         "/finix-dashboard",
@@ -368,7 +371,7 @@ def module_for_path(path: str, method: str = "GET") -> Optional[str]:
     if normalized.startswith("/api"):
         normalized = normalized[4:] or "/"
 
-    if _matches(normalized, CORE_PREFIXES):
+    if _matches(normalized, CORE_PREFIXES) or _matches(normalized, CORE_REPORT_PREFIXES):
         return "core"
 
     if method == "GET":
@@ -642,6 +645,8 @@ def _hydrate_admin(user: User, license_doc: dict) -> User:
 
 
 def _licensed_module(module: str, license_doc: dict) -> bool:
+    if module == "core":
+        return True
     return module in resolve_license_modules(license_doc)
 
 
