@@ -27,7 +27,11 @@ from fastapi.responses import StreamingResponse, JSONResponse
 import io
 from pydantic import BaseModel, EmailStr, Field
 from passlib.context import CryptContext
-from jose import jwt, JWTError
+try:
+    from jose import jwt, JWTError
+except ImportError:
+    import jwt
+    JWTError = getattr(jwt, "PyJWTError", Exception)
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from backend.dependencies import (

@@ -146,9 +146,10 @@ const itemVariants = {
 const getPriorityStripeClass = (priority) => {
   const p = (priority || '').toLowerCase().trim();
   if (p === 'critical') return 'border-l-[3px] border-l-red-500';
+  if (p === 'high')     return 'border-l-[3px] border-l-rose-500';
   if (p === 'urgent')   return 'border-l-[3px] border-l-orange-400';
-  if (p === 'medium')   return 'border-l-[3px] border-l-emerald-500';
-  if (p === 'low')      return 'border-l-[3px] border-l-blue-400';
+  if (p === 'medium')   return 'border-l-[3px] border-l-amber-500';
+  if (p === 'low')      return 'border-l-[3px] border-l-emerald-500';
   return 'border-l-[3px] border-l-slate-200';
 };
 
@@ -1648,9 +1649,9 @@ export default function Dashboard() {
         border: 'border-amber-200 dark:border-amber-800',
       },
       low: {
-        bg:     'bg-blue-50 dark:bg-blue-900/20',
-        text:   'text-blue-600',
-        border: 'border-blue-200 dark:border-blue-800',
+        bg:     'bg-emerald-50 dark:bg-emerald-900/20',
+        text:   'text-emerald-600 dark:text-emerald-400',
+        border: 'border-emerald-200 dark:border-emerald-800',
       },
     };
     return styles[priority?.toLowerCase()] || styles.medium;

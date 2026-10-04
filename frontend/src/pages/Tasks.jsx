@@ -199,10 +199,51 @@ const STATUS_STYLES = {
 };
 
 const PRIORITY_STYLES = {
-  low:      { bg: 'bg-green-50',  text: 'text-green-700',  bar: 'bg-green-500',  label: 'LOW' },
-  medium:   { bg: 'bg-yellow-50', text: 'text-yellow-700', bar: 'bg-yellow-500', label: 'MED' },
-  high:     { bg: 'bg-orange-50', text: 'text-orange-700', bar: 'bg-orange-500', label: 'HIGH' },
-  critical: { bg: 'bg-red-50',    text: 'text-red-700',    bar: 'bg-red-600',    label: 'CRIT' },
+  low: {
+    bg: 'bg-emerald-50 dark:bg-emerald-950/40',
+    text: 'text-emerald-700 dark:text-emerald-300',
+    border: 'border-emerald-200 dark:border-emerald-800',
+    badge: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800',
+    dot: 'bg-emerald-500',
+    bar: 'bg-emerald-500',
+    label: 'Low',
+    shortLabel: 'LOW',
+  },
+  medium: {
+    bg: 'bg-amber-50 dark:bg-amber-950/40',
+    text: 'text-amber-700 dark:text-amber-300',
+    border: 'border-amber-200 dark:border-amber-800',
+    badge: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800',
+    dot: 'bg-amber-500',
+    bar: 'bg-amber-500',
+    label: 'Medium',
+    shortLabel: 'MED',
+  },
+  high: {
+    bg: 'bg-rose-50 dark:bg-rose-950/40',
+    text: 'text-rose-700 dark:text-rose-300',
+    border: 'border-rose-200 dark:border-rose-800',
+    badge: 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-800',
+    dot: 'bg-rose-500',
+    bar: 'bg-rose-500',
+    label: 'High',
+    shortLabel: 'HIGH',
+  },
+  critical: {
+    bg: 'bg-red-50 dark:bg-red-950/40',
+    text: 'text-red-700 dark:text-red-300',
+    border: 'border-red-200 dark:border-red-800',
+    badge: 'bg-red-50 text-red-700 border-red-200 dark:bg-red-950/60 dark:text-red-300 dark:border-red-800',
+    dot: 'bg-red-600',
+    bar: 'bg-red-600',
+    label: 'Critical',
+    shortLabel: 'CRIT',
+  },
+};
+
+const getPriorityStyle = (priority) => {
+  const p = String(priority || 'medium').trim().toLowerCase();
+  return PRIORITY_STYLES[p] || PRIORITY_STYLES.medium;
 };
 
 const getStripeColor = (task, overdue, dueToday) => {
@@ -214,8 +255,9 @@ const getStripeColor = (task, overdue, dueToday) => {
   if (s === 'pending') {
     const p = (task.priority || '').toLowerCase();
     if (p === 'critical') return 'bg-red-600';
-    if (p === 'high')     return 'bg-orange-500';
-    return 'bg-red-400';
+    if (p === 'high')     return 'bg-rose-500';
+    if (p === 'low')      return 'bg-emerald-500';
+    return 'bg-amber-400';
   }
   return 'bg-slate-300';
 };
@@ -396,6 +438,7 @@ const TaskRow = memo(function TaskRow({
   parseChecklist, taskChecklists, toggleChecklistItem,
   canModifyTask, canDeleteTasks,
   handleEdit, handleDelete, handleDuplicateTask, handleQuickStatusChange,
+  handleQuickPriorityChange,
   openTaskDetail, openCommentTaskId, setOpenCommentTaskId,
   fetchComments, comments: taskComments, newComment, setNewComment,
   selectedTask, setSelectedTask, handleAddComment,
@@ -419,7 +462,7 @@ const TaskRow = memo(function TaskRow({
 
         <div
           className="pl-5 pr-3 py-2.5 grid items-center gap-0"
-          style={{ gridTemplateColumns: '24px 24px minmax(0,1fr) 160px 88px 64px 72px 110px 110px 88px 100px' }}
+          style={{ gridTemplateColumns: '24px 24px minmax(0,1fr) 160px 88px 76px 72px 110px 110px 88px 100px' }}
         >
           {selectMode ? (
             <button onClick={() => onToggleSelect(task.id)} className="flex items-center justify-center" title="Select task">
@@ -485,9 +528,58 @@ const TaskRow = memo(function TaskRow({
           </div>
 
           <div className="flex items-center justify-center overflow-hidden">
-            <span className={`text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ${priorityStyle.bg} ${priorityStyle.text}`}>
-              {priorityStyle.label}
-            </span>
+            {canModifyTask(task) && handleQuickPriorityChange ? (
+              <Popover>
+                <PopoverTrigger asChild>
+                  <button
+                    type="button"
+                    className={`group/prio inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border transition-all hover:scale-105 active:scale-95 cursor-pointer ${priorityStyle.badge || `${priorityStyle.bg} ${priorityStyle.text} border`}`}
+                    title="Click to assign or change priority"
+                  >
+                    <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${priorityStyle.dot || 'bg-slate-400'}`} />
+                    <span>{priorityStyle.label}</span>
+                    <ChevronDown className="h-2.5 w-2.5 opacity-50 group-hover/prio:opacity-100 transition-opacity ml-0.5" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent className="w-36 p-1.5 rounded-xl shadow-lg border bg-white dark:bg-slate-800" align="center" side="bottom">
+                  <div className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 text-slate-400">
+                    Assign Priority
+                  </div>
+                  <div className="space-y-0.5">
+                    {[
+                      { value: 'high', label: 'High', style: PRIORITY_STYLES.high },
+                      { value: 'medium', label: 'Medium', style: PRIORITY_STYLES.medium },
+                      { value: 'low', label: 'Low', style: PRIORITY_STYLES.low },
+                    ].map((p) => {
+                      const isSelected = (task.priority || '').toLowerCase() === p.value;
+                      return (
+                        <button
+                          key={p.value}
+                          type="button"
+                          onClick={() => handleQuickPriorityChange(task, p.value)}
+                          className={`w-full flex items-center justify-between px-2 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                            isSelected
+                              ? `${p.style.bg} ${p.style.text} font-bold`
+                              : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className={`w-2 h-2 rounded-full ${p.style.dot}`} />
+                            <span>{p.label}</span>
+                          </div>
+                          {isSelected && <Check className="h-3.5 w-3.5" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </PopoverContent>
+              </Popover>
+            ) : (
+              <span className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${priorityStyle.badge || `${priorityStyle.bg} ${priorityStyle.text} border`}`}>
+                <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${priorityStyle.dot || 'bg-slate-400'}`} />
+                <span>{priorityStyle.label}</span>
+              </span>
+            )}
           </div>
 
           <div className="flex items-center justify-center overflow-hidden">
@@ -746,6 +838,7 @@ const BoardCard = memo(function BoardCard({
   parseChecklist, taskChecklists, toggleChecklistItem,
   canModifyTask, canDeleteTasks,
   handleEdit, handleDelete, handleDuplicateTask, handleQuickStatusChange,
+  handleQuickPriorityChange,
   openTaskDetail, openCommentTaskId, setOpenCommentTaskId,
   fetchComments, comments: taskComments, newComment, setNewComment,
   selectedTask, setSelectedTask, handleAddComment,
@@ -791,9 +884,58 @@ const BoardCard = memo(function BoardCard({
           </div>
 
           <div className="flex flex-wrap gap-1.5">
-            <span className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-md ${priorityStyle.bg} ${priorityStyle.text}`}>
-              {priorityStyle.label}
-            </span>
+            {canModifyTask(task) && handleQuickPriorityChange ? (
+              <Popover>
+                <PopoverTrigger asChild>
+                  <button
+                    type="button"
+                    className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-md border transition-all hover:scale-105 active:scale-95 cursor-pointer ${priorityStyle.badge || `${priorityStyle.bg} ${priorityStyle.text} border`}`}
+                    title="Click to assign or change priority"
+                  >
+                    <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${priorityStyle.dot || 'bg-slate-400'}`} />
+                    <span>{priorityStyle.label}</span>
+                    <ChevronDown className="h-2.5 w-2.5 opacity-60 ml-0.5" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent className="w-36 p-1.5 rounded-xl shadow-lg border bg-white dark:bg-slate-800" align="start">
+                  <div className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 text-slate-400">
+                    Assign Priority
+                  </div>
+                  <div className="space-y-0.5">
+                    {[
+                      { value: 'high', label: 'High', style: PRIORITY_STYLES.high },
+                      { value: 'medium', label: 'Medium', style: PRIORITY_STYLES.medium },
+                      { value: 'low', label: 'Low', style: PRIORITY_STYLES.low },
+                    ].map((p) => {
+                      const isSelected = (task.priority || '').toLowerCase() === p.value;
+                      return (
+                        <button
+                          key={p.value}
+                          type="button"
+                          onClick={() => handleQuickPriorityChange(task, p.value)}
+                          className={`w-full flex items-center justify-between px-2 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                            isSelected
+                              ? `${p.style.bg} ${p.style.text} font-bold`
+                              : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className={`w-2 h-2 rounded-full ${p.style.dot}`} />
+                            <span>{p.label}</span>
+                          </div>
+                          {isSelected && <Check className="h-3.5 w-3.5" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </PopoverContent>
+              </Popover>
+            ) : (
+              <span className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-md border ${priorityStyle.badge || `${priorityStyle.bg} ${priorityStyle.text} border`}`}>
+                <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${priorityStyle.dot || 'bg-slate-400'}`} />
+                <span>{priorityStyle.label}</span>
+              </span>
+            )}
             {isOverdue && <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-md bg-red-100 text-red-700 border border-red-200 flex items-center gap-1"><AlertCircle className="h-3 w-3 text-red-600" /> Overdue</span>}
             {isDueToday && <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-md bg-amber-100 text-amber-800 border border-amber-300 flex items-center gap-1"><Zap className="h-3 w-3 text-amber-600 fill-amber-600" /> Due Today</span>}
             {task.is_recurring && <span className="text-[10px] font-semibold bg-purple-50 text-purple-700 px-2 py-0.5 rounded-md">↺ Recurring</span>}
@@ -995,6 +1137,7 @@ export default function Tasks() {
   const [selectedTaskIds, setSelectedTaskIds] = useState(() => new Set());
   const [sendingNudge,   setSendingNudge]   = useState(false);
   const [bulkNudging,    setBulkNudging]    = useState(false);
+  const [bulkUpdatingPriority, setBulkUpdatingPriority] = useState(false);
 
   const [searchQuery,             setSearchQuery]             = useState('');
   const [filterStatus,            setFilterStatus]            = useState('all');
@@ -1481,6 +1624,38 @@ export default function Tasks() {
     }
   }, []);
 
+  const handleQuickPriorityChange = React.useCallback(async (task, newPriority) => {
+    const previousPriority = task.priority || 'medium';
+    if (String(previousPriority).toLowerCase() === String(newPriority).toLowerCase()) return;
+    const normalized = String(newPriority).toLowerCase();
+
+    // Optimistic update — rolled back below if the server rejects it.
+    setTasks(prev => prev.map(t => t.id === task.id ? { ...t, priority: normalized } : t));
+    setSelectedDetailTask(prev => (prev && prev.id === task.id ? { ...prev, priority: normalized } : prev));
+
+    try {
+      const res = await fetch(`${API_BASE}/tasks/${task.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+        body: JSON.stringify({ priority: normalized })
+      });
+      if (!res.ok) {
+        setTasks(prev => prev.map(t => t.id === task.id ? { ...t, priority: previousPriority } : t));
+        setSelectedDetailTask(prev => (prev && prev.id === task.id ? { ...prev, priority: previousPriority } : prev));
+        let detail = '';
+        try { detail = (await res.json())?.detail || ''; } catch {}
+        toast.error(detail || `Failed to update priority (${res.status})`);
+        return;
+      }
+      const label = PRIORITY_STYLES[normalized]?.label || newPriority;
+      toast.success(`Priority set to ${label}`);
+    } catch {
+      setTasks(prev => prev.map(t => t.id === task.id ? { ...t, priority: previousPriority } : t));
+      setSelectedDetailTask(prev => (prev && prev.id === task.id ? { ...prev, priority: previousPriority } : prev));
+      toast.error('Network error');
+    }
+  }, []);
+
   const handleAddComment = React.useCallback(async () => {
     if (!newComment.trim()) return;
     const taskId = selectedTask?.id; if (!taskId) return;
@@ -1562,6 +1737,38 @@ export default function Tasks() {
       setBulkNudging(false);
     }
   };
+
+  const handleBulkPriorityChange = React.useCallback(async (newPriority) => {
+    if (selectedTaskIds.size === 0) return;
+    const normalized = String(newPriority).toLowerCase();
+    const ids = Array.from(selectedTaskIds);
+    setBulkUpdatingPriority(true);
+
+    const previousTasks = [...tasks];
+    setTasks(prev => prev.map(t => selectedTaskIds.has(t.id) ? { ...t, priority: normalized } : t));
+
+    try {
+      const results = await Promise.allSettled(
+        ids.map(id =>
+          fetch(`${API_BASE}/tasks/${id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+            body: JSON.stringify({ priority: normalized }),
+          })
+        )
+      );
+      const ok = results.filter(r => r.status === 'fulfilled' && r.value.ok).length;
+      const label = PRIORITY_STYLES[normalized]?.label || newPriority;
+      toast.success(`Priority updated to ${label} for ${ok}/${ids.length} task(s)`);
+      setSelectedTaskIds(new Set());
+      setSelectMode(false);
+    } catch {
+      setTasks(previousTasks);
+      toast.error('Failed to update priority for selected tasks');
+    } finally {
+      setBulkUpdatingPriority(false);
+    }
+  }, [selectedTaskIds, tasks]);
 
   // ── Enhanced local duplicate detection — deep field-level comparison ──
   const detectDuplicatesLocally = (taskList) => {
@@ -1994,8 +2201,12 @@ export default function Tasks() {
 
   // ── Filtering ─────────────────────────────────────────────────────────────
   const filteredTasks = useMemo(() => scopedTasks.filter(task => {
-    const matchesSearch   = task.title.toLowerCase().includes(searchQuery.toLowerCase()) || task.description?.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesPriority = filterPriority === 'all' || task.priority   === filterPriority;
+    const cleanQuery = (searchQuery || '').trim().toLowerCase();
+    const matchesSearch = !cleanQuery ||
+      Boolean(task.title && task.title.toLowerCase().includes(cleanQuery)) ||
+      Boolean(task.description && task.description.toLowerCase().includes(cleanQuery));
+    const taskPriority    = (task.priority || 'medium').toLowerCase();
+    const matchesPriority = filterPriority === 'all' || taskPriority === filterPriority.toLowerCase();
     const matchesCategory = filterCategory.length === 0 || filterCategory.includes(task.category);
     const matchesAssignee = filterAssignee.length === 0 || filterAssignee.includes(task.assigned_to) || filterAssignee.some(id => (task.sub_assignees || []).includes(id));
     const matchesTeam     = !filterTeamOnly || task.assigned_to === user?.id || (task.sub_assignees || []).includes(user?.id) || crossVisibilityUserIds.includes(task.assigned_to) || (task.sub_assignees || []).some(id => crossVisibilityUserIds.includes(id));
@@ -2038,7 +2249,7 @@ export default function Tasks() {
     result.sort((a, b) => {
       let cmp = 0;
       if (sortBy === 'due_date') { const dA = a.due_date ? new Date(a.due_date).getTime() : Infinity; const dB = b.due_date ? new Date(b.due_date).getTime() : Infinity; cmp = dA - dB; }
-      else if (sortBy === 'priority') { const prioOrder = { critical: 4, high: 3, medium: 2, low: 1 }; cmp = (prioOrder[b.priority] || 0) - (prioOrder[a.priority] || 0); }
+      else if (sortBy === 'priority') { const prioOrder = { critical: 4, high: 3, medium: 2, low: 1 }; cmp = (prioOrder[(b.priority || 'medium').toLowerCase()] || 0) - (prioOrder[(a.priority || 'medium').toLowerCase()] || 0); }
       else if (sortBy === 'title')  cmp = a.title.localeCompare(b.title);
       else if (sortBy === 'status') cmp = (a.status || '').localeCompare(b.status || '');
       else if (sortBy === 'created_date') { const dA = a.created_at ? new Date(a.created_at).getTime() : 0; const dB = b.created_at ? new Date(b.created_at).getTime() : 0; cmp = dA - dB; }
@@ -2612,13 +2823,37 @@ export default function Tasks() {
                             {/* Priority + Status */}
                             <div className="grid grid-cols-2 gap-4">
                               <div className="space-y-1.5">
-                                <Label className="text-[11px] font-semibold text-slate-500">Priority</Label>
+                                <Label className="text-[11px] font-semibold text-slate-500">Priority Level</Label>
+                                <div className="grid grid-cols-3 gap-1 mb-1.5">
+                                  {[
+                                    { value: 'high', label: 'High', style: PRIORITY_STYLES.high },
+                                    { value: 'medium', label: 'Medium', style: PRIORITY_STYLES.medium },
+                                    { value: 'low', label: 'Low', style: PRIORITY_STYLES.low },
+                                  ].map((p) => {
+                                    const isSelected = (formData.priority || 'medium').toLowerCase() === p.value;
+                                    return (
+                                      <button
+                                        key={p.value}
+                                        type="button"
+                                        onClick={() => setFormData(prev => ({ ...prev, priority: p.value }))}
+                                        className={`h-8 px-1 rounded-lg text-[11px] font-bold border transition-all flex items-center justify-center gap-1 ${
+                                          isSelected
+                                            ? `${p.style.badge} shadow-xs ring-2 ring-offset-1 ring-current`
+                                            : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                                        }`}
+                                      >
+                                        <span className={`w-1.5 h-1.5 rounded-full ${p.style.dot}`} />
+                                        <span>{p.label}</span>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
                                 <Select value={formData.priority} onValueChange={(v) => setFormData(p => ({ ...p, priority: v }))}>
-                                  <SelectTrigger className="h-10 text-sm rounded-xl border-slate-200 bg-slate-50"><SelectValue /></SelectTrigger>
+                                  <SelectTrigger className="h-9 text-xs rounded-xl border-slate-200 bg-slate-50"><SelectValue /></SelectTrigger>
                                   <SelectContent className="rounded-xl">
-                                    <SelectItem value="low">🟢 Low</SelectItem>
-                                    <SelectItem value="medium">🟡 Medium</SelectItem>
                                     <SelectItem value="high">🔴 High</SelectItem>
+                                    <SelectItem value="medium">🟡 Medium</SelectItem>
+                                    <SelectItem value="low">🟢 Low</SelectItem>
                                     <SelectItem value="critical">🚨 Critical</SelectItem>
                                   </SelectContent>
                                 </Select>
@@ -3652,13 +3887,23 @@ export default function Tasks() {
 
           {/* Search — wider, takes flex-[2] */}
           <div className="relative flex-[2] min-w-0">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
             <Input
-              placeholder="Search tasks…"
+              placeholder="Search by title or description…"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className={`pl-8 h-8 text-xs rounded-lg w-full ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 placeholder:text-slate-400' : 'bg-slate-50 border-slate-200'}`}
+              className={`pl-8 pr-7 h-8 text-xs rounded-lg w-full ${isDark ? 'bg-slate-700 border-slate-600 text-slate-100 placeholder:text-slate-400' : 'bg-slate-50 border-slate-200'}`}
             />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+                title="Clear search"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            )}
           </div>
 
           {/* Status — flex-1 each so all 5 dropdowns share remaining space equally */}
@@ -3684,10 +3929,10 @@ export default function Tasks() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Priorities</SelectItem>
-                <SelectItem value="low">Low</SelectItem>
-                <SelectItem value="medium">Medium</SelectItem>
-                <SelectItem value="high">High</SelectItem>
-                <SelectItem value="critical">Critical</SelectItem>
+                <SelectItem value="high">🔴 High Priority</SelectItem>
+                <SelectItem value="medium">🟡 Medium Priority</SelectItem>
+                <SelectItem value="low">🟢 Low Priority</SelectItem>
+                <SelectItem value="critical">🚨 Critical Priority</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -4115,6 +4360,37 @@ export default function Tasks() {
                 className="h-7 text-xs rounded-lg">
                 Clear
               </Button>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button size="sm" variant="outline" disabled={bulkUpdatingPriority}
+                    className="h-7 text-xs rounded-lg gap-1 border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200">
+                    {bulkUpdatingPriority ? <Loader2 className="h-3 w-3 animate-spin" /> : <SlidersHorizontal className="h-3 w-3" />}
+                    Set Priority
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-40 p-1.5 rounded-xl shadow-lg border bg-white dark:bg-slate-800" align="end">
+                  <div className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 text-slate-400">
+                    Assign to Selected
+                  </div>
+                  <div className="space-y-0.5">
+                    {[
+                      { value: 'high', label: 'High', style: PRIORITY_STYLES.high },
+                      { value: 'medium', label: 'Medium', style: PRIORITY_STYLES.medium },
+                      { value: 'low', label: 'Low', style: PRIORITY_STYLES.low },
+                    ].map((p) => (
+                      <button
+                        key={p.value}
+                        type="button"
+                        onClick={() => handleBulkPriorityChange(p.value)}
+                        className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+                      >
+                        <span className={`w-2 h-2 rounded-full ${p.style.dot}`} />
+                        <span>{p.label} Priority</span>
+                      </button>
+                    ))}
+                  </div>
+                </PopoverContent>
+              </Popover>
               <Button size="sm" onClick={handleBulkNudge} disabled={bulkNudging}
                 className="h-7 text-xs rounded-lg gap-1.5 bg-rose-600 hover:bg-rose-700 text-white">
                 {bulkNudging ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />Sending…</> : <><BellRing className="h-3.5 w-3.5" />Send Popup to Selected</>}
@@ -4128,10 +4404,66 @@ export default function Tasks() {
       <div className="overflow-y-auto max-h-[calc(100vh-360px)]">
         {viewMode === 'list' ? (
           <motion.div className="space-y-1.5" variants={containerVariants}>
+            {/* ── Search Bar at top of Task List View ── */}
+            <div className={`p-2 sm:p-2.5 rounded-xl border flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 transition-all ${
+              isDark ? 'bg-slate-800/90 border-slate-700' : 'bg-white border-slate-200 shadow-xs'
+            }`}>
+              <div className="relative flex-1 min-w-[200px]">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+                <Input
+                  type="text"
+                  placeholder="Filter tasks by title or description in real-time…"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className={`w-full pl-9 pr-8 h-9 text-xs rounded-lg transition-colors ${
+                    isDark
+                      ? 'bg-slate-900/60 border-slate-700 text-slate-100 placeholder:text-slate-500 focus-visible:ring-1 focus-visible:ring-blue-500'
+                      : 'bg-slate-50/80 border-slate-200 text-slate-800 placeholder:text-slate-400 focus-visible:bg-white focus-visible:ring-1 focus-visible:ring-blue-500'
+                  }`}
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 rounded text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+                    title="Clear search"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+
+              <div className="flex items-center justify-between sm:justify-end gap-2 shrink-0">
+                <span className={`text-[11px] font-medium px-2.5 py-1.5 rounded-lg border transition-colors ${
+                  searchQuery
+                    ? (isDark ? 'bg-blue-950/40 border-blue-800/60 text-blue-300' : 'bg-blue-50 border-blue-200 text-blue-700 font-semibold')
+                    : (isDark ? 'bg-slate-900/40 border-slate-700 text-slate-400' : 'bg-slate-50 border-slate-200 text-slate-500')
+                }`}>
+                  {searchQuery ? (
+                    <>Found <strong>{displayTasks.length}</strong> matching</>
+                  ) : (
+                    <>{displayTasks.length} task{displayTasks.length === 1 ? '' : 's'}</>
+                  )}
+                </span>
+                {searchQuery && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setSearchQuery('')}
+                    className="h-8 text-xs text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 px-2"
+                  >
+                    <X className="h-3 w-3 mr-1" />
+                    Clear
+                  </Button>
+                )}
+              </div>
+            </div>
+
             <div
               className={`hidden sm:grid items-center pl-5 pr-3 py-2 text-[10px] font-bold uppercase tracking-widest select-none border-b mb-1.5
                 ${isDark ? 'text-slate-500 border-slate-700' : 'text-slate-400 border-slate-100'}`}
-              style={{ gridTemplateColumns: '24px 24px minmax(0,1fr) 160px 88px 64px 72px 110px 110px 88px 100px' }}
+              style={{ gridTemplateColumns: '24px 24px minmax(0,1fr) 160px 88px 76px 72px 110px 110px 88px 100px' }}
             >
               {selectMode ? (
                 <button
@@ -4162,7 +4494,7 @@ export default function Tasks() {
               const taskIsOverdue = isOverdue(task);
               const displayStatus = getDisplayStatus(task);
               const statusStyle   = STATUS_STYLES[displayStatus] || STATUS_STYLES.pending;
-              const priorityStyle = PRIORITY_STYLES[task.priority] || PRIORITY_STYLES.medium;
+              const priorityStyle = getPriorityStyle(task.priority);
               const stripeColor   = getStripeColor(task, taskIsOverdue);
               return (
                 <TaskRow key={task.id} task={task} index={index}
@@ -4172,7 +4504,9 @@ export default function Tasks() {
                   taskChecklists={taskChecklists} toggleChecklistItem={toggleChecklistItem}
                   canModifyTask={canModifyTask} canDeleteTasks={canDeleteTasks}
                   handleEdit={handleEdit} handleDelete={handleDelete} handleDuplicateTask={handleDuplicateTask}
-                  handleQuickStatusChange={handleQuickStatusChange} openTaskDetail={openTaskDetail}
+                  handleQuickStatusChange={handleQuickStatusChange}
+                  handleQuickPriorityChange={handleQuickPriorityChange}
+                  openTaskDetail={openTaskDetail}
                   openCommentTaskId={openCommentTaskId} setOpenCommentTaskId={setOpenCommentTaskId}
                   fetchComments={fetchComments} comments={comments[task.id] || EMPTY_ARR} newComment={newComment}
                   setNewComment={setNewComment} selectedTask={selectedTask} setSelectedTask={setSelectedTask}
@@ -4185,11 +4519,29 @@ export default function Tasks() {
 
             {displayTasks.length === 0 && (
               <div className="text-center py-16">
-                <div className="w-12 h-12 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto mb-3">
-                  <Search className="h-5 w-5 text-slate-300" />
+                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-3 ${isDark ? 'bg-slate-800' : 'bg-slate-100'}`}>
+                  <Search className="h-5 w-5 text-slate-400" />
                 </div>
-                <p className="text-sm font-medium text-slate-500">No tasks found</p>
-                <p className="text-xs text-slate-400 mt-1">Try adjusting your filters</p>
+                <p className={`text-sm font-medium ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
+                  {searchQuery ? `No tasks match "${searchQuery}"` : 'No tasks found'}
+                </p>
+                <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
+                  {searchQuery
+                    ? 'No tasks matched your title or description search query in real-time. Try different keywords or clear your search.'
+                    : 'Try adjusting your filters'}
+                </p>
+                {searchQuery && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setSearchQuery('')}
+                    className="mt-3 text-xs gap-1.5 rounded-lg"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                    Clear Search
+                  </Button>
+                )}
               </div>
             )}
           </motion.div>
@@ -4213,7 +4565,7 @@ export default function Tasks() {
                       const taskIsOverdue = isOverdue(task);
                       const displayStatus = getDisplayStatus(task);
                       const statusStyle   = STATUS_STYLES[displayStatus] || STATUS_STYLES.pending;
-                      const priorityStyle = PRIORITY_STYLES[task.priority] || PRIORITY_STYLES.medium;
+                      const priorityStyle = getPriorityStyle(task.priority);
                       const stripeColor   = getStripeColor(task, taskIsOverdue);
                       return (
                         <BoardCard key={task.id} task={task} index={index}
@@ -4223,7 +4575,9 @@ export default function Tasks() {
                           taskChecklists={taskChecklists} toggleChecklistItem={toggleChecklistItem}
                           canModifyTask={canModifyTask} canDeleteTasks={canDeleteTasks}
                           handleEdit={handleEdit} handleDelete={handleDelete} handleDuplicateTask={handleDuplicateTask}
-                          handleQuickStatusChange={handleQuickStatusChange} openTaskDetail={openTaskDetail}
+                          handleQuickStatusChange={handleQuickStatusChange}
+                          handleQuickPriorityChange={handleQuickPriorityChange}
+                          openTaskDetail={openTaskDetail}
                           openCommentTaskId={openCommentTaskId} setOpenCommentTaskId={setOpenCommentTaskId}
                           fetchComments={fetchComments} comments={comments[task.id] || EMPTY_ARR} newComment={newComment}
                           setNewComment={setNewComment} selectedTask={selectedTask} setSelectedTask={setSelectedTask}
@@ -4256,7 +4610,7 @@ export default function Tasks() {
             const taskIsOverdue  = isOverdue(selectedDetailTask);
             const displayStatus  = getDisplayStatus(selectedDetailTask);
             const statusStyle    = STATUS_STYLES[displayStatus] || STATUS_STYLES.pending;
-            const priorityStyle  = PRIORITY_STYLES[selectedDetailTask.priority] || PRIORITY_STYLES.medium;
+            const priorityStyle  = getPriorityStyle(selectedDetailTask.priority);
             const checklistItems = parseChecklist(selectedDetailTask.description);
             const checkedItems   = taskChecklists[selectedDetailTask.id] || [];
             const progress       = getChecklistProgress(selectedDetailTask);
@@ -4264,9 +4618,53 @@ export default function Tasks() {
               <div className="space-y-5 mt-2">
                 <div>
                   <h2 className={`text-xl font-bold mb-2 leading-snug ${isDark ? 'text-slate-100' : 'text-slate-900'}`}>{selectedDetailTask.title}</h2>
-                  <div className="flex flex-wrap gap-1.5">
+                  <div className="flex flex-wrap items-center gap-1.5">
                     <span className={`text-xs font-semibold px-2.5 py-1 rounded-lg ${statusStyle.bg} ${statusStyle.text}`}>{taskIsOverdue ? 'Overdue' : statusStyle.label}</span>
-                    <span className={`text-xs font-semibold px-2.5 py-1 rounded-lg ${priorityStyle.bg} ${priorityStyle.text}`}>{priorityStyle.label} Priority</span>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <button
+                          type="button"
+                          className={`inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-lg border transition-all hover:scale-105 active:scale-95 cursor-pointer ${priorityStyle.badge || `${priorityStyle.bg} ${priorityStyle.text} border`}`}
+                          title="Click to assign or change priority"
+                        >
+                          <span className={`w-2 h-2 rounded-full ${priorityStyle.dot}`} />
+                          <span>{priorityStyle.label} Priority</span>
+                          <ChevronDown className="h-3 w-3 opacity-60 ml-0.5" />
+                        </button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-36 p-1.5 rounded-xl shadow-lg border bg-white dark:bg-slate-800" align="start">
+                        <div className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 text-slate-400">
+                          Assign Priority
+                        </div>
+                        <div className="space-y-0.5">
+                          {[
+                            { value: 'high', label: 'High', style: PRIORITY_STYLES.high },
+                            { value: 'medium', label: 'Medium', style: PRIORITY_STYLES.medium },
+                            { value: 'low', label: 'Low', style: PRIORITY_STYLES.low },
+                          ].map((p) => {
+                            const isSelected = (selectedDetailTask.priority || '').toLowerCase() === p.value;
+                            return (
+                              <button
+                                key={p.value}
+                                type="button"
+                                onClick={() => handleQuickPriorityChange(selectedDetailTask, p.value)}
+                                className={`w-full flex items-center justify-between px-2 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                                  isSelected
+                                    ? `${p.style.bg} ${p.style.text} font-bold`
+                                    : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2">
+                                  <span className={`w-2 h-2 rounded-full ${p.style.dot}`} />
+                                  <span>{p.label}</span>
+                                </div>
+                                {isSelected && <Check className="h-3.5 w-3.5" />}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </PopoverContent>
+                    </Popover>
                     {selectedDetailTask.is_recurring && <span className="text-xs font-semibold bg-purple-50 text-purple-700 px-2.5 py-1 rounded-lg">↺ Recurring</span>}
                     {selectedDetailTask.category && <span className="text-xs font-semibold bg-slate-100 text-slate-600 px-2.5 py-1 rounded-lg uppercase">{getCategoryLabel(selectedDetailTask.category)}</span>}
                   </div>
