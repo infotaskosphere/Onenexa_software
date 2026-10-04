@@ -66,6 +66,7 @@ LEGACY_SOURCE_APPLICATION = "Final-Taskosphere-3"
 
 BACKUP_HISTORY_COLLECTION = "backup_history"
 BACKUP_GRIDFS_BUCKET = "taskosphere_backups"
+RESTORE_SNAPSHOT_PREFIX = "_restore_snapshot_"
 
 EXCLUDED_COLLECTIONS = {
     "sessions", "refresh_tokens", "access_tokens", "password_resets",
@@ -473,7 +474,10 @@ async def _collection_docs(raw, name: str, company_id: str, user_ids: set[str], 
 async def _resolve_collections(user: User, requested: list[str] | None):
     company_id, company, user_ids, identities = await _tenant_context(user)
     raw = _raw_db()
-    available = sorted(set(await raw.list_collection_names()) - EXCLUDED_COLLECTIONS)
+    available = sorted(
+        name for name in set(await raw.list_collection_names()) - EXCLUDED_COLLECTIONS
+        if not name.startswith(RESTORE_SNAPSHOT_PREFIX)
+    )
     if not requested:
         selected = available
     else:
@@ -594,7 +598,10 @@ async def backup_info(current_user: User = Depends(get_current_user)):
     _require_backup_access(current_user)
     company_id, company, user_ids, identities = await _tenant_context(current_user)
     raw = _raw_db()
-    available = sorted(set(await raw.list_collection_names()) - EXCLUDED_COLLECTIONS)
+    available = sorted(
+        name for name in set(await raw.list_collection_names()) - EXCLUDED_COLLECTIONS
+        if not name.startswith(RESTORE_SNAPSHOT_PREFIX)
+    )
     modules = {module: sorted(set(collections) & set(available)) for module, collections in MODULE_COLLECTION_MAP.items()}
     return {"format": "Taskosphere Portable Backup v1", "company_id": company_id, "company_name": (company or {}).get("name"), "user_count": len(user_ids), "collections": available, "modules": modules, "encrypted": True, "requires_password": True, "mongo_database": DB_NAME, "mongo_connection_configured": bool(MONGO_URL), "excluded_security_collections": sorted(EXCLUDED_COLLECTIONS), "notes": ["Full backup includes tenant MongoDB data, tenant-linked settings and index definitions.", "Live sessions, reset tokens and OAuth state are never exported.", "Cross-license restore remaps company/license/customer identifiers to the target tenant."]}
 
