@@ -69,6 +69,13 @@ html {
   --radius-2xl:      1.5rem;
 }
 
+@media (max-width: 1366px) {
+  :root {
+    --sidebar-width: 240px;
+    --content-max: 100%;
+  }
+}
+
 /* ============================= */
 /* GLOBAL TYPOGRAPHY SAFEGUARDS  */
 /* ============================= */

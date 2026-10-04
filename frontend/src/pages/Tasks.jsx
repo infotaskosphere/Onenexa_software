@@ -469,7 +469,7 @@ const TaskRow = memo(function TaskRow({
 
         <div
           className="pl-5 pr-3 py-2.5 grid items-center gap-0"
-          style={{ gridTemplateColumns: '24px 24px minmax(0,1fr) 160px 88px 76px 72px 110px 110px 88px 100px' }}
+          style={{ gridTemplateColumns: '24px 24px minmax(140px,1fr) 136px 72px 70px 60px 92px 92px 76px 96px' }}
         >
           {selectMode ? (
             <button onClick={() => onToggleSelect(task.id)} className="flex items-center justify-center" title="Select task">
@@ -2483,7 +2483,7 @@ export default function Tasks() {
           <div className="absolute right-28 bottom-0 w-40 h-40 rounded-full mb-[-40px] opacity-5" style={{ background: 'white' }} />
           <div className="absolute left-0 bottom-0 w-48 h-48 rounded-full -ml-20 -mb-20 opacity-5" style={{ background: 'white' }} />
 
-          <div className="relative flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 min-w-0">
+          <div className="relative flex flex-col xl:flex-row items-start xl:items-center justify-between gap-4 min-w-0">
             {/* Left — title */}
             <div className="flex-1 min-w-0">
               <p className="text-white/50 text-[10px] font-semibold uppercase tracking-widest mb-1 flex items-center gap-1.5 min-w-0 truncate">
@@ -2494,9 +2494,8 @@ export default function Tasks() {
               <p className="text-white/60 text-sm mt-1">Task Updates</p>
             </div>
 
-            {/* Right — action buttons: fixed three-column layout prevents empty cells
-                and keeps New Task in the first row at desktop widths. */}
-            <div className="grid grid-cols-3 gap-2 w-full lg:w-[720px] max-w-full min-w-0">
+            {/* Right — action buttons: responsive multi-column layout */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 w-full xl:w-auto xl:max-w-[720px] max-w-full min-w-0">
             {/* Total Tasks — admin only */}
             {isAdmin && (
               <>
@@ -3081,7 +3080,7 @@ export default function Tasks() {
 
       <motion.div
         variants={itemVariants}
-        className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 [&>*]:min-w-0 items-stretch"
+        className="grid grid-cols-2 sm:grid-cols-3 2xl:grid-cols-6 gap-3 [&>*]:min-w-0 items-stretch"
       >
         {/* 1. My Task */}
         <MetricCard
@@ -3969,7 +3968,7 @@ export default function Tasks() {
         className={`border rounded-2xl px-3 py-2.5 shadow-sm space-y-2 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
 
         {/* ── ROW 1: Search + 5 filter dropdowns + view toggle ── */}
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap xl:flex-nowrap items-center gap-2">
 
           {/* Search — wider, takes flex-[2] */}
           <div className="relative flex-[2] min-w-0">
@@ -4180,7 +4179,7 @@ export default function Tasks() {
         <div className={`h-px w-full ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`} />
 
         {/* ── ROW 2: Creator + New Today + Pending + AI Tools — all equal flex-1 ── */}
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap xl:flex-nowrap items-center gap-2">
 
           {/* Creator / Assigned By — flex-1 */}
           <div className="flex-1 min-w-0">
@@ -4487,9 +4486,9 @@ export default function Tasks() {
       </AnimatePresence>
 
       {/* ── List / Board ─────────────────────────────────────────────────── */}
-      <div className="overflow-y-auto max-h-[calc(100vh-360px)]">
+      <div className="overflow-y-auto overflow-x-auto max-h-[calc(100vh-360px)] slim-scroll w-full min-w-0">
         {viewMode === 'list' ? (
-          <motion.div className="space-y-1.5" variants={containerVariants}>
+          <motion.div className="space-y-1.5 min-w-[900px] w-full" variants={containerVariants}>
             {/* ── Search Bar at top of Task List View ── */}
             <div className={`p-2 sm:p-2.5 rounded-xl border flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 transition-all ${
               isDark ? 'bg-slate-800/90 border-slate-700' : 'bg-white border-slate-200 shadow-xs'
@@ -4549,7 +4548,7 @@ export default function Tasks() {
             <div
               className={`hidden sm:grid items-center pl-5 pr-3 py-2 text-[10px] font-bold uppercase tracking-widest select-none border-b mb-1.5
                 ${isDark ? 'text-slate-500 border-slate-700' : 'text-slate-400 border-slate-100'}`}
-              style={{ gridTemplateColumns: '24px 24px minmax(0,1fr) 160px 88px 76px 72px 110px 110px 88px 100px' }}
+              style={{ gridTemplateColumns: '24px 24px minmax(140px,1fr) 136px 72px 70px 60px 92px 92px 76px 96px' }}
             >
               {selectMode ? (
                 <button

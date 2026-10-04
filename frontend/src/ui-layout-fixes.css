@@ -1,15 +1,18 @@
 /* Additive fixes only. Loaded after header-tabs-canonical.css. */
 
-:root { --ts-module-tab-w: 124px !important; }
+:root { --ts-module-tab-w: auto !important; }
 
-/* Module switcher: undo the canonical display:contents wrapper behavior so
-   the left module group and the right Admin/Settings group have deterministic
-   flex geometry. */
-#root #top-module-switcher-bar > div:nth-child(1):has(> button[id^="nav-tab-"]) { display:flex !important; flex:0 0 auto !important; width:auto !important; min-width:0 !important; max-width:none !important; overflow:visible !important; }
+/* Module switcher: undo rigid width constraints so tabs fit fluidly across all screen sizes
+   and never clip Admin or Settings on 13-inch laptops or smaller displays. */
+#root #top-module-switcher-bar {
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+}
+#root #top-module-switcher-bar > div:nth-child(1):has(> button[id^="nav-tab-"]) { display:flex !important; flex:1 1 auto !important; width:auto !important; min-width:0 !important; max-width:none !important; overflow-x:auto !important; overflow-y:hidden !important; }
 #root #top-module-switcher-bar > div:nth-child(2):not(:has(> button[id^="nav-tab-"])) { display:none !important; }
 #root #top-module-switcher-bar > div:nth-child(3):has(> button[id^="nav-tab-"]) { display:flex !important; flex:0 0 auto !important; width:auto !important; min-width:max-content !important; max-width:none !important; margin-left:auto !important; overflow:visible !important; }
 #root #top-module-switcher-bar > div:nth-child(1) > button[id^="nav-tab-"],
-#root #top-module-switcher-bar > div:nth-child(3) > button[id^="nav-tab-"] { flex:0 0 var(--ts-module-tab-w) !important; width:var(--ts-module-tab-w) !important; min-width:var(--ts-module-tab-w) !important; max-width:var(--ts-module-tab-w) !important; overflow:visible !important; text-overflow:clip !important; }
+#root #top-module-switcher-bar > div:nth-child(3) > button[id^="nav-tab-"] { flex:0 0 auto !important; width:auto !important; min-width:76px !important; max-width:none !important; padding:0 10px !important; overflow:visible !important; text-overflow:clip !important; }
 #root #top-module-switcher-bar button[id^="nav-tab-"] span { display:inline-block !important; max-width:none !important; overflow:visible !important; text-overflow:clip !important; white-space:nowrap !important; }
 
 /* Client Discussion — target the actual Meeting Assistant grid emitted by
@@ -41,6 +44,26 @@
    sidebar/header remain visible while a lazy page resolves. */
 body:not(.website-surface) #root .taskosphere-loader--fullscreen { position:relative !important; inset:auto !important; z-index:1 !important; width:100% !important; min-width:0 !important; max-width:100% !important; min-height:clamp(240px,42vh,420px) !important; box-sizing:border-box !important; pointer-events:none !important; }
 body:not(.website-surface) #root .taskosphere-route-loading { width:100% !important; min-width:0 !important; max-width:100% !important; overflow:visible !important; }
+
+@media (max-width: 1400px) {
+  #root main {
+    padding: clamp(0.75rem, 1.5vw, 1.25rem) !important;
+    overflow-x: auto !important;
+  }
+  #root main > div {
+    max-width: 100% !important;
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+  #root main [style*="linear-gradient"]:has(h1) > div:has(h1) {
+    flex-wrap: wrap !important;
+    gap: 12px !important;
+  }
+  #root main [style*="linear-gradient"]:has(h1) > div:has(h1) > :last-child {
+    max-width: 100% !important;
+    flex-wrap: wrap !important;
+  }
+}
 
 @media (max-width:1180px) {
   #root main [style*="linear-gradient"]:has(h1) > div:has(h1) > :last-child:has(> button:nth-child(5)) { width:min(560px,100%) !important; }
