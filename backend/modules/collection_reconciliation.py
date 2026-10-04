@@ -22,8 +22,18 @@ def shared_owner_mismatches() -> dict[str, tuple[str, str]]:
     return mismatches
 
 
-def unresolved_collection_ownership() -> dict[str, list[str]]:
+def unregistered_shared_owners() -> dict[str, str]:
+    """Return shared collections whose declared owner has no domain contract."""
+    return {
+        collection: owner
+        for collection, owner in SHARED_COLLECTION_OWNERS.items()
+        if owner not in DOMAIN_CONTRACTS
+    }
+
+
+def unresolved_collection_ownership() -> dict[str, object]:
     return {
         "duplicate_domain_owners": duplicate_domain_owners(),
         "shared_owner_mismatches": shared_owner_mismatches(),
+        "unregistered_shared_owners": unregistered_shared_owners(),
     }
