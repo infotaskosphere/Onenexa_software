@@ -936,19 +936,21 @@ async def get_current_user_with_commercial_guard(
     normalized_request_path = request.url.path.split("?", 1)[0]
     normalized_without_api = normalized_request_path.removeprefix("/api") or "/"
 
+    # Resolve explicit ownership first. A route that already belongs to a
+    # billable module must never be shadowed by a broad legacy blocked prefix.
+    module = module_for_path(
+        request.url.path,
+        request.method,
+    )
+
     for blocked_prefix in COMMERCIAL_BLOCKED_PREFIXES:
-        if _matches(normalized_without_api, (blocked_prefix,)):
+        if not module and _matches(normalized_without_api, (blocked_prefix,)):
             raise _deny(
                 request,
                 user,
                 f"This API route is not commercially assigned and is disabled for customer tenants: {blocked_prefix}.",
                 commercial,
             )
-
-    module = module_for_path(
-        request.url.path,
-        request.method,
-    )
 
     core_admin_shared = (
         _is_admin_role(user)
