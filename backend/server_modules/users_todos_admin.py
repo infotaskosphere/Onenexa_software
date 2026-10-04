@@ -298,6 +298,14 @@ async def reject_user(user_id: str, current_user: User = Depends(get_current_use
 
     update_data = {"status": "rejected", "is_active": False}
 
+    try:
+        await SessionManager.revoke_all_user_sessions(
+            str(existing.get("id") or existing.get("_id") or user_id),
+            reason="user_rejected",
+        )
+    except Exception:
+        logger.warning("Failed to revoke sessions for rejected user %s", user_id)
+
     if existing.get("_id"):
         await db.users.update_one({"_id": existing["_id"]}, {"$set": update_data})
     else:
@@ -616,6 +624,25 @@ async def update_user(
     new_password = user_data.get("password")
     if new_password and len(new_password.strip()) > 0:
         update_payload["password"] = get_password_hash(new_password)
+        # SaaS accounts authenticate from the scrypt password_hash/password_salt
+        # pair. Keep the legacy bcrypt field for compatibility, but update the
+        # canonical SaaS credential too so admin password changes take effect.
+        if existing.get("password_hash") or existing.get("password_salt"):
+            password_salt = secrets.token_bytes(16).hex()
+            update_payload["password_hash"] = hashlib.scrypt(
+                new_password.encode("utf-8"),
+                salt=password_salt.encode("utf-8"),
+                n=16384,
+                r=8,
+                p=1,
+                dklen=64,
+            ).hex()
+            update_payload["password_salt"] = password_salt
+        try:
+            current_password_version = int(existing.get("password_version") or 1)
+        except (TypeError, ValueError):
+            current_password_version = 1
+        update_payload["password_version"] = current_password_version + 1
 
     # Always ensure canonical id field is stored on the document
     if target_id:
@@ -626,6 +653,18 @@ async def update_user(
             await db.users.update_one({"_id": target_oid}, {"$set": update_payload})
         else:
             await db.users.update_one({"id": user_id}, {"$set": update_payload})
+
+    # Security-sensitive account changes must terminate already-issued sessions.
+    if new_password and len(new_password.strip()) > 0:
+        try:
+            await SessionManager.revoke_all_user_sessions(target_id, reason="password_changed")
+        except Exception:
+            logger.warning("Failed to revoke sessions after password change for %s", target_id)
+    if update_payload.get("is_active") is False or str(update_payload.get("status") or "").lower() in {"inactive", "rejected", "suspended", "disabled", "deleted"}:
+        try:
+            await SessionManager.revoke_all_user_sessions(target_id, reason="account_disabled")
+        except Exception:
+            logger.warning("Failed to revoke sessions after account disable for %s", target_id)
 
     # Clean up any phantom commercial control plane records that shadowed this user ID
     if is_own and is_admin:
@@ -677,6 +716,13 @@ async def delete_user(
     await create_audit_log(
         current_user, "DELETE_USER", "user", record_id=user_id, old_data=existing
     )
+    try:
+        await SessionManager.revoke_all_user_sessions(
+            str(existing.get("id") or existing.get("_id") or user_id),
+            reason="user_deleted",
+        )
+    except Exception:
+        logger.warning("Failed to revoke sessions before deleting user %s", user_id)
     if existing.get("_id"):
         await db.users.delete_one({"_id": existing["_id"]})
     await db.users.delete_one({"id": user_id})
@@ -874,6 +920,11 @@ async def offboard_user(
     )
 
     # 11. Delete or deactivate old user
+    try:
+        await SessionManager.revoke_all_user_sessions(user_id, reason="user_offboarded")
+    except Exception:
+        logger.warning("Failed to revoke sessions for offboarded user %s", user_id)
+
     if body.delete_old_user:
         await db.users.delete_one({"id": user_id})
         transfer_summary["old_user_deleted"] = True
