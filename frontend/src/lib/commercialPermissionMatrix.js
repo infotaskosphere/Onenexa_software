@@ -18,6 +18,7 @@ const getPlatformOwnerEmails = () => {
 };
 
 export const MODULES = Object.freeze({
+  core: { flag: null, aliases: ["core", "admin"], landing: "/users" },
   taskosphere: { flag: "can_access_taskosphere", aliases: ["taskosphere", "tasks"], landing: "/dashboard" },
   finix: { flag: "can_access_finix", aliases: ["finix", "invoicing", "accounting"], landing: "/finix-dashboard" },
   compliance: { flag: "can_access_compliance", aliases: ["compliance"], landing: "/compliance-dashboard" },
@@ -28,6 +29,11 @@ export const MODULES = Object.freeze({
 });
 
 export const PAGE_MATRIX = Object.freeze([
+  ["core", "can_view_user_page", "/users"],
+  ["core", "can_view_staff_activity", "/staff-activity"],
+  ["core", "can_view_reports", "/reports"],
+  ["core", "can_manage_settings", "/settings"],
+  ["core", "can_view_security_sessions", "/security/sessions"],
   ["taskosphere", "can_view_dashboard", "/dashboard"], ["taskosphere", "can_view_tasks", "/tasks"], ["taskosphere", "can_view_todo_dashboard", "/todos"], ["taskosphere", "can_view_attendance", "/attendance"], ["taskosphere", "can_view_reminders", "/reminders"], ["taskosphere", "can_view_action_center", "/action-center"], ["taskosphere", "can_view_client_visits", "/visits"], ["taskosphere", "can_view_client_portal", "/client-portal-manager"], ["taskosphere", "can_reset_client_passwords", "/client-portal-manager/password"], ["taskosphere", "can_reset_client_passwords", "/client-portal-manager/reset"],
   ["finix", "can_view_accounting_reports", "/finix-dashboard"], ["finix", "can_view_accounting_reports", "/accounting-reports"], ["finix", "can_post_journal_entries", "/zero-touch-entry"], ["finix", "can_view_accounting_reports", "/gst-portal-sync"], ["finix", "can_manage_chart_of_accounts", "/accounting-integrity"], ["finix", "can_view_accounting_reports", "/day-book"], ["finix", "can_view_accounting_reports", "/cash-bank-book"], ["finix", "can_view_accounting_reports", "/cash-flow"], ["finix", "can_view_accounting_reports", "/outstanding-report"],  ["finix", "can_view_accounting_reports", "/depreciation"], ["finix", "can_view_accounting_reports", "/tds-tcs"], ["finix", "can_view_accounting_reports", "/financial-ratios"], ["finix", "can_view_accounting_reports", "/comparative-report"], ["finix", "can_view_accounting_reports", "/yearly-report"], ["finix", "can_view_accounting_reports", "/opening-balances"], ["finix", "can_view_accounting_reports", "/accounting-audit-trail"], ["finix", "can_view_accounting_reports", "/bulk-import"], ["finix", "can_view_accounting_reports", "/due-dates"], ["finix", "can_view_sale", "/import-invoices"], ["finix", "can_view_sale", "/invoicing"], ["finix", "can_view_purchase", "/purchase"], ["finix", "can_view_bank", "/bank-accounts"], ["finix", "can_view_chart_of_accounts", "/chart-of-accounts"], ["finix", "can_manage_chart_of_accounts", "/chart-of-accounts/manage"], ["finix", "can_view_journal_entries", "/journal-entries"], ["finix", "can_post_journal_entries", "/journal-entries/post"], ["finix", "can_match_bank", "/bank-reconciliation"],
   ["compliance", "can_view_compliance", "/compliance-dashboard"], ["compliance", "can_view_compliance", "/compliance"], ["compliance", "can_manage_compliance", "/compliance/manage"], ["compliance", "can_view_gst_reconciliation", "/gst-reconciliation"], ["compliance", "can_view_gst_reconciliation", "/gst-sphere"], ["compliance", "can_view_trademark_sphere", "/trademark-sphere"], ["compliance", "can_view_mis_report", "/mis-report"], ["compliance", "can_manage_mis_report", "/mis-report/manage"], ["compliance", "can_view_salary_slips", "/salary-slips"], ["compliance", "can_manage_salary_slips", "/salary-slips/manage"], ["compliance", "can_view_roc_sphere", "/roc-sphere"], ["compliance", "can_manage_roc_sphere", "/roc-sphere/manage"],
@@ -58,8 +64,9 @@ export function normalizeModules(user) {
   return result;
 }
 
-const DASHBOARD_FLAG_BY_MODULE = Object.freeze({ taskosphere: "can_view_dashboard", finix: "can_view_accounting_reports", compliance: "can_view_compliance", records: "can_view_documents", proposals: "can_view_all_leads", people_matrix: "can_view_user_page" });
+const DASHBOARD_FLAG_BY_MODULE = Object.freeze({ core: "can_access_admin", taskosphere: "can_view_dashboard", finix: "can_view_accounting_reports", compliance: "can_view_compliance", records: "can_view_documents", proposals: "can_view_all_leads", people_matrix: "can_view_user_page" });
 const ALL_PAGE_FLAGS_BY_MODULE = Object.freeze({
+  core: ["can_view_user_page", "can_view_staff_activity", "can_view_reports", "can_manage_settings", "can_view_security_sessions"],
   taskosphere: ["can_view_dashboard", "can_view_tasks", "can_view_todo_dashboard", "can_view_attendance", "can_view_reminders", "can_view_action_center", "can_view_client_visits", "can_view_client_portal", "can_reset_client_passwords"],
   finix: ["can_view_accounting_reports", "can_view_sale", "can_view_purchase", "can_view_bank", "can_view_chart_of_accounts", "can_manage_chart_of_accounts", "can_view_journal_entries", "can_post_journal_entries", "can_match_bank"],
   compliance: ["can_view_compliance", "can_manage_compliance", "can_view_gst_reconciliation", "can_view_trademark_sphere", "can_view_mis_report", "can_manage_mis_report", "can_view_salary_slips", "can_manage_salary_slips", "can_view_roc_sphere", "can_manage_roc_sphere"],
@@ -108,6 +115,7 @@ export function pageFlagForPath(pathname) { const path = String(pathname || "").
 export function hasModuleAccess(user, moduleId) {
   if (!user) return false;
   if (isPlatformOwner(user)) return true;
+  if (moduleId === "core") return isCommercialTenant(user);
   if (moduleId === "aiweave") return user.permissions?.can_access_aiweave === true && user.permissions?.can_view_aiweave === true;
   if (!MODULES[moduleId]) return false;
   const modules = normalizeModules(user);
@@ -148,6 +156,11 @@ export function hasPageLicense(user, pageFlag, moduleId = null) {
 
   if (!module) return false;
 
+  // Core is non-billable and available to every authenticated commercial tenant.
+  if (module === "core") {
+    return true;
+  }
+
   // Hard ceiling: company must have the module on the commercial license
   const modules = normalizeModules(user);
   if (modules.size > 0 && !modules.has(module)) return false;
@@ -187,6 +200,11 @@ export function hasEffectivePermission(user, permission) {
   const pageEntry = PAGE_MATRIX.find(([, flag]) => flag === permission);
   if (pageEntry) {
     const [moduleId] = pageEntry;
+    if (moduleId === "core") {
+      if (permission === "can_view_security_sessions") return isCommercialTenant(user);
+      if (String(user.role || "").toLowerCase() === "admin") return true;
+      return Boolean(user.permissions?.[permission]);
+    }
     if (!hasPageLicense(user, permission, moduleId)) return false;
     // Commercial licensee admins are governed by the active commercial
     // module + selected-page ceiling. Platform Owner is handled above.
@@ -229,7 +247,7 @@ export function canAccessPath(user, pathname) {
   if (
     String(user.role || "").trim().toLowerCase() === "admin" &&
     user.company_id &&
-    ["/users", "/clients", "/reports"].some(
+    ["/users", "/reports"].some(
       (prefix) => normalizedPath === prefix || normalizedPath.startsWith(prefix + "/")
     )
   ) {
