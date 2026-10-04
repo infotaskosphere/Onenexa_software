@@ -589,11 +589,18 @@ def _hydrate_tenant_user(user: User, license_doc: dict) -> User:
     data = user.model_dump()
     original_permissions = getattr(user, "permissions", None)
     if hasattr(original_permissions, "model_dump"):
+        explicit_ai_access = bool(
+            getattr(original_permissions, "can_access_aiweave", False)
+        )
+        explicit_ai_view = bool(
+            getattr(original_permissions, "can_view_aiweave", False)
+        )
         original_permissions = original_permissions.model_dump()
-    if not isinstance(original_permissions, dict):
-        original_permissions = {}
-    explicit_ai_access = bool(original_permissions.get("can_access_aiweave", False))
-    explicit_ai_view = bool(original_permissions.get("can_view_aiweave", False))
+    else:
+        if not isinstance(original_permissions, dict):
+            original_permissions = {}
+        explicit_ai_access = bool(original_permissions.get("can_access_aiweave", False))
+        explicit_ai_view = bool(original_permissions.get("can_view_aiweave", False))
 
     data["commercial_customer_id"] = (
         data.get("commercial_customer_id")
@@ -928,15 +935,22 @@ async def get_current_user_with_commercial_guard(
     # commercial hydration applies role/license defaults.
     pre_hydration_permissions = getattr(user, "permissions", None)
     if hasattr(pre_hydration_permissions, "model_dump"):
+        pre_hydration_ai_access = bool(
+            getattr(pre_hydration_permissions, "can_access_aiweave", False)
+        )
+        pre_hydration_ai_view = bool(
+            getattr(pre_hydration_permissions, "can_view_aiweave", False)
+        )
         pre_hydration_permissions = pre_hydration_permissions.model_dump()
-    if not isinstance(pre_hydration_permissions, dict):
-        pre_hydration_permissions = {}
-    pre_hydration_ai_access = bool(
-        pre_hydration_permissions.get("can_access_aiweave", False)
-    )
-    pre_hydration_ai_view = bool(
-        pre_hydration_permissions.get("can_view_aiweave", False)
-    )
+    else:
+        if not isinstance(pre_hydration_permissions, dict):
+            pre_hydration_permissions = {}
+        pre_hydration_ai_access = bool(
+            pre_hydration_permissions.get("can_access_aiweave", False)
+        )
+        pre_hydration_ai_view = bool(
+            pre_hydration_permissions.get("can_view_aiweave", False)
+        )
 
     user = _hydrate_admin(
         user,
