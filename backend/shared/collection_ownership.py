@@ -14,11 +14,11 @@ from typing import Mapping
 SHARED_COLLECTION_OWNERS: Mapping[str, str] = MappingProxyType(
     {
         # Identity / tenant control plane
-        "users": "people_matrix",
+        "users": "core",
         "companies": "platform",
         "subscriptions": "platform",
-        "role_definitions": "people_matrix",
-        "access_requests": "people_matrix",
+        "role_definitions": "core",
+        "access_requests": "core",
 
         # Cross-domain business records
         "clients": "taskosphere",
