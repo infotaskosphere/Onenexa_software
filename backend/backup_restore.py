@@ -926,6 +926,151 @@ def _replace(value: Any, replacements: dict[str, str]) -> Any:
     return value
 
 
+def _restore_snapshot_collection_name(restore_id: str, collection_name: str) -> str:
+    import hashlib
+    digest = hashlib.sha256(collection_name.encode("utf-8")).hexdigest()[:16]
+    return f"_restore_snapshot_{restore_id}_{digest}"
+
+
+async def _snapshot_restore_targets(current_user: User, selected_names: list[str], restore_id: str):
+    """Persist the exact target records that the existing restore may replace/delete."""
+    target_company_id, target_company, target_user_ids, target_identities = await _tenant_context(current_user)
+    raw = _raw_db()
+    snapshot_map: dict[str, str] = {}
+
+    for name in selected_names:
+        if name in EXCLUDED_COLLECTIONS:
+            continue
+        snapshot_name = _restore_snapshot_collection_name(restore_id, name)
+        snapshot = raw[snapshot_name]
+
+        if name == "companies":
+            docs = []
+            if target_company:
+                docs = [dict(target_company)]
+            elif target_company_id:
+                found = await raw.companies.find_one({"id": target_company_id})
+                if found:
+                    docs = [dict(found)]
+        elif name == "users":
+            docs = await raw.users.find({"company_id": target_company_id}).to_list(100000)
+        elif name in TENANT_COLLECTIONS:
+            docs = await raw[name].find({"company_id": target_company_id}).to_list(100000)
+        else:
+            cursor = raw[name].find(
+                {"$or": [{"company_id": {"$exists": True}}, {"user_id": {"$exists": True}}]}
+            )
+            docs = []
+            async for doc in cursor:
+                if _linked(doc, {_s(current_user.id)}, target_identities):
+                    docs.append(doc)
+
+        if docs:
+            staged = [{"original_id": doc.get("_id"), "doc": doc} for doc in docs]
+            for index in range(0, len(staged), 500):
+                await snapshot.insert_many(staged[index:index + 500], ordered=False)
+        snapshot_map[name] = snapshot_name
+
+    return target_company_id, snapshot_map
+
+
+async def _rollback_restore_targets(current_user: User, snapshot: tuple[str, dict[str, str]]):
+    """Restore the exact pre-restore target records from the snapshot collections."""
+    target_company_id, snapshot_map = snapshot
+    raw = _raw_db()
+    target_identities = {field: {_s(getattr(current_user, field, None))} for field in IDENTITY_FIELDS}
+    for field in IDENTITY_FIELDS:
+        target_identities[field].discard("")
+
+    for name, snapshot_name in snapshot_map.items():
+        snapshot = raw[snapshot_name]
+        staged = await snapshot.find({}).to_list(100000)
+        docs = [item.get("doc") for item in staged if isinstance(item.get("doc"), dict)]
+
+        if name == "companies":
+            await raw.companies.delete_one({"id": target_company_id})
+            if docs:
+                await raw.companies.replace_one({"id": target_company_id}, docs[0], upsert=True)
+            continue
+
+        if name == "users":
+            await raw.users.delete_many({"company_id": target_company_id, "id": {"$ne": str(current_user.id)}})
+            live_snapshot = next((doc for doc in docs if _s(doc.get("id")) == _s(current_user.id)), None)
+            if live_snapshot:
+                await raw.users.replace_one({"id": str(current_user.id)}, live_snapshot, upsert=True)
+            other_docs = [doc for doc in docs if _s(doc.get("id")) != _s(current_user.id)]
+        elif name in TENANT_COLLECTIONS:
+            await raw[name].delete_many({"company_id": target_company_id})
+            other_docs = docs
+        else:
+            cursor = raw[name].find(
+                {"$or": [{"company_id": {"$exists": True}}, {"user_id": {"$exists": True}}]}
+            )
+            current_linked = []
+            async for existing in cursor:
+                if _linked(existing, {_s(current_user.id)}, target_identities) and existing.get("_id") is not None:
+                    current_linked.append(existing.get("_id"))
+            for oid in current_linked:
+                await raw[name].delete_one({"_id": oid})
+            other_docs = docs
+
+        for index in range(0, len(other_docs), 500):
+            if other_docs[index:index + 500]:
+                await raw[name].insert_many(other_docs[index:index + 500], ordered=False)
+
+
+async def _cleanup_restore_snapshot(snapshot: tuple[str, dict[str, str]] | None):
+    if not snapshot:
+        return
+    _, snapshot_map = snapshot
+    raw = _raw_db()
+    for snapshot_name in snapshot_map.values():
+        try:
+            await raw[snapshot_name].drop()
+        except Exception:
+            logger.warning("Could not remove restore snapshot collection %s", snapshot_name)
+
+
+def _restore_rollback_guard(func):
+    """Add application-level rollback around the existing destructive restore implementation."""
+    async def wrapped(manifest, collections, current_user, zip_path, legacy_migration=False):
+        restore_id = secrets.token_urlsafe(18)
+        selected_names = [name for name, _ in collections]
+        snapshot = None
+        try:
+            target_company_id, snapshot_map = await _snapshot_restore_targets(
+                current_user, selected_names, restore_id
+            )
+            snapshot = (target_company_id, snapshot_map)
+            result = await func(manifest, collections, current_user, zip_path, legacy_migration=legacy_migration)
+            await _cleanup_restore_snapshot(snapshot)
+            return result
+        except Exception as exc:
+            rollback_error = None
+            if snapshot:
+                try:
+                    await _rollback_restore_targets(current_user, snapshot)
+                except Exception as restore_exc:
+                    rollback_error = restore_exc
+                    logger.critical(
+                        "Restore rollback failed for restore_id=%s: %s",
+                        restore_id,
+                        restore_exc,
+                        exc_info=True,
+                    )
+                finally:
+                    await _cleanup_restore_snapshot(snapshot)
+            if rollback_error:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Restore failed and the automatic rollback could not be verified. Contact support before retrying.",
+                ) from rollback_error
+            raise exc
+
+    return wrapped
+
+
+@_restore_rollback_guard
 async def _restore(manifest: dict, collections: list[tuple[str, str]], current_user: User, zip_path: str, legacy_migration: bool = False):
     target_company_id, target_company, target_user_ids, target_identities = await _tenant_context(current_user)
     source_company = _s(manifest.get("source_company_id"))
