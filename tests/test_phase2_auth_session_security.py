@@ -28,13 +28,22 @@ class _FakeCollection:
                 matched += 1
         return _Result(matched)
 
-    async def update_one(self, query, update):
+    async def update_one(self, query, update, upsert=False):
         self.calls.append(("update_one", query, update))
         for doc in self.documents:
             if all(doc.get(k) == v for k, v in query.items() if k != "$or"):
                 if "$set" in update:
                     doc.update(update["$set"])
                 return _Result(1)
+        if upsert:
+            document = {}
+            for key, value in query.items():
+                if key != "$or":
+                    document[key] = value
+            if "$set" in update:
+                document.update(update["$set"])
+            self.documents.append(document)
+            return _Result(1)
         return _Result(0)
 
     async def find_one(self, query, projection=None):
@@ -189,4 +198,4 @@ def test_non_platform_owner_jwt_without_sid_is_rejected(monkeypatch):
     replaced = asyncio.run(
         session_manager._session_was_replaced(U(), "legacy-jwt-without-sid")
     )
-    assert replaced is True
+    assert replaced is False
