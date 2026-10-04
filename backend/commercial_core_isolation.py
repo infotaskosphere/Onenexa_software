@@ -117,6 +117,32 @@ def _assert_production_database_configuration() -> None:
 _assert_production_database_configuration()
 
 
+async def verify_production_runtime() -> None:
+    """Actively verify the production MongoDB connection before startup completes."""
+    if str(os.getenv("ENV_MODE") or "").strip().lower() != "production":
+        return
+
+    client = getattr(_dependencies, "client", None)
+    if client is None or client.__class__.__name__ == "MockMongoClient":
+        raise RuntimeError(
+            "COMMERCIAL SECURITY: production runtime is using MockMongoClient."
+        )
+
+    ping = getattr(getattr(client, "admin", None), "command", None)
+    if ping is None:
+        raise RuntimeError(
+            "COMMERCIAL SECURITY: MongoDB client does not expose an admin ping."
+        )
+
+    try:
+        await ping("ping")
+    except Exception as exc:
+        raise RuntimeError(
+            "COMMERCIAL SECURITY: MongoDB production health check failed; "
+            "startup is refused."
+        ) from exc
+
+
 def install() -> None:
     """Explicit boot marker used by deployment logs and architecture tests."""
     return None
