@@ -69,7 +69,7 @@ BACKUP_GRIDFS_BUCKET = "taskosphere_backups"
 
 EXCLUDED_COLLECTIONS = {
     "sessions", "refresh_tokens", "access_tokens", "password_resets",
-    "password_reset_tokens", "verification_tokens", "email_verification_tokens",
+    "password_reset_tokens", "verification_tokens", "email_verification_tokens", "backup_jobs",
     "oauth_states", "oauth_tokens", "rate_limits",
     # Internal backup-management data must never be recursively captured by a backup.
     BACKUP_HISTORY_COLLECTION,
@@ -638,6 +638,7 @@ async def create_backup(request: Request, current_user: User = Depends(get_curre
     _set_backup_progress(
         progress_id,
         owner_user_id=_s(current_user.id),
+        company_id=_s(getattr(current_user, "company_id", None)),
         phase="preparing",
         percent=2.0,
         processed_documents=0,
@@ -1295,6 +1296,24 @@ async def _expire_backup_output(progress_id: str):
     if item and time.time() - float(item.get("created_at", time.time())) >= _BACKUP_OUTPUT_TTL_SECONDS:
         _cleanup_backup_output(progress_id)
 
+async def _persist_backup_progress(progress_id: str, state: dict) -> None:
+    """Persist backup progress so status survives process restart."""
+    try:
+        raw = _raw_db()
+        await raw["backup_jobs"].update_one(
+            {"_id": progress_id},
+            {"$set": dict(state, _id=progress_id)},
+            upsert=True,
+        )
+    except Exception:
+        logger.debug("Backup progress persistence failed for %s.", progress_id, exc_info=True)
+
+
+async def _get_backup_progress_persisted(progress_id: str):
+    raw = _raw_db()
+    return await raw["backup_jobs"].find_one({"_id": progress_id}, {"_id": 0})
+
+
 def _set_backup_progress(progress_id: str | None, **values):
     if not progress_id:
         return
@@ -1303,6 +1322,11 @@ def _set_backup_progress(progress_id: str | None, **values):
     state.update(values)
     state["updated_at"] = now
     _BACKUP_PROGRESS[progress_id] = state
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(_persist_backup_progress(progress_id, dict(state)))
+    except RuntimeError:
+        pass
 
     cutoff = now - _BACKUP_PROGRESS_TTL_SECONDS
     for key in [
@@ -1326,7 +1350,16 @@ async def backup_create_progress(progress_id: str, current_user: User = Depends(
     _require_backup_access(current_user)
     if not progress_id or len(progress_id) > 120:
         raise HTTPException(status_code=400, detail="Invalid backup progress id.")
-    return _get_backup_progress(progress_id)
+    try:
+        return _get_backup_progress(progress_id)
+    except HTTPException as exc:
+        if exc.status_code != 404:
+            raise
+        persisted = await _get_backup_progress_persisted(progress_id)
+        if not persisted:
+            raise
+        persisted.pop("updated_at", None)
+        return persisted
 
 
 async def _count_commercial_backup_documents(raw, name, company_id, company, user_ids, identities):
