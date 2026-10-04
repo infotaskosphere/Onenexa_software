@@ -16,6 +16,7 @@ _MODULE_FLAGS = (
     "can_access_records",
     "can_access_proposals",
     "can_access_people_matrix",
+    "can_access_aiweave",
 )
 _COMMERCIAL_IDENTITY_FIELDS = (
     "commercial_customer_id",
