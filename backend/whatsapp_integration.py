@@ -52,6 +52,15 @@ _bulk_job_running = False
 router = APIRouter(prefix="/whatsapp", tags=["whatsapp"])
 
 WA_BRIDGE_URL = os.getenv("WA_BRIDGE_URL", "http://localhost:3002")
+WA_BRIDGE_SECRET = os.getenv("WA_BRIDGE_SECRET", "").strip()
+
+
+def _bridge_auth_headers() -> dict:
+    """Return the private bridge authentication header; fail closed in production."""
+    production = str(os.getenv("ENV_MODE") or "").strip().lower() == "production"
+    if production and not WA_BRIDGE_SECRET:
+        raise HTTPException(503, "WhatsApp bridge security secret is not configured.")
+    return {"X-WA-Bridge-Secret": WA_BRIDGE_SECRET} if WA_BRIDGE_SECRET else {}
 
 def _db():
     from backend.server import db
@@ -141,7 +150,7 @@ def _invalidate_sessions_cache():
 async def ping_wa_bridge_keep_alive():
     try:
         async with httpx.AsyncClient(timeout=10) as c:
-            r = await c.get(f"{WA_BRIDGE_URL}/status")
+            r = await c.get(f"{WA_BRIDGE_URL}/status", headers=_bridge_auth_headers())
             logger.info(f"WA bridge keep-alive ping: {r.status_code}")
     except Exception as e:
         logger.warning(f"WA bridge keep-alive ping failed (non-fatal): {e}")
@@ -210,7 +219,7 @@ async def _bridge_get_raw(path: str, retries: int = 3) -> Dict[str, Any]:
     for attempt in range(retries):
         try:
             async with httpx.AsyncClient(timeout=15) as c:
-                r = await c.get(f"{WA_BRIDGE_URL}{path}")
+                r = await c.get(f"{WA_BRIDGE_URL}{path}", headers=_bridge_auth_headers())
                 if r.status_code == 429:
                     if attempt < retries - 1:
                         wait = 2 ** (attempt + 1)
@@ -242,7 +251,7 @@ async def _bridge_post(path: str, payload: Dict, retries: int = 3) -> Dict:
     for attempt in range(retries):
         try:
             async with httpx.AsyncClient(timeout=20) as c:
-                r = await c.post(f"{WA_BRIDGE_URL}{path}", json=payload)
+                r = await c.post(f"{WA_BRIDGE_URL}{path}", json=payload, headers=_bridge_auth_headers())
                 if r.status_code == 429:
                     if attempt < retries - 1:
                         wait = 2 ** (attempt + 1)
@@ -271,7 +280,7 @@ async def _bridge_post_large(path: str, payload: Dict, retries: int = 2) -> Dict
     for attempt in range(retries):
         try:
             async with httpx.AsyncClient(timeout=90) as c:
-                r = await c.post(f"{WA_BRIDGE_URL}{path}", json=payload)
+                r = await c.post(f"{WA_BRIDGE_URL}{path}", json=payload, headers=_bridge_auth_headers())
                 if r.status_code == 429:
                     if attempt < retries - 1:
                         wait = 2 ** (attempt + 1)
@@ -298,7 +307,7 @@ async def _bridge_post_large(path: str, payload: Dict, retries: int = 2) -> Dict
 async def _bridge_delete(path: str) -> Dict:
     try:
         async with httpx.AsyncClient(timeout=15) as c:
-            r = await c.delete(f"{WA_BRIDGE_URL}{path}")
+            r = await c.delete(f"{WA_BRIDGE_URL}{path}", headers=_bridge_auth_headers())
             r.raise_for_status()
             return r.json()
     except httpx.ConnectError:
