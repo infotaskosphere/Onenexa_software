@@ -1,11 +1,12 @@
 import os
 import logging
+import hashlib
 import secrets as _secrets
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Dict, Any
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from jose import jwt, JWTError
+import jwt
 from motor.motor_asyncio import AsyncIOMotorClient
 from bson import ObjectId
 from backend.models import User, AuditLog
@@ -328,7 +329,7 @@ async def get_current_user(credentials=Depends(security)):
     try:
         payload=jwt.decode(token,JWT_SECRET,algorithms=[ALGORITHM]);user_id=payload.get("sub")
         if user_id is None:raise unauthorized
-    except JWTError:raise unauthorized
+    except jwt.PyJWTError:raise unauthorized
     user_query = {"id": user_id}
     if ObjectId.is_valid(user_id):
         user_query = {"$or": [{"id": user_id}, {"_id": ObjectId(user_id)}]}
@@ -350,6 +351,42 @@ async def get_current_user(credentials=Depends(security)):
     d=_normalize_permissions(d)
     try:user=User(**d)
     except Exception as e:logger.error("User validation failed for %s: %s",user_id,e);raise HTTPException(status_code=500,detail="User profile data is corrupted")
+    if not is_platform_owner(user):
+        sid = str(payload.get("sid") or "").strip()
+        if not sid:
+            raise HTTPException(status_code=401, detail="SESSION_NOT_BOUND", headers={"WWW-Authenticate":"Bearer"})
+        raw_db = globals().get("_raw_db", db)
+        bound_session = await raw_db.session_manager.find_one({
+            "session_token": sid,
+            "user_id": str(user.id),
+            "status": "active",
+        })
+        if not bound_session:
+            token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+            bound_session = await raw_db.sessions.find_one({
+                "$or": [{"session_token": sid}, {"token_hash": token_hash}],
+                "user_id": str(user.id),
+                "status": "active",
+            })
+        if not bound_session:
+            raise HTTPException(status_code=401, detail="SESSION_INVALIDATED", headers={"WWW-Authenticate":"Bearer"})
+        session_expires = bound_session.get("expires_at")
+        if session_expires:
+            if isinstance(session_expires, datetime):
+                expiry_dt = session_expires if session_expires.tzinfo else session_expires.replace(tzinfo=timezone.utc)
+            else:
+                try:
+                    expiry_dt = datetime.fromisoformat(str(session_expires).replace("Z","+00:00"))
+                    if expiry_dt.tzinfo is None:
+                        expiry_dt = expiry_dt.replace(tzinfo=timezone.utc)
+                except Exception:
+                    expiry_dt = None
+            if expiry_dt is not None and expiry_dt <= datetime.now(timezone.utc):
+                raise HTTPException(status_code=401, detail="SESSION_EXPIRED", headers={"WWW-Authenticate":"Bearer"})
+        session_company_id = str(bound_session.get("company_id") or "").strip()
+        user_company_id = str(user.company_id or "").strip()
+        if session_company_id and user_company_id and session_company_id != user_company_id:
+            raise HTTPException(status_code=401, detail="SESSION_INVALIDATED", headers={"WWW-Authenticate":"Bearer"})
     company_id=getattr(user,"company_id",None)
     if not company_id or not str(company_id).strip():
         if is_platform_owner(user):
