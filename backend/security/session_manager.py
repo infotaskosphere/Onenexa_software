@@ -12,6 +12,7 @@ import backend.dependencies as dependencies
 logger = logging.getLogger("session_manager")
 
 SESSION_REPLACED_DETAIL = "SESSION_REPLACED"
+SESSION_NOT_BOUND_DETAIL = "SESSION_NOT_BOUND"
 
 
 def _raw_db():
@@ -168,7 +169,7 @@ async def _session_was_replaced(user, bearer_token: str) -> bool:
     # session id created at login. A cryptographically valid legacy JWT without
     # that binding is not sufficient to authenticate a commercial session.
     if not sid:
-        return True
+        return False
 
     # Fallback for JWTs that carry a sid but whose legacy session record is not
     # currently available. Compare the token issuance time with active sessions
@@ -216,6 +217,27 @@ async def _guarded_get_current_user(request, credentials):
         user = await original(request, credentials)
     else:
         user = await original(credentials)
+    try:
+        from jose import jwt as _jwt
+        _payload = _jwt.decode(
+            credentials.credentials,
+            dependencies.JWT_SECRET,
+            algorithms=[dependencies.ALGORITHM],
+            options={"verify_exp": False},
+        )
+        _sid = _payload.get("sid")
+        from backend.platform_owner import is_platform_owner as _is_owner
+        if not _is_owner(user) and not _sid:
+            raise HTTPException(
+                status_code=401,
+                detail=SESSION_NOT_BOUND_DETAIL,
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+
     if await _session_was_replaced(user, credentials.credentials):
         raise HTTPException(
             status_code=401,
