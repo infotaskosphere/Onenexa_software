@@ -623,6 +623,8 @@ async def update_user(
             update_payload["monthly_salary"] = None
     new_password = user_data.get("password")
     if new_password and len(new_password.strip()) > 0:
+        if len(new_password.strip()) < 12:
+            raise HTTPException(status_code=400, detail="Password must be at least 12 characters.")
         update_payload["password"] = get_password_hash(new_password)
         # SaaS accounts authenticate from the scrypt password_hash/password_salt
         # pair. Keep the legacy bcrypt field for compatibility, but update the
