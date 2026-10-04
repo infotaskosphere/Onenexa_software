@@ -15,6 +15,8 @@ COMPANY_FIELD = "company_id"
 COMPANY_ID_FIELD = "id"
 
 TENANT_COLLECTIONS = {
+    # Identity / user master data
+    "users",
     # Tasks & Todos & Visits
     "tasks", "todos", "reminders", "visits", "due_dates",
     # Clients, Drive, & Discussions
