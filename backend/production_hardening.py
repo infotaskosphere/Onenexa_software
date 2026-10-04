@@ -390,13 +390,16 @@ def _harden_email_crypto():
         if email_module._fernet is None:
             from cryptography.fernet import Fernet
             key = os.getenv("EMAIL_ENCRYPT_KEY", "").encode()
+            production = str(os.getenv("ENV_MODE") or "").strip().lower() == "production"
             if len(key) == 44:
                 email_module._fernet = Fernet(key)
+            elif production:
+                raise RuntimeError("EMAIL_ENCRYPT_KEY must be configured with a valid Fernet key in production.")
             else:
                 gen_key = Fernet.generate_key()
                 os.environ["EMAIL_ENCRYPT_KEY"] = gen_key.decode()
                 email_module._fernet = Fernet(gen_key)
-                _hardening_logger.warning("EMAIL_ENCRYPT_KEY was not configured; generated secure runtime Fernet key.")
+                _hardening_logger.warning("EMAIL_ENCRYPT_KEY was not configured; generated secure runtime Fernet key for non-production use.")
 
         def _secure_encrypt(plain: str) -> str:
             if not email_module._fernet:
