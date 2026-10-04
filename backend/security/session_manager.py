@@ -328,7 +328,36 @@ class SessionManager:
                 upsert=True,
             )
         except Exception:
-            pass
+            logger.warning("SaaS session mirror write failed.")
+
+        # A commercial login must have one authoritative session represented in
+        # both stores. Do not leave a partially-created session that can bypass
+        # replacement detection after a restart.
+        try:
+            legacy_ok = await raw_db.session_manager.find_one(
+                {"session_token": session_token, "user_id": str(user_id), "status": "active"},
+                {"_id": 1},
+            )
+            mirror_ok = await raw_db.sessions.find_one(
+                {"token_hash": hashlib.sha256(session_token.encode("utf-8")).hexdigest(), "user_id": str(user_id), "status": "active"},
+                {"_id": 1},
+            )
+            if not legacy_ok or not mirror_ok:
+                raise RuntimeError("Session state was not persisted consistently.")
+        except Exception:
+            logger.exception("Failed to establish canonical session state; rejecting login session.")
+            try:
+                await raw_db.session_manager.update_one(
+                    {"session_token": session_token},
+                    {"$set": {"status": "revoked", "revoked_reason": "session_state_incomplete"}},
+                )
+                await raw_db.sessions.update_one(
+                    {"token_hash": hashlib.sha256(session_token.encode("utf-8")).hexdigest()},
+                    {"$set": {"status": "revoked", "revoked_reason": "session_state_incomplete"}},
+                )
+            except Exception:
+                pass
+            raise
 
         return session_token
 
@@ -373,7 +402,53 @@ class SessionManager:
             query,
             {"$set": {"status": "revoked", "logout_at": now, "revoked_reason": "logout"}},
         )
+        # Keep the two session stores consistent. A legacy session_manager record
+        # can otherwise remain active after a successful commercial logout.
+        try:
+            await raw_db.session_manager.update_one(
+                {"session_token": session_token, **user_filter},
+                {"$set": {"status": "revoked", "logout_at": now, "revoked_reason": "logout"}},
+            )
+        except Exception:
+            logger.warning("Legacy session_manager mirror revoke failed on logout.")
         return result.modified_count > 0
+
+    @staticmethod
+    async def revoke_all_user_sessions(user_id: str, reason: str = "security_event") -> int:
+        """Revoke every active session for one concrete user in all session stores."""
+        raw_db = _raw_db()
+        now = datetime.now(timezone.utc).isoformat()
+        user_id_str = str(user_id or "").strip()
+        if not user_id_str:
+            return 0
+
+        update = {
+            "$set": {
+                "status": "revoked",
+                "revoked_at": now,
+                "logout_at": now,
+                "revoked_reason": reason,
+            }
+        }
+        total = 0
+        try:
+            result = await raw_db.session_manager.update_many(
+                {"user_id": user_id_str, "status": "active"},
+                update,
+            )
+            total += int(getattr(result, "modified_count", 0) or 0)
+        except Exception:
+            logger.warning("Failed to revoke session_manager sessions for user %s.", user_id_str)
+
+        try:
+            result = await raw_db.sessions.update_many(
+                {"user_id": user_id_str, "status": "active"},
+                update,
+            )
+            total += int(getattr(result, "modified_count", 0) or 0)
+        except Exception:
+            logger.warning("Failed to revoke sessions records for user %s.", user_id_str)
+        return total
 
     @staticmethod
     async def is_session_active(session_token: str) -> bool:
