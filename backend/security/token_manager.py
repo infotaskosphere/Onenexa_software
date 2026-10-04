@@ -1,7 +1,7 @@
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional
-from jose import jwt, JWTError
+import jwt
 from backend.dependencies import JWT_SECRET, ALGORITHM
 
 logger = logging.getLogger("token_manager")
@@ -26,6 +26,6 @@ class TokenManager:
         try:
             payload = jwt.decode(token, JWT_SECRET, algorithms=[ALGORITHM])
             return payload
-        except JWTError as e:
+        except jwt.InvalidTokenError as e:
             logger.error(f"JWT signature verification failed: {e}")
             return None
