@@ -271,7 +271,10 @@ function pushSSE(event, data) {
 async function webhookPost(url, data, description = "webhook") {
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      await axios.post(url, data, { timeout: 15000 });
+      const headers = BRIDGE_SECRET
+        ? { "X-WA-Bridge-Secret": BRIDGE_SECRET }
+        : {};
+      await axios.post(url, data, { timeout: 15000, headers });
       return;
     } catch (e) {
       const status = e.response?.status;
