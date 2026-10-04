@@ -9,7 +9,7 @@ license entitlement guards unchanged.
 from __future__ import annotations
 
 from fastapi import Depends, HTTPException
-from jose import JWTError
+from jwt import InvalidTokenError
 
 from backend import dependencies as _dependencies
 from backend.models import User
@@ -56,7 +56,7 @@ async def _raw_get_current_user(credentials=Depends(_dependencies.security)) -> 
         user_id = payload.get("sub")
         if user_id is None:
             raise unauthorized
-    except JWTError:
+    except InvalidTokenError:
         raise unauthorized
 
     raw_db = _raw_db()
