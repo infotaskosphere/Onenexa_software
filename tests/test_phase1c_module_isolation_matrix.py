@@ -11,7 +11,7 @@ from starlette.requests import Request
 from fastapi import HTTPException
 
 from backend import commercial_module_guard as guard
-from backend.models import User
+from backend.models import User, UserPermissions
 
 
 MODULE_ROUTES = {
@@ -127,7 +127,14 @@ async def _run_guard(monkeypatch, path: str, license_modules):
 
 
 def test_admin_user_model_preserves_explicit_aiweave_grant():
+    permissions = UserPermissions(
+        can_access_aiweave=True,
+        can_view_aiweave=True,
+    )
+    assert permissions.can_access_aiweave is True
+    assert permissions.can_view_aiweave is True
     user = _admin_user()
+    assert "can_access_aiweave" in user.permissions.model_fields_set
     assert user.permissions.can_access_aiweave is True
     assert user.permissions.can_view_aiweave is True
 
