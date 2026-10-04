@@ -108,3 +108,67 @@ def test_session_replaced_constant_is_stable():
     from backend.security.session_manager import SESSION_REPLACED_DETAIL
 
     assert SESSION_REPLACED_DETAIL == "SESSION_REPLACED"
+
+def test_session_creation_persists_expiry_in_both_stores(monkeypatch):
+    from backend.security import session_manager
+
+    fake_db = _FakeDb()
+    monkeypatch.setattr(session_manager, "_raw_db", lambda: fake_db)
+    monkeypatch.setattr(session_manager.dependencies, "ACCESS_TOKEN_EXPIRE_MINUTES", 60)
+    monkeypatch.setattr(session_manager, "uuid", type("U", (), {"uuid4": staticmethod(lambda: type("X", (), {"hex": "abc123"})())}))
+
+    token = asyncio.run(
+        session_manager.SessionManager.create_user_session(
+            "user-3", "127.0.0.1", "test-agent", "u3@example.com"
+        )
+    )
+
+    assert token == "sess_abc123"
+    legacy = fake_db.session_manager.documents[-1]
+    mirror = fake_db.sessions.documents[-1]
+    assert legacy["status"] == "active"
+    assert mirror["status"] == "active"
+    assert legacy.get("expires_at") is not None
+    assert mirror.get("expires_at") is not None
+
+
+def test_saas_session_rejects_user_session_company_mismatch(monkeypatch):
+    from backend import dependencies
+
+    class _Collection:
+        async def find_one(self, query, *args, **kwargs):
+            if "token_hash" in query:
+                return {
+                    "_id": "sess-1",
+                    "token_hash": query["token_hash"],
+                    "user_id": "user-1",
+                    "company_id": "tenant-b",
+                    "status": "active",
+                    "expires_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc) + __import__("datetime").timedelta(hours=1),
+                }
+            if query.get("id") == "user-1":
+                return {
+                    "id": "user-1",
+                    "email": "user@example.com",
+                    "company_id": "tenant-a",
+                    "status": "active",
+                    "role": "staff",
+                }
+            return None
+
+        def __getattr__(self, name):
+            return self
+
+    class _DB:
+        sessions = _Collection()
+        users = _Collection()
+        companies = _Collection()
+        subscriptions = _Collection()
+
+        def __getitem__(self, name):
+            return getattr(self, name)
+
+    monkeypatch.setattr(dependencies, "_raw_db", _DB(), raising=False)
+    monkeypatch.setattr(dependencies, "MONGO_URL", "mongodb://test", raising=False)
+    result = asyncio.run(dependencies._get_saas_session_user("session-token"))
+    assert result is None
