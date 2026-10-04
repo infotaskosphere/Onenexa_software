@@ -39,8 +39,6 @@ services:
         value: "30"
       - key: WA_BRIDGE_URL
         value: https://tasko-commercial-wa-bridge.onrender.com
-      - key: WA_BRIDGE_SECRET
-        sync: false
     healthCheckPath: /health
 
   # ── Frontend (React / Vite static site) ────────────────────────────────────
@@ -81,12 +79,6 @@ services:
     envVars:
       - key: BACKEND_URL
         value: https://tasko-commercial-backend.onrender.com
-      - key: WA_BRIDGE_SECRET
-        sync: false
-      - key: NODE_ENV
-        value: production
-      - key: BRIDGE_PUBLIC_URL
-        value: https://tasko-commercial-wa-bridge.onrender.com
     disk:
       name: wa-sessions
       mountPath: /opt/render/project/src/sessions

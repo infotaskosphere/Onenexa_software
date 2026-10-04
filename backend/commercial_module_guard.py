@@ -169,7 +169,6 @@ MODULE_PREFIXES = {
     ),
     "people_matrix": (
         "/people-matrix",
-        "/users",
         "/leave",
         "/payroll",
         "/hr",
@@ -184,7 +183,7 @@ FEATURE_PREFIXES = {
         "can_view_reports": ("/reports/efficiency", "/reports/performance-rankings"),
         "can_download_reports": ("/reports/export",),
         "can_view_staff_activity": ("/activity", "/staff-activity"),
-        "can_view_user_page": ("/users",),
+        "can_view_user_page": ("/users", "/users/manage"),
         "can_manage_settings": ("/settings",),
     },
     "taskosphere": {
@@ -321,8 +320,7 @@ FEATURE_PREFIXES = {
         "can_view_aiweave": ("/ai", "/aiweave", "/ai-reader"),
     },
     "people_matrix": {
-        "can_view_user_page": (
-            "/users/manage",
+        "can_view_people_matrix": (
             "/people-matrix",
         ),
         "can_view_leave": (
@@ -637,8 +635,8 @@ def _hydrate_tenant_user(user: User, license_doc: dict) -> User:
         if isinstance(fallback_permissions, dict):
             stored_permissions = dict(fallback_permissions)
     if "aiweave" in resolve_license_modules(license_doc):
-        admin_permissions["can_access_aiweave"] = explicit_ai_access
-        admin_permissions["can_view_aiweave"] = explicit_ai_view
+        admin_permissions["can_access_aiweave"] = bool(stored_permissions.get("can_access_aiweave", False))
+        admin_permissions["can_view_aiweave"] = bool(stored_permissions.get("can_view_aiweave", False))
         matrix = dict(stored_permissions.get("governance_matrix") or {})
         ai_matrix = {
             key: value for key, value in matrix.items()
@@ -655,19 +653,12 @@ def _hydrate_tenant_user(user: User, license_doc: dict) -> User:
     data["permissions"] = admin_permissions
 
     hydrated_user = User.model_validate(data)
-    # AIWeave is explicitly user-governed. Re-apply the authenticated
-    # administrator's pre-hydration grant using a validated Pydantic copy so
-    # permission-model serialization/normalization cannot silently turn it off.
+    # Re-apply the explicit tenant-admin AIWeave grant to the final Pydantic
+    # permission object. AIWeave remains user-governed and is never recreated
+    # merely because the commercial license contains the module.
     if "aiweave" in resolve_license_modules(license_doc):
-        hydrated_permissions = hydrated_user.permissions.model_copy(
-            update={
-                "can_access_aiweave": explicit_ai_access,
-                "can_view_aiweave": explicit_ai_view,
-            }
-        )
-        hydrated_user = hydrated_user.model_copy(
-            update={"permissions": hydrated_permissions}
-        )
+        hydrated_user.permissions.can_access_aiweave = explicit_ai_access
+        hydrated_user.permissions.can_view_aiweave = explicit_ai_view
     return hydrated_user
 
 
@@ -933,42 +924,10 @@ async def get_current_user_with_commercial_guard(
     if not commercial:
         return user
 
-    # Capture the administrator's explicit AIWeave grant before any
-    # commercial hydration rewrites the permission payload. The commercial
-    # license is only the module ceiling; it must never manufacture this
-    # user-level grant.
-    pre_hydration_permissions = getattr(user, "permissions", None)
-    if hasattr(pre_hydration_permissions, "model_dump"):
-        pre_hydration_permissions = pre_hydration_permissions.model_dump()
-    if not isinstance(pre_hydration_permissions, dict):
-        pre_hydration_permissions = {}
-    pre_hydration_ai_access = bool(
-        pre_hydration_permissions.get("can_access_aiweave", False)
-    )
-    pre_hydration_ai_view = bool(
-        pre_hydration_permissions.get("can_view_aiweave", False)
-    )
-
     user = _hydrate_admin(
         user,
         commercial,
     )
-
-    if (
-        _is_admin_role(user)
-        and "aiweave" in resolve_license_modules(commercial)
-    ):
-        user_permissions = getattr(user, "permissions", None)
-        if hasattr(user_permissions, "model_copy"):
-            user_permissions = user_permissions.model_copy(
-                update={
-                    "can_access_aiweave": pre_hydration_ai_access,
-                    "can_view_aiweave": pre_hydration_ai_view,
-                }
-            )
-            user = user.model_copy(
-                update={"permissions": user_permissions}
-            )
 
     # Commercial tenant users inherit the licensed tenant administrator's
     # effective module/page access. This also repairs legacy users created
@@ -992,6 +951,7 @@ async def get_current_user_with_commercial_guard(
     COMMERCIAL_ADMIN_SHARED_DATA_PREFIXES = (
         "/users",
         "/clients",
+        "/reports",
     )
     if _is_admin_role(user) and any(
         normalized_request_path == prefix

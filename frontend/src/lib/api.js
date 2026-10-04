@@ -10,7 +10,6 @@ import { isPlatformOwner } from "./commercialPermissionMatrix";
 // Commercial deployments can use VITE_API_URL so the frontend
 // can be connected to any self-hosted or cloud backend.
 const CONFIGURED_API_URL = (import.meta.env.VITE_API_URL || "").trim();
-const ALLOW_MOCK_BACKEND = Boolean(import.meta.env.DEV && !CONFIGURED_API_URL);
 
 // Local development backend fallback.
 const LOCAL_API_URL = "http://localhost:7432";
@@ -311,8 +310,24 @@ const api = axios.create({
 
 api.interceptors.request.use(
   async (config) => {
-    // If no remote API backend URL is provided, route directly to the in-memory mock handler
-    if (ALLOW_MOCK_BACKEND) {
+    // If no remote API backend URL is provided:
+    if (!CONFIGURED_API_URL) {
+      if (import.meta.env.PROD) {
+        // Production must never fake success when backend configuration is missing
+        config.adapter = async (cfg) => {
+          const err = new Error("Backend API URL (VITE_API_URL) is not configured in production.");
+          err.response = {
+            data: { error: "Backend API URL is not configured.", detail: "VITE_API_URL environment variable is required in production." },
+            status: 503,
+            statusText: "Service Unavailable",
+            headers: {},
+            config: cfg,
+          };
+          return Promise.reject(err);
+        };
+        return config;
+      }
+
       config.adapter = async (cfg) => {
         const method = (cfg.method || "get").toLowerCase();
         const rawUrl = cfg.url || "";
@@ -344,13 +359,15 @@ api.interceptors.request.use(
             config: cfg,
           };
         }
-        return {
-          data: method === "get" ? [] : { success: true, message: "OK" },
-          status: 200,
-          statusText: "OK",
+        const err = new Error(`Mock endpoint not implemented: ${method.toUpperCase()} ${rawUrl}`);
+        err.response = {
+          data: { error: `Endpoint not implemented in mock: ${rawUrl}` },
+          status: 404,
+          statusText: "Not Found",
           headers: {},
           config: cfg,
         };
+        return Promise.reject(err);
       };
       return config;
     }
@@ -461,12 +478,13 @@ api.interceptors.response.use(
       return Promise.reject(error);
     }
 
-    // Offline / Mock fallback when backend server is not running or unreachable
+    // Offline / Mock fallback when backend server is not running or unreachable (development only)
     const isOffline =
-      !error.response ||
-      error.code === "ERR_NETWORK" ||
-      error.message === "Network Error" ||
-      (ALLOW_MOCK_BACKEND && [404, 502, 503, 504].includes(error.response?.status));
+      !import.meta.env.PROD &&
+      (!error.response ||
+        error.code === "ERR_NETWORK" ||
+        error.message === "Network Error" ||
+        (!CONFIGURED_API_URL && [404, 502, 503, 504].includes(error.response?.status)));
 
     if (isOffline) {
       try {
@@ -478,17 +496,15 @@ api.interceptors.response.use(
             bodyData = JSON.parse(bodyData);
           } catch {}
         }
-        if (ALLOW_MOCK_BACKEND) {
-          const mockRes = handleMockRoute(method, rawUrl, bodyData);
-          if (mockRes) {
-            return Promise.resolve({
-              data: mockRes.data,
-              status: mockRes.status || 200,
-              statusText: "OK",
-              headers: {},
-              config: error.config,
-            });
-          }
+        const mockRes = handleMockRoute(method, rawUrl, bodyData);
+        if (mockRes) {
+          return Promise.resolve({
+            data: mockRes.data,
+            status: mockRes.status || 200,
+            statusText: "OK",
+            headers: {},
+            config: error.config,
+          });
         }
       } catch (err) {
         console.warn("[MockBackend] Fallback error:", err);

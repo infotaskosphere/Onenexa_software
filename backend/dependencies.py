@@ -21,7 +21,6 @@ def personal_birthday_candidates(client):
     return candidates
 MONGO_URL=os.getenv("MONGO_URL") or os.getenv("MONGODB_URI")
 DB_NAME=os.getenv("DB_NAME") or os.getenv("MONGODB_DB_NAME","taskosphere_commercial")
-ENV_MODE=str(os.getenv("ENV_MODE") or "development").strip().lower()
 import uuid
 class MockCursor:
     def __init__(self,data):self._data,self._index=data,0
@@ -108,19 +107,15 @@ class MockMongoClient:
     def __getitem__(self,name):return self._db
     def __getattr__(self,name):return self._db
 if not MONGO_URL:
-    if ENV_MODE == "production":
-        raise RuntimeError("MONGO_URL/MONGODB_URI is required in production. Refusing to start without the production database.")
-    print("[AI Studio] MONGO_URL/MONGODB_URI not provided. Using fallback in-memory MongoDB client for non-production use.")
-    client=MockMongoClient();db=client[DB_NAME]
+    if os.getenv("ENV_MODE") == "production":
+        raise RuntimeError("MONGO_URL/MONGODB_URI environment variable is not set. Refusing to start in production without a valid database connection.")
+    print("[AI Studio] MONGO_URL/MONGODB_URI not provided. Using fallback in-memory MongoDB client.");client=MockMongoClient();db=client[DB_NAME]
 else:
-    try:
-        client=AsyncIOMotorClient(MONGO_URL)
-        db=client[DB_NAME]
+    try:client=AsyncIOMotorClient(MONGO_URL);db=client[DB_NAME]
     except Exception as e:
-        if ENV_MODE == "production":
-            raise RuntimeError("Failed to initialize the production MongoDB client.") from e
-        print(f"[AI Studio] Failed to connect to MongoDB in non-production mode; using mock: {e}")
-        client=MockMongoClient();db=client[DB_NAME]
+        if os.getenv("ENV_MODE") == "production":
+            raise RuntimeError(f"Failed to connect to MongoDB in production: {e}")
+        print(f"[AI Studio] Failed to connect to MongoDB, falling back to mock: {e}");client=MockMongoClient();db=client[DB_NAME]
 def _resolve_jwt_secret():
     secret=os.getenv("JWT_SECRET")
     if secret and secret.strip():return secret.strip()

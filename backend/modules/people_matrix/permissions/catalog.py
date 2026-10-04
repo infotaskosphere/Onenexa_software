@@ -86,9 +86,8 @@ MODULE_HIERARCHY = {
     "people_matrix": {
         "flag": "can_access_people_matrix",
         "label": "People Matrix",
-        "description": "User directory, Attendance, Leave, Payroll, HR, Recruitment (candidate pipeline & interviews) and Performance (HRMS).",
+        "description": "Leave, Payroll, HR, Recruitment (candidate pipeline & interviews) and Performance (HRMS).",
         "pages": [
-            {"flag": "can_view_user_page", "label": "User Directory", "actions": ["view", "export"]},
             {"flag": "can_view_leave", "label": "Leave (view)", "actions": ["view"]},
             {"flag": "can_manage_leave", "label": "Leave (manage)", "actions": ["create", "edit", "delete", "approve"]},
             {"flag": "can_view_payroll", "label": "Payroll (view)", "actions": ["view", "export"]},

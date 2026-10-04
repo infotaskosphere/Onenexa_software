@@ -730,7 +730,7 @@ async def download_created_backup(progress_id: str, request: Request, current_us
     _require_backup_access(current_user)
     if not progress_id or len(progress_id) > 120:
         raise HTTPException(status_code=400, detail="Invalid backup progress id.")
-    state = _get_backup_progress(progress_id)
+    state = await _resolve_backup_progress(progress_id)
     if _s(state.get("owner_user_id")) != _s(current_user.id):
         raise HTTPException(status_code=404, detail="Backup progress session not found.")
     if state.get("phase") != "ready":
@@ -1352,21 +1352,26 @@ def _get_backup_progress(progress_id: str):
     return state
 
 
+async def _resolve_backup_progress(progress_id: str) -> dict:
+    state = _BACKUP_PROGRESS.get(progress_id)
+    if state:
+        st = dict(state)
+        st.pop("updated_at", None)
+        return st
+    persisted = await _get_backup_progress_persisted(progress_id)
+    if persisted:
+        persisted = dict(persisted)
+        persisted.pop("updated_at", None)
+        return persisted
+    raise HTTPException(status_code=404, detail="Backup progress session not found.")
+
+
 @router.get("/create/progress/{progress_id}")
 async def backup_create_progress(progress_id: str, current_user: User = Depends(get_current_user)):
     _require_backup_access(current_user)
     if not progress_id or len(progress_id) > 120:
         raise HTTPException(status_code=400, detail="Invalid backup progress id.")
-    try:
-        return _get_backup_progress(progress_id)
-    except HTTPException as exc:
-        if exc.status_code != 404:
-            raise
-        persisted = await _get_backup_progress_persisted(progress_id)
-        if not persisted:
-            raise
-        persisted.pop("updated_at", None)
-        return persisted
+    return await _resolve_backup_progress(progress_id)
 
 
 async def _count_commercial_backup_documents(raw, name, company_id, company, user_ids, identities):

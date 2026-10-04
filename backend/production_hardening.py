@@ -390,16 +390,15 @@ def _harden_email_crypto():
         if email_module._fernet is None:
             from cryptography.fernet import Fernet
             key = os.getenv("EMAIL_ENCRYPT_KEY", "").encode()
-            production = str(os.getenv("ENV_MODE") or "").strip().lower() == "production"
             if len(key) == 44:
                 email_module._fernet = Fernet(key)
-            elif production:
-                raise RuntimeError("EMAIL_ENCRYPT_KEY must be configured with a valid Fernet key in production.")
             else:
+                if str(os.getenv("ENV_MODE") or "").strip().lower() == "production":
+                    raise RuntimeError("EMAIL_ENCRYPT_KEY environment variable must be set to a valid 44-character base64 Fernet key in production.")
                 gen_key = Fernet.generate_key()
                 os.environ["EMAIL_ENCRYPT_KEY"] = gen_key.decode()
                 email_module._fernet = Fernet(gen_key)
-                _hardening_logger.warning("EMAIL_ENCRYPT_KEY was not configured; generated secure runtime Fernet key for non-production use.")
+                _hardening_logger.warning("EMAIL_ENCRYPT_KEY was not configured; generated secure runtime Fernet key.")
 
         def _secure_encrypt(plain: str) -> str:
             if not email_module._fernet:
@@ -429,6 +428,8 @@ def _harden_email_crypto():
 def _harden_password_crypto():
     try:
         if not os.getenv("PASSWORD_REPO_KEY"):
+            if str(os.getenv("ENV_MODE") or "").strip().lower() == "production":
+                raise RuntimeError("PASSWORD_REPO_KEY environment variable is not set. Refusing to start in production without an explicit encryption key for password vault.")
             from cryptography.fernet import Fernet
             os.environ["PASSWORD_REPO_KEY"] = Fernet.generate_key().decode()
             _hardening_logger.warning("PASSWORD_REPO_KEY was not configured; generated secure runtime Fernet key.")
