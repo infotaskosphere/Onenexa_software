@@ -13,6 +13,7 @@ logger = logging.getLogger("session_manager")
 
 SESSION_REPLACED_DETAIL = "SESSION_REPLACED"
 SESSION_NOT_BOUND_DETAIL = "SESSION_NOT_BOUND"
+SESSION_INVALIDATED_DETAIL = "SESSION_INVALIDATED"
 
 
 def _raw_db():
@@ -233,6 +234,22 @@ async def _guarded_get_current_user(request, credentials):
                 detail=SESSION_NOT_BOUND_DETAIL,
                 headers={"WWW-Authenticate": "Bearer"},
             )
+        if not _is_owner(user) and _sid:
+            raw_db = _raw_db()
+            current_session = await raw_db.session_manager.find_one(
+                {"session_token": _sid}
+            )
+            if not current_session:
+                token_hash = hashlib.sha256(credentials.credentials.encode("utf-8")).hexdigest()
+                current_session = await raw_db.sessions.find_one(
+                    {"$or": [{"session_token": _sid}, {"token_hash": token_hash}]}
+                )
+            if not current_session or current_session.get("status") != "active":
+                raise HTTPException(
+                    status_code=401,
+                    detail=SESSION_INVALIDATED_DETAIL,
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
     except HTTPException:
         raise
     except Exception:
