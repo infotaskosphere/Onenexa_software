@@ -19,7 +19,7 @@ xlrd==2.0.1
 # =========================
 pandas==2.3.3
 numpy==2.3.3
-pdfplumber==0.11.4
+pdfplumber==0.11.7
 
 # =========================
 # Google Drive OAuth
@@ -54,7 +54,7 @@ python-multipart==0.0.9
 # =========================
 # Authentication / Security
 # =========================
-python-jose==3.3.0
+python-jose[cryptography]==3.5.0
 passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
 PyJWT==2.8.0
@@ -65,7 +65,7 @@ PyJWT==2.8.0
 requests==2.31.0
 chardet==5.2.0
 httpx==0.27.0
-aiohttp==3.9.5
+aiohttp==3.14.3
 
 # =========================
 # Parsing / Scraping
@@ -73,7 +73,7 @@ aiohttp==3.9.5
 beautifulsoup4==4.12.3
 python-dateutil==2.9.0.post0
 playwright==1.44.0
-lxml==5.2.1
+lxml==6.1.3
 
 # =========================
 # Excel / PDF / Docs
@@ -81,7 +81,7 @@ lxml==5.2.1
 openpyxl==3.1.2
 fpdf2==2.7.9
 python-docx==1.1.2
-pypdf==4.3.1
+pypdf==6.19.0
 Pillow==12.3.0
 
 # =========================
@@ -123,7 +123,7 @@ jsonschema==4.22.0
 # =========================
 # SSL / Encoding
 # =========================
-certifi==2024.2.2
+certifi==2026.7.22
 charset-normalizer==3.3.2
 idna==3.7
 urllib3==2.2.1
@@ -169,3 +169,6 @@ striprtf>=0.0.26
 
 pytesseract==0.3.13
 pdf2image==1.17.0
+
+# Security override: pdfplumber's PDF parser dependency must stay on a fixed release.
+pdfminer.six==20260107
