@@ -933,10 +933,42 @@ async def get_current_user_with_commercial_guard(
     if not commercial:
         return user
 
+    # Capture the administrator's explicit AIWeave grant before any
+    # commercial hydration rewrites the permission payload. The commercial
+    # license is only the module ceiling; it must never manufacture this
+    # user-level grant.
+    pre_hydration_permissions = getattr(user, "permissions", None)
+    if hasattr(pre_hydration_permissions, "model_dump"):
+        pre_hydration_permissions = pre_hydration_permissions.model_dump()
+    if not isinstance(pre_hydration_permissions, dict):
+        pre_hydration_permissions = {}
+    pre_hydration_ai_access = bool(
+        pre_hydration_permissions.get("can_access_aiweave", False)
+    )
+    pre_hydration_ai_view = bool(
+        pre_hydration_permissions.get("can_view_aiweave", False)
+    )
+
     user = _hydrate_admin(
         user,
         commercial,
     )
+
+    if (
+        _is_admin_role(user)
+        and "aiweave" in resolve_license_modules(commercial)
+    ):
+        user_permissions = getattr(user, "permissions", None)
+        if hasattr(user_permissions, "model_copy"):
+            user_permissions = user_permissions.model_copy(
+                update={
+                    "can_access_aiweave": pre_hydration_ai_access,
+                    "can_view_aiweave": pre_hydration_ai_view,
+                }
+            )
+            user = user.model_copy(
+                update={"permissions": user_permissions}
+            )
 
     # Commercial tenant users inherit the licensed tenant administrator's
     # effective module/page access. This also repairs legacy users created
