@@ -40,7 +40,7 @@ services:
       - key: WA_BRIDGE_URL
         value: https://tasko-commercial-wa-bridge.onrender.com
       - key: WA_BRIDGE_SECRET
-        generateValue: true
+        sync: false
     healthCheckPath: /health
 
   # ── Frontend (React / Vite static site) ────────────────────────────────────
@@ -82,7 +82,7 @@ services:
       - key: BACKEND_URL
         value: https://tasko-commercial-backend.onrender.com
       - key: WA_BRIDGE_SECRET
-        generateValue: true
+        sync: false
       - key: NODE_ENV
         value: production
       - key: BRIDGE_PUBLIC_URL
