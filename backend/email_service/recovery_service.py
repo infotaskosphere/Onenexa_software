@@ -9,6 +9,7 @@ from backend.dependencies import db
 from backend.email_service.models import AccountRecoverySettings
 from backend.email_service.service import email_service
 from backend.security.audit_security import AuditSecurity
+from backend.security.session_manager import SessionManager
 
 
 def _mask_email(email_str: str) -> str:
@@ -249,11 +250,16 @@ class AccountRecoveryService:
             },
         )
 
-        # Invalidate any active session documents for this user
+        # Invalidate every active session in both canonical session stores.
+        # Password changes must terminate all prior devices immediately.
         try:
-            await db.sessions.delete_many({"user_id": user.get("id") or user_id})
+            await SessionManager.revoke_all_user_sessions(
+                str(user.get("id") or user_id),
+                reason="password_changed",
+            )
         except Exception:
-            pass
+            logger = __import__("logging").getLogger("account_recovery")
+            logger.exception("Failed to revoke all sessions after password reset.")
 
         # Send security notification
         settings = await cls.get_recovery_settings()
