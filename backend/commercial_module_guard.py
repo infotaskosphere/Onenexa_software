@@ -884,6 +884,26 @@ async def get_current_user_with_commercial_guard(
         except Exception as exc:
             logger.warning("Tenant user permission inheritance skipped: %s", exc)
 
+    # Licensee Admin control-plane/shared-master-data APIs must remain available
+    # even when the customer purchased only one operational module. These routes
+    # back Admin Dashboard, User Administration and tenant-wide reporting.
+    # They remain tenant-scoped by the authenticated company and are still denied
+    # to non-admin users through the normal module/page checks below.
+    normalized_request_path = str(request.url.path or "").split("?", 1)[0]
+    if normalized_request_path.startswith("/api"):
+        normalized_request_path = normalized_request_path[4:] or "/"
+    COMMERCIAL_ADMIN_SHARED_DATA_PREFIXES = (
+        "/users",
+        "/clients",
+        "/reports",
+    )
+    if _is_admin_role(user) and any(
+        normalized_request_path == prefix
+        or normalized_request_path.startswith(prefix + "/")
+        for prefix in COMMERCIAL_ADMIN_SHARED_DATA_PREFIXES
+    ):
+        return user
+
     module = module_for_path(
         request.url.path,
         request.method,
