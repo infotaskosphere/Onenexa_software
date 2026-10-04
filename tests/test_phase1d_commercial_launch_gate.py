@@ -50,11 +50,11 @@ def test_phase1d_gate_is_declared_on_main():
 def test_production_mock_database_is_rejected(monkeypatch):
     from backend import commercial_core_isolation as core
 
-    class FakeMock:
-        __name__ = "MockMongoClient"
+    class MockMongoClient:
+        pass
 
     monkeypatch.setenv("ENV_MODE", "production")
-    monkeypatch.setattr(core._dependencies, "client", FakeMock(), raising=False)
+    monkeypatch.setattr(core._dependencies, "client", MockMongoClient(), raising=False)
     monkeypatch.setattr(core._dependencies, "MONGO_URL", "mongodb://example", raising=False)
 
     with pytest.raises(RuntimeError, match="MockMongoClient"):
