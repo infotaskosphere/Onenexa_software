@@ -79,11 +79,16 @@ if _extra_cors_origins:
 # http://127.0.0.1:5173
 # --------------------------------------------------------
 
-CORS_ORIGIN_REGEX = (
-    r"^https://[a-zA-Z0-9-]+\.vercel\.app$"
-    r"|^https://[a-zA-Z0-9-]+\.onrender\.com$"
+_IS_PRODUCTION = str(os.getenv("ENV_MODE") or "").strip().lower() == "production"
+
+# Preview/local regex support is intentionally disabled in production. Customer
+# browsers must originate from one of the explicit production allowlist entries
+# above, or an origin deliberately added through CORS_ALLOWED_ORIGINS.
+CORS_ORIGIN_REGEX = None if _IS_PRODUCTION else (
+    r"^https://[a-zA-Z0-9-]+\\.vercel\\.app$"
+    r"|^https://[a-zA-Z0-9-]+\\.onrender\\.com$"
     r"|^http://localhost(?::[0-9]+)?$"
-    r"|^http://127\.0\.0\.1(?::[0-9]+)?$"
+    r"|^http://127\\.0\\.0\\.1(?::[0-9]+)?$"
 )
 
 
@@ -91,16 +96,48 @@ CORS_ORIGIN_REGEX = (
 # FastAPI CORS middleware
 # --------------------------------------------------------
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=CORS_ALLOWED_ORIGINS,
-    allow_origin_regex=CORS_ORIGIN_REGEX,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["*"],
-    max_age=3600,
-)
+_cors_kwargs = {
+    "allow_origins": CORS_ALLOWED_ORIGINS,
+    "allow_credentials": True,
+    "allow_methods": [
+        "GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"
+    ],
+    "allow_headers": [
+        "Accept",
+        "Authorization",
+        "Content-Type",
+        "Origin",
+        "X-Requested-With",
+    ],
+    "expose_headers": ["Content-Disposition", "X-Request-ID"],
+    "max_age": 3600,
+}
+if CORS_ORIGIN_REGEX:
+    _cors_kwargs["allow_origin_regex"] = CORS_ORIGIN_REGEX
+
+app.add_middleware(CORSMiddleware, **_cors_kwargs)
+
+
+# --------------------------------------------------------
+# Security response headers
+# --------------------------------------------------------
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault(
+        "Permissions-Policy",
+        "camera=(), microphone=(), geolocation=(), payment=()"
+    )
+    if _IS_PRODUCTION:
+        response.headers.setdefault(
+            "Strict-Transport-Security",
+            "max-age=31536000; includeSubDomains"
+        )
+    return response
 
 
 # --------------------------------------------------------
