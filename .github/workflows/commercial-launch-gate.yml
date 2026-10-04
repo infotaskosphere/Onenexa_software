@@ -37,4 +37,4 @@ jobs:
         env:
           ENV_MODE: test
         run: |
-          python -m pytest -q             test_route_audit.py             test_route_ownership.py             test_route_reconciliation.py             test_tenant_reconciliation.py             test_collection_ownership.py             test_production_hardening.py             tests/test_commercial_license_permissions.py             tests/test_commercial_tenant_visibility.py             tests/test_phase1c_module_isolation_matrix.py             tests/test_phase1d_commercial_launch_gate.py
+          python -m pytest -q             test_route_audit.py             test_route_ownership.py             test_route_reconciliation.py             test_tenant_reconciliation.py             test_collection_ownership.py             test_production_hardening.py             tests/test_commercial_license_permissions.py             tests/test_commercial_tenant_visibility.py             tests/test_phase1c_module_isolation_matrix.py             tests/test_phase1d_commercial_launch_gate.py             tests/test_phase2_auth_session_security.py
