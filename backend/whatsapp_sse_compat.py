@@ -19,7 +19,7 @@ from typing import Optional
 from fastapi import Depends, HTTPException, Request
 from fastapi.dependencies.utils import get_dependant
 from fastapi.responses import StreamingResponse
-from jose import JWTError, jwt
+import jwt
 
 from backend import whatsapp_hub
 from backend import dependencies as _dependencies
@@ -93,9 +93,9 @@ async def _resolve_user(request: Request, token: Optional[str]):
 
     # Keep compatibility with legacy JWT access tokens.
     try:
-        payload = jwt.decode(raw_token, JWT_SECRET, algorithms=[ALGORITHM])
+        payload = jwt.decode(bearer_token, JWT_SECRET, algorithms=[ALGORITHM])
         user_id = payload.get("sub")
-    except JWTError:
+    except jwt.PyJWTError:
         user_id = None
 
     if not user_id:
