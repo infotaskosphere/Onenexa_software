@@ -126,6 +126,12 @@ async def _run_guard(monkeypatch, path: str, license_modules):
     )
 
 
+def test_admin_user_model_preserves_explicit_aiweave_grant():
+    user = _admin_user()
+    assert user.permissions.can_access_aiweave is True
+    assert user.permissions.can_view_aiweave is True
+
+
 def test_every_billable_route_has_one_canonical_owner():
     owners = {}
     for module, routes in MODULE_ROUTES.items():
