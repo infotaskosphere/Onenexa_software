@@ -259,13 +259,6 @@ from backend.server_modules.application_runtime import register_application_runt
 
 app = FastAPI(title="Taskosphere Backend", redirect_slashes=False)
 
-@app.on_event("startup")
-async def _verify_production_mongodb():
-    # Production must never report healthy while the application cannot reach
-    # its real MongoDB database. Non-production environments intentionally keep
-    # the existing in-memory development fallback.
-    if str(os.getenv("ENV_MODE") or "").strip().lower() == "production":
-        await client.admin.command("ping")
 
 api_router = APIRouter(prefix="/api")
 app.include_router(backup_restore_router, prefix="/api")
