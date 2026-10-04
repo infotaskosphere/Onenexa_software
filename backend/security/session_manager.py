@@ -164,7 +164,15 @@ async def _session_was_replaced(user, bearer_token: str) -> bool:
             if active_other:
                 return True
 
-    # Fallback for JWT tokens without embedded sid
+    # JWTs issued for non-Platform-Owner accounts must carry the server-side
+    # session id created at login. A cryptographically valid legacy JWT without
+    # that binding is not sufficient to authenticate a commercial session.
+    if not sid:
+        return True
+
+    # Fallback for JWTs that carry a sid but whose legacy session record is not
+    # currently available. Compare the token issuance time with active sessions
+    # as a compatibility check rather than silently accepting an unbound token.
     try:
         active_sessions = await raw_db.session_manager.find(
             {"$or": user_or_filters, "status": "active"}
