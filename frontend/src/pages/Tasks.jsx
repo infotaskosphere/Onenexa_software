@@ -193,7 +193,7 @@ const COMPLIANCE_WORKFLOWS = [
 const STATUS_STYLES = {
   pending:     { bg: 'bg-red-50',    text: 'text-red-700',    border: 'border-red-200',    dot: 'bg-red-500',    label: 'To Do' },
   in_progress: { bg: 'bg-amber-50',  text: 'text-amber-700',  border: 'border-amber-200',  dot: 'bg-amber-500',  label: 'In Progress' },
-  completed:   { bg: 'bg-blue-50',   text: 'text-blue-700',   border: 'border-blue-200',   dot: 'bg-blue-500',   label: 'Completed' },
+  completed:   { bg: 'bg-emerald-50 dark:bg-emerald-950/40', text: 'text-emerald-700 dark:text-emerald-300', border: 'border-emerald-200 dark:border-emerald-800', dot: 'bg-emerald-500', label: 'Completed' },
   overdue:     { bg: 'bg-red-100',   text: 'text-red-800',    border: 'border-red-300',    dot: 'bg-red-700',    label: 'Overdue' },
   due_today:   { bg: 'bg-amber-100', text: 'text-amber-900',  border: 'border-amber-300',  dot: 'bg-amber-500',  label: 'Due Today' },
 };
@@ -250,7 +250,7 @@ const getStripeColor = (task, overdue, dueToday) => {
   if (overdue) return 'bg-red-700';
   if (dueToday) return 'bg-amber-500';
   const s = (task.status || '').toLowerCase();
-  if (s === 'completed')   return 'bg-blue-600';
+  if (s === 'completed')   return 'bg-emerald-500';
   if (s === 'in_progress') return 'bg-amber-500';
   if (s === 'pending') {
     const p = (task.priority || '').toLowerCase();
@@ -444,6 +444,7 @@ const TaskRow = memo(function TaskRow({
   selectedTask, setSelectedTask, handleAddComment,
   user, isDark,
   handleNudgeTask, sendingNudge, selectMode, selected, onToggleSelect,
+  isJustCompleted,
 }) {
   const [expanded, setExpanded] = useState(false);
   const checklistItems = parseChecklist(task.description);
@@ -453,12 +454,18 @@ const TaskRow = memo(function TaskRow({
 
   return (
     <motion.div variants={itemVariants} layout>
-      <div className={`relative rounded-xl border transition-all duration-200 overflow-hidden group
-        ${isCompleted
-          ? (isDark ? 'bg-slate-800/60 border-slate-700 opacity-70' : 'bg-slate-50 border-slate-200 opacity-70')
-          : (isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-500 hover:shadow-sm' : 'bg-white border-slate-200 hover:border-slate-300 hover:shadow-sm')}`}>
+      <div className={`relative rounded-xl border transition-all duration-300 overflow-hidden group
+        ${isJustCompleted
+          ? (isDark
+              ? 'bg-emerald-950/40 border-emerald-500/80 shadow-[0_0_18px_rgba(16,185,129,0.18)] ring-1 ring-emerald-500/40'
+              : 'bg-emerald-50/90 border-emerald-300 shadow-[0_0_18px_rgba(16,185,129,0.22)] ring-1 ring-emerald-400/50')
+          : isCompleted
+            ? (isDark ? 'bg-slate-800/60 border-slate-700 opacity-70' : 'bg-slate-50 border-slate-200 opacity-70')
+            : (isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-500 hover:shadow-sm' : 'bg-white border-slate-200 hover:border-slate-300 hover:shadow-sm')}`}>
 
-        <div className={`absolute left-0 top-0 h-full w-1 ${stripeColor}`} />
+        <div className={`absolute left-0 top-0 h-full transition-all duration-300 ${
+          isJustCompleted ? 'w-1.5 bg-emerald-500' : `w-1 ${stripeColor}`
+        }`} />
 
         <div
           className="pl-5 pr-3 py-2.5 grid items-center gap-0"
@@ -480,13 +487,38 @@ const TaskRow = memo(function TaskRow({
                 : task.status === 'in_progress' ? 'completed' : 'pending';
               handleQuickStatusChange(task, next);
             }}
-            className="flex items-center justify-center"
+            className="flex items-center justify-center relative p-0.5"
             title="Cycle status"
           >
-            <span className="w-4 h-4 rounded-full border-2 border-slate-300 flex items-center justify-center hover:border-blue-400 transition-colors">
-              {task.status === 'completed'   && <Check className="h-2.5 w-2.5 text-blue-600" />}
-              {task.status === 'in_progress' && <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />}
+            <span className={`w-4 h-4 rounded-full flex items-center justify-center transition-all duration-300 ${
+              isCompleted
+                ? 'bg-emerald-600 border border-emerald-600 text-white shadow-xs'
+                : 'border-2 border-slate-300 hover:border-emerald-400'
+            }`}>
+              {isCompleted ? (
+                <motion.span
+                  key="completed-check"
+                  initial={isJustCompleted ? { scale: 0, rotate: -45, opacity: 0 } : false}
+                  animate={{ scale: 1, rotate: 0, opacity: 1 }}
+                  transition={{ type: "spring", stiffness: 600, damping: 20 }}
+                  className="flex items-center justify-center"
+                >
+                  <Check className="h-2.5 w-2.5 text-white stroke-[3]" />
+                </motion.span>
+              ) : task.status === 'in_progress' ? (
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+              ) : null}
             </span>
+
+            {/* Ripple ring animation on completion */}
+            {isJustCompleted && (
+              <motion.span
+                initial={{ scale: 0.8, opacity: 0.8 }}
+                animate={{ scale: 2.2, opacity: 0 }}
+                transition={{ duration: 0.65, ease: "easeOut" }}
+                className="absolute inset-0 rounded-full bg-emerald-400 pointer-events-none"
+              />
+            )}
           </button>
 
           <button
@@ -505,11 +537,15 @@ const TaskRow = memo(function TaskRow({
                 {[
                   { s: 'pending',     label: 'To Do', active: 'bg-red-500 text-white border-red-500',     idle: isDark ? 'bg-slate-700 text-slate-400 border-slate-600 hover:border-red-400 hover:text-red-400'    : 'bg-white text-slate-400 border-slate-200 hover:border-red-300 hover:text-red-500' },
                   { s: 'in_progress', label: 'WIP',   active: 'bg-amber-500 text-white border-amber-500', idle: isDark ? 'bg-slate-700 text-slate-400 border-slate-600 hover:border-amber-400 hover:text-amber-400' : 'bg-white text-slate-400 border-slate-200 hover:border-amber-300 hover:text-amber-500' },
-                  { s: 'completed',   label: 'Done',  active: 'bg-blue-600 text-white border-blue-600',   idle: isDark ? 'bg-slate-700 text-slate-400 border-slate-600 hover:border-blue-400 hover:text-blue-400'   : 'bg-white text-slate-400 border-slate-200 hover:border-blue-300 hover:text-blue-500' },
+                  { s: 'completed',   label: 'Done',  active: 'bg-emerald-600 text-white border-emerald-600', idle: isDark ? 'bg-slate-700 text-slate-400 border-slate-600 hover:border-emerald-400 hover:text-emerald-400' : 'bg-white text-slate-400 border-slate-200 hover:border-emerald-300 hover:text-emerald-500' },
                 ].map(({ s, label, active, idle }) => (
                   <button key={s} onClick={() => handleQuickStatusChange(task, s)}
-                    className={`h-[20px] px-2 text-[9px] font-semibold tracking-wide rounded border transition-all whitespace-nowrap
-                      ${task.status === s ? active : idle}`}>
+                    className={`h-[20px] px-2 text-[9px] font-semibold tracking-wide rounded border transition-all whitespace-nowrap flex items-center gap-1
+                      ${task.status === s ? active : idle}
+                      ${s === 'completed' && isJustCompleted ? 'scale-105 shadow-xs ring-1 ring-emerald-400' : ''}`}>
+                    {s === 'completed' && task.status === 'completed' && (
+                      <Check className="h-2 w-2 stroke-[3]" />
+                    )}
                     {label}
                   </button>
                 ))}
@@ -843,6 +879,7 @@ const BoardCard = memo(function BoardCard({
   fetchComments, comments: taskComments, newComment, setNewComment,
   selectedTask, setSelectedTask, handleAddComment,
   isDark,
+  isJustCompleted,
 }) {
   const checklistItems = parseChecklist(task.description);
   const checkedItems   = taskChecklists[task.id] || [];
@@ -851,21 +888,37 @@ const BoardCard = memo(function BoardCard({
 
   return (
     <motion.div variants={itemVariants} layout>
-      <div className={`relative rounded-xl border overflow-hidden transition-all duration-200 group
-        ${isCompleted
-          ? (isDark ? 'bg-slate-800/60 border-slate-700 opacity-75' : 'bg-slate-50 border-slate-200 opacity-75')
-          : (isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-500 hover:shadow-md' : 'bg-white border-slate-200 hover:border-slate-300 hover:shadow-md')}`}>
+      <div className={`relative rounded-xl border overflow-hidden transition-all duration-300 group
+        ${isJustCompleted
+          ? (isDark
+              ? 'bg-emerald-950/40 border-emerald-500/80 shadow-[0_0_18px_rgba(16,185,129,0.18)] ring-1 ring-emerald-500/40'
+              : 'bg-emerald-50/90 border-emerald-300 shadow-[0_0_18px_rgba(16,185,129,0.22)] ring-1 ring-emerald-400/50')
+          : isCompleted
+            ? (isDark ? 'bg-slate-800/60 border-slate-700 opacity-75' : 'bg-slate-50 border-slate-200 opacity-75')
+            : (isDark ? 'bg-slate-800 border-slate-700 hover:border-slate-500 hover:shadow-md' : 'bg-white border-slate-200 hover:border-slate-300 hover:shadow-md')}`}>
 
-        <div className={`h-1 w-full ${stripeColor}`} />
+        <div className={`w-full transition-all duration-300 ${isJustCompleted ? 'h-1.5 bg-emerald-500' : `h-1 ${stripeColor}`}`} />
 
         <div className="p-4 space-y-3">
           <div className="flex items-start justify-between gap-2">
-            <button
-              onClick={() => openTaskDetail(task)}
-              className={`font-semibold text-sm leading-snug text-left flex-1 transition-colors
-                ${isCompleted ? 'text-slate-400 line-through' : (isDark ? 'text-slate-100 hover:text-blue-400' : 'text-slate-800 hover:text-blue-700')}`}>
-              {task.title}
-            </button>
+            <div className="flex-1 flex items-start gap-1.5 min-w-0">
+              <button
+                onClick={() => openTaskDetail(task)}
+                className={`font-semibold text-sm leading-snug text-left transition-colors
+                  ${isCompleted ? 'text-slate-400 line-through' : (isDark ? 'text-slate-100 hover:text-blue-400' : 'text-slate-800 hover:text-blue-700')}`}>
+                {task.title}
+              </button>
+              {isJustCompleted && (
+                <motion.span
+                  initial={{ scale: 0, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  transition={{ type: "spring", stiffness: 500, damping: 20 }}
+                  className="inline-flex items-center gap-0.5 text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-900/50 px-1.5 py-0.5 rounded shrink-0"
+                >
+                  <Check className="h-2.5 w-2.5 stroke-[3]" /> Done!
+                </motion.span>
+              )}
+            </div>
             {canModifyTask(task) && (
               <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
                 <button onClick={() => handleEdit(task)} className="p-1 rounded-lg hover:bg-blue-50 text-slate-400 hover:text-blue-600 transition-colors">
@@ -976,11 +1029,15 @@ const BoardCard = memo(function BoardCard({
               {[
                 { s: 'pending',     label: 'To Do', active: 'bg-red-500 text-white border-red-500' },
                 { s: 'in_progress', label: 'WIP',   active: 'bg-amber-500 text-white border-amber-500' },
-                { s: 'completed',   label: 'Done',  active: 'bg-blue-600 text-white border-blue-600' },
+                { s: 'completed',   label: 'Done',  active: 'bg-emerald-600 text-white border-emerald-600' },
               ].map(({ s, label, active }) => (
                 <button key={s} onClick={() => handleQuickStatusChange(task, s)}
-                  className={`h-6 text-[10px] font-semibold rounded-lg border transition-all
-                    ${task.status === s ? active : (isDark ? 'bg-slate-700 border-slate-600 text-slate-400' : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300')}`}>
+                  className={`h-6 text-[10px] font-semibold rounded-lg border transition-all flex items-center justify-center gap-1
+                    ${task.status === s ? active : (isDark ? 'bg-slate-700 border-slate-600 text-slate-400' : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300')}
+                    ${s === 'completed' && isJustCompleted ? 'scale-105 shadow-xs ring-1 ring-emerald-400' : ''}`}>
+                  {s === 'completed' && task.status === 'completed' && (
+                    <Check className="h-2.5 w-2.5 stroke-[3]" />
+                  )}
                   {label}
                 </button>
               ))}
@@ -1138,6 +1195,20 @@ export default function Tasks() {
   const [sendingNudge,   setSendingNudge]   = useState(false);
   const [bulkNudging,    setBulkNudging]    = useState(false);
   const [bulkUpdatingPriority, setBulkUpdatingPriority] = useState(false);
+  const [justCompletedIds, setJustCompletedIds] = useState(() => new Set());
+
+  const triggerCompletedAnimation = React.useCallback((taskId) => {
+    if (!taskId) return;
+    setJustCompletedIds(prev => new Set(prev).add(taskId));
+    setTimeout(() => {
+      setJustCompletedIds(prev => {
+        if (!prev.has(taskId)) return prev;
+        const next = new Set(prev);
+        next.delete(taskId);
+        return next;
+      });
+    }, 2200);
+  }, []);
 
   const [searchQuery,             setSearchQuery]             = useState('');
   const [filterStatus,            setFilterStatus]            = useState('all');
@@ -1604,6 +1675,9 @@ export default function Tasks() {
 
   const handleQuickStatusChange = React.useCallback(async (task, newStatus) => {
     const previousStatus = task.status;
+    if (newStatus === 'completed' && previousStatus !== 'completed') {
+      triggerCompletedAnimation(task.id);
+    }
     // Optimistic update — rolled back below if the server rejects it.
     setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: newStatus } : t));
     try {
@@ -1612,6 +1686,12 @@ export default function Tasks() {
         // Server rejected the update (e.g. 403 permission denied, 404, 500).
         // Roll back the optimistic change so the UI doesn't lie about what was saved.
         setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: previousStatus } : t));
+        setJustCompletedIds(prev => {
+          if (!prev.has(task.id)) return prev;
+          const next = new Set(prev);
+          next.delete(task.id);
+          return next;
+        });
         let detail = '';
         try { detail = (await res.json())?.detail || ''; } catch {}
         toast.error(detail || `Failed to update status (${res.status})`);
@@ -1620,9 +1700,15 @@ export default function Tasks() {
       toast.success(`Marked as ${STATUS_STYLES[newStatus]?.label || newStatus}`);
     } catch {
       setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: previousStatus } : t));
+      setJustCompletedIds(prev => {
+        if (!prev.has(task.id)) return prev;
+        const next = new Set(prev);
+        next.delete(task.id);
+        return next;
+      });
       toast.error('Network error');
     }
-  }, []);
+  }, [triggerCompletedAnimation]);
 
   const handleQuickPriorityChange = React.useCallback(async (task, newPriority) => {
     const previousPriority = task.priority || 'medium';
@@ -4513,6 +4599,7 @@ export default function Tasks() {
                   handleAddComment={handleAddComment} user={user}
                   handleNudgeTask={handleNudgeTask} sendingNudge={sendingNudge}
                   selectMode={selectMode} selected={selectedTaskIds.has(task.id)} onToggleSelect={toggleTaskSelected}
+                  isJustCompleted={justCompletedIds.has(task.id)}
                 />
               );
             })}
@@ -4583,6 +4670,7 @@ export default function Tasks() {
                           setNewComment={setNewComment} selectedTask={selectedTask} setSelectedTask={setSelectedTask}
                           handleAddComment={handleAddComment}
                           isDark={isDark}
+                          isJustCompleted={justCompletedIds.has(task.id)}
                         />
                       );
                     })}
