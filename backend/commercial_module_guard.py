@@ -1045,11 +1045,23 @@ async def get_current_user_with_commercial_guard(
                 commercial,
             )
 
-        if not core_admin_shared and not _permission_flag(
-            user,
-            feature_flag,
-            commercial,
-            feature_module,
+        explicit_ai_feature_grant = None
+        if feature_module == "aiweave" and _is_admin_role(user):
+            explicit_ai_feature_grant = (
+                pre_hydration_ai_view
+                if feature_flag == "can_view_aiweave"
+                else pre_hydration_ai_access
+            )
+
+        if not core_admin_shared and not (
+            explicit_ai_feature_grant
+            if explicit_ai_feature_grant is not None
+            else _permission_flag(
+                user,
+                feature_flag,
+                commercial,
+                feature_module,
+            )
         ):
             raise _deny(
                 request,
