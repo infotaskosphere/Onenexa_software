@@ -1139,11 +1139,8 @@ async def hub_events(
     The frontend already appends ?token=<jwt> when opening the EventSource URL.
     """
     from backend.dependencies import JWT_SECRET, ALGORITHM
-    try:
-        from jose import jwt as _jwt, JWTError
-    except ImportError:
-        import jwt as _jwt
-        JWTError = getattr(_jwt, "PyJWTError", Exception)
+    import jwt as _jwt
+    from jwt import PyJWTError as JWTError
 
     # Try Authorization header first; fall back to ?token= query param.
     auth_header = request.headers.get("Authorization", "")
