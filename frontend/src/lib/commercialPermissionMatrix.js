@@ -157,6 +157,26 @@ export function hasPageLicense(user, pageFlag, moduleId = null) {
 }
 
 export function hasEffectivePermission(user, permission) {
+  // Licensee Admin owns the tenant control plane. Admin/Settings navigation and
+  // control-plane permissions stay available even when the customer purchased
+  // only one operational module. Purchased operational modules remain the hard
+  // ceiling for business-module routes and APIs.
+  if (user && !isPlatformOwner(user) && String(user.role || "").trim().toLowerCase() === "admin" && user.company_id) {
+    const adminControlPlanePermissions = new Set([
+      "can_access_admin",
+      "can_view_user_page",
+      "can_manage_permissions",
+      "can_view_audit_logs",
+      "can_manage_settings",
+      "can_view_master_data",
+      "can_manage_master_data",
+      "can_view_roles",
+      "can_manage_roles",
+      "can_view_staff_activity",
+      "can_view_backup_restore",
+    ]);
+    if (adminControlPlanePermissions.has(permission)) return true;
+  }
   if (!user || !permission) return false;
   if (isPlatformOwner(user)) return true;
   if (permission === "can_access_aiweave") return user.permissions?.can_access_aiweave === true && user.permissions?.can_view_aiweave === true;
