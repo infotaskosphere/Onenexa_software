@@ -1,0 +1,40 @@
+name: Commercial Launch Gate
+
+on:
+  push:
+    branches: ["feature/master-console"]
+  pull_request:
+    branches: ["feature/master-console"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  commercial-launch-gate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout main commercial code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Compile backend
+        run: python -m compileall -q backend
+
+      - name: Run commercial security gates
+        env:
+          ENV_MODE: test
+        run: |
+          python -m pytest -q             test_route_audit.py             test_route_ownership.py             test_route_reconciliation.py             test_tenant_reconciliation.py             test_collection_ownership.py             test_production_hardening.py             tests/test_commercial_license_permissions.py             tests/test_commercial_tenant_visibility.py             tests/test_phase1c_module_isolation_matrix.py             tests/test_phase1d_commercial_launch_gate.py
