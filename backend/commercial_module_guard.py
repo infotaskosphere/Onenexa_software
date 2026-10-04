@@ -58,6 +58,19 @@ def _deny(request: Request, user: User, detail: str, license_doc: Optional[dict]
     return HTTPException(status_code=403, detail=detail)
 
 
+CORE_PREFIXES = (
+    "/users",
+    "/master",
+    "/companies",
+    "/settings",
+)
+
+COMMERCIAL_BLOCKED_PREFIXES = (
+    "/v2/search",
+    "/v2/platform",
+    "/v2/exports",
+)
+
 MODULE_PREFIXES = {
     "taskosphere": (
         "/tasks",
@@ -68,6 +81,13 @@ MODULE_PREFIXES = {
         "/action-center",
         "/visits",
         "/client-portal-manager",
+        "/dashboard",
+        "/reports/efficiency",
+        "/reports/performance-rankings",
+        "/reports/export",
+        "/activity",
+        "/staff-activity",
+        "/desktop-agent",
     ),
     "finix": (
         "/finix-dashboard",
@@ -112,6 +132,8 @@ MODULE_PREFIXES = {
         "/reports/validation-engine",
         "/reports/ledger-by-code",
         "/reports/finix-dashboard",
+        "/v2/exports/ledger",
+        "/finix",
     ),
     "compliance": (
         "/compliance-dashboard",
@@ -140,6 +162,8 @@ MODULE_PREFIXES = {
         "/ai",
         "/aiweave",
         "/ai-reader",  # legacy URL; still AIWeave, never Taskosphere
+        "/v2/copilot",
+        "/ai/",
     ),
     "people_matrix": (
         "/people-matrix",
@@ -163,6 +187,9 @@ FEATURE_PREFIXES = {
         "can_view_action_center": ("/action-center",),
         "can_view_client_visits": ("/visits",),
         "can_view_client_portal": ("/client-portal-manager",),
+        "can_view_reports": ("/reports/efficiency", "/reports/performance-rankings"),
+        "can_download_reports": ("/reports/export",),
+        "can_view_staff_activity": ("/activity", "/staff-activity"),
         "can_reset_client_passwords": (
             "/client-portal-manager/password",
             "/client-portal-manager/reset",
@@ -205,6 +232,7 @@ FEATURE_PREFIXES = {
         "can_match_bank": (
             "/bank-reconciliation",
         ),
+        "can_view_finix_ai": ("/finix", "/v2/exports/ledger"),
     },
     "compliance": {
         "can_view_compliance": (
@@ -338,11 +366,14 @@ def module_for_path(path: str, method: str = "GET") -> Optional[str]:
     if normalized.startswith("/api"):
         normalized = normalized[4:] or "/"
 
+    if _matches(normalized, CORE_PREFIXES):
+        return "core"
+
     if method == "GET":
-        # User Directory is a People Matrix page for commercial tenants.
-        # Keep the route entitlement consistent for GET and mutation endpoints.
+        # Client master data remains Records for non-admin operational access.
+        # Tenant-admin access is handled explicitly by the commercial guard.
         if normalized in ("/clients", "/clients/search"):
-            return None
+            return "records"
 
     for module, prefixes in MODULE_PREFIXES.items():
         if _matches(normalized, prefixes):
@@ -360,13 +391,9 @@ def feature_for_path(
     if normalized.startswith("/api"):
         normalized = normalized[4:] or "/"
 
-    # All User Directory APIs, including approve/reject/edit/delete/permissions,
-    # are actions of the People Matrix User Directory page. This prevents a
-    # mutation endpoint such as POST /users/{id}/approve from falling through
-    # to the module-only branch and incorrectly producing:
-    # "does not include a selected page for people_matrix".
+    # All User Directory APIs belong to non-billable CORE administration.
     if normalized == "/users" or normalized.startswith("/users/"):
-        return "people_matrix", "can_view_user_page"
+        return "core", "can_view_user_page"
 
     # Client APIs belong to the Records module. The Clients endpoints enforce
     # their own action-level permissions, so the commercial guard only needs
@@ -904,12 +931,32 @@ async def get_current_user_with_commercial_guard(
     ):
         return user
 
+    normalized_request_path = request.url.path.split("?", 1)[0]
+    normalized_without_api = normalized_request_path.removeprefix("/api") or "/"
+
+    for blocked_prefix in COMMERCIAL_BLOCKED_PREFIXES:
+        if _matches(normalized_without_api, (blocked_prefix,)):
+            raise _deny(
+                request,
+                user,
+                f"This API route is not commercially assigned and is disabled for customer tenants: {blocked_prefix}.",
+                commercial,
+            )
+
     module = module_for_path(
         request.url.path,
         request.method,
     )
 
-    if module and not _licensed_module(
+    core_admin_shared = (
+        _is_admin_role(user)
+        and _matches(
+            normalized_without_api,
+            ("/users", "/clients", "/companies", "/master", "/settings"),
+        )
+    )
+
+    if module and not core_admin_shared and not _licensed_module(
         module,
         commercial,
     ):
@@ -928,7 +975,7 @@ async def get_current_user_with_commercial_guard(
     if feature:
         feature_module, feature_flag = feature
 
-        if not _licensed_module(
+        if not core_admin_shared and not _licensed_module(
             feature_module,
             commercial,
         ):
@@ -939,7 +986,7 @@ async def get_current_user_with_commercial_guard(
                 commercial,
             )
 
-        if not _permission_flag(
+        if not core_admin_shared and not _permission_flag(
             user,
             feature_flag,
             commercial,
