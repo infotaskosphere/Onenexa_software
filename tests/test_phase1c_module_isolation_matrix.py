@@ -18,7 +18,6 @@ MODULE_ROUTES = {
     "taskosphere": (
         "/tasks",
         "/attendance",
-        "/reports/efficiency",
     ),
     "finix": (
         "/invoicing",
@@ -55,6 +54,9 @@ MODULE_ROUTES = {
 
 CORE_ROUTES = (
     "/users",
+    "/reports/efficiency",
+    "/reports/performance-rankings",
+    "/reports/export",
     "/users/example-user/permissions",
     "/activity",
     "/staff-activity",
