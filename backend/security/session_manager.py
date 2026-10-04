@@ -97,7 +97,7 @@ async def _session_was_replaced(user, bearer_token: str) -> bool:
     sid = None
     issued_at = None
     try:
-        from jose import jwt
+        import jwt
 
         payload = jwt.decode(
             bearer_token,
@@ -219,7 +219,7 @@ async def _guarded_get_current_user(request, credentials):
     else:
         user = await original(credentials)
     try:
-        from jose import jwt as _jwt
+        import jwt as _jwt
         _payload = _jwt.decode(
             credentials.credentials,
             dependencies.JWT_SECRET,
@@ -342,13 +342,16 @@ class SessionManager:
         from backend.platform_owner import is_platform_owner
 
         norm_email = str(email or "").strip().lower()
-        if not norm_email and user_id:
+        company_id = ""
+        if user_id:
             try:
                 found_user = await raw_db.users.find_one(
                     {"$or": [{"id": str(user_id)}, {"_id": user_id}]}
                 )
                 if found_user:
-                    norm_email = str(found_user.get("email") or "").strip().lower()
+                    if not norm_email:
+                        norm_email = str(found_user.get("email") or "").strip().lower()
+                    company_id = str(found_user.get("company_id") or "").strip()
             except Exception:
                 pass
 
@@ -389,6 +392,7 @@ class SessionManager:
             "session_token": session_token,
             "user_id": str(user_id),
             "email": norm_email,
+            "company_id": company_id,
             "client_ip": client_ip,
             "user_agent": user_agent,
             "status": "active",
@@ -413,6 +417,7 @@ class SessionManager:
                     "token_hash": token_hash,
                     "user_id": str(user_id),
                     "email": norm_email,
+                    "company_id": company_id,
                     "status": "active",
                     "created_at": now_dt,
                     "login_at": now,
