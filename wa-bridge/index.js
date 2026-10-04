@@ -71,6 +71,22 @@ function bridgeSecretMatches(value) {
   const b = Buffer.from(BRIDGE_SECRET);
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
+
+function signMedia(filename, expiresAt) {
+  return crypto.createHmac("sha256", BRIDGE_SECRET)
+    .update(`${filename}.${expiresAt}`)
+    .digest("hex");
+}
+
+function mediaSignatureMatches(filename, expiresAt, signature) {
+  if (!BRIDGE_SECRET || !filename || !signature) return false;
+  const exp = Number(expiresAt || 0);
+  if (!Number.isFinite(exp) || exp < Math.floor(Date.now() / 1000)) return false;
+  const expected = signMedia(filename, exp);
+  const a = Buffer.from(String(signature));
+  const b = Buffer.from(expected);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
 const SESSIONS_DIR      = path.join(__dirname, "sessions");
 const UPLOAD_DIR        = path.join(__dirname, "uploads");
 const logger            = pino({ level: "warn" });
@@ -298,7 +314,11 @@ async function downloadAndSaveMedia(sessionId, msg) {
 
     fs.writeFileSync(filepath, buffer);
     return {
-      url:      `${BRIDGE_PUBLIC_URL}/media/${filename}`,
+      url: (() => {
+        const expiresAt = Math.floor(Date.now() / 1000) + 900;
+        const signature = signMedia(filename, expiresAt);
+        return `${BRIDGE_PUBLIC_URL}/media/${filename}?expires=${expiresAt}&sig=${signature}`;
+      })(),
       filename: m.documentMessage?.fileName || mediaMsg.fileName || filename,
       mimeType,
       size:     buffer.length,
