@@ -17,6 +17,7 @@ COMPANY_ID_FIELD = "id"
 TENANT_COLLECTIONS = {
     # Identity / user master data
     "users",
+    "backup_jobs",
     # Additional tenant business / operational collections discovered by static audit
     "activity_logs", "api_usage", "automation_settings", "bank_learned_mappings",
     "billing_history", "client", "client_email_templates", "client_portal_reset_tokens",
