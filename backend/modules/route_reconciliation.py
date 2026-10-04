@@ -6,6 +6,10 @@ from types import MappingProxyType
 from backend.modules.route_ownership import ROUTE_OWNERSHIP
 
 RECONCILED_OWNERS = MappingProxyType({
+    "core.identity": "backend.dependencies",
+    "core.user_admin": "backend.server_modules.users_todos_admin",
+    "core.security": "backend.server_modules.auth_routes",
+    "core.settings": "backend.server_modules.application_runtime",
     "taskosphere.tasks": "backend.modules.taskosphere.tasks.router",
     "taskosphere.attendance": "backend.modules.taskosphere.attendance.router",
     "taskosphere.clients": "backend.modules.taskosphere.clients.router",
