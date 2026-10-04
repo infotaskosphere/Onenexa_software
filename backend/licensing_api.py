@@ -318,6 +318,40 @@ async def update_license_status_record(license_id: str, new_status: str) -> Dict
         {"id": license_id},
         {"$set": {"status": new_status, "last_event_at": now}},
     )
+    # A suspended/revoked commercial entitlement must terminate every active
+    # customer session immediately, including Manager/Staff accounts.
+    if new_status in {"suspended", "revoked"}:
+        try:
+            from backend.security.session_manager import SessionManager
+            raw_db = getattr(__import__("backend.dependencies", fromlist=["_raw_db"]), "_raw_db", db)
+            customer_id = str(license_doc.get("customer_id") or "").strip()
+            user_ids = set()
+            if customer_id:
+                rows = await raw_db.users.find(
+                    {"commercial_customer_id": customer_id},
+                    {"_id": 0, "id": 1},
+                ).to_list(5000)
+                user_ids.update(str(u.get("id") or "").strip() for u in rows if u.get("id"))
+                company_rows = await raw_db.companies.find(
+                    {"commercial_customer_id": customer_id},
+                    {"_id": 0, "id": 1},
+                ).to_list(5000)
+                company_ids = [str(x.get("id") or "").strip() for x in company_rows if x.get("id")]
+                if company_ids:
+                    company_users = await raw_db.users.find(
+                        {"company_id": {"$in": company_ids}},
+                        {"_id": 0, "id": 1},
+                    ).to_list(5000)
+                    user_ids.update(str(u.get("id") or "").strip() for u in company_users if u.get("id"))
+            license_users = await raw_db.users.find(
+                {"license_id": license_id},
+                {"_id": 0, "id": 1},
+            ).to_list(5000)
+            user_ids.update(str(u.get("id") or "").strip() for u in license_users if u.get("id"))
+            for user_id in sorted(user_ids):
+                await SessionManager.revoke_all_user_sessions(user_id, reason=f"license_{new_status}")
+        except Exception:
+            logger.exception("Failed to revoke customer sessions after license status change: %s", license_id)
     license_doc["status"] = new_status
     license_doc["last_event_at"] = now
     return _public_license(license_doc)
