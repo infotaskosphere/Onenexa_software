@@ -185,6 +185,7 @@ FEATURE_PREFIXES = {
         "can_download_reports": ("/reports/export",),
         "can_view_staff_activity": ("/activity", "/staff-activity"),
         "can_view_user_page": ("/users",),
+        "can_manage_settings": ("/settings",),
     },
     "taskosphere": {
         "can_view_dashboard": ("/dashboard",),
