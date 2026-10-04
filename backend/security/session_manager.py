@@ -266,6 +266,51 @@ async def _guarded_get_current_user(request, credentials):
 
 class SessionManager:
     @staticmethod
+    async def list_user_sessions(user_id: str, include_revoked: bool = False) -> list[dict]:
+        """Return sanitized session metadata for one concrete user identity."""
+        raw_db = _raw_db()
+        user_id_str = str(user_id or "").strip()
+        if not user_id_str:
+            return []
+        query = {"user_id": user_id_str}
+        if not include_revoked:
+            query["status"] = "active"
+        sessions = await raw_db.sessions.find(query).sort("created_at", -1).to_list(100)
+        result = []
+        for session in sessions:
+            result.append({
+                "id": str(session.get("_id") or ""),
+                "status": session.get("status", "active"),
+                "created_at": session.get("created_at"),
+                "last_seen_at": session.get("last_seen_at") or session.get("last_activity_at"),
+                "expires_at": session.get("expires_at"),
+                "client_ip": session.get("client_ip"),
+                "user_agent": str(session.get("user_agent") or "")[:240],
+                "revoked_reason": session.get("revoked_reason"),
+            })
+        return result
+
+    @staticmethod
+    async def revoke_user_session_by_id(user_id: str, session_id: str, reason: str = "admin_revoked") -> bool:
+        """Revoke one session by Mongo id while binding it to the user identity."""
+        raw_db = _raw_db()
+        user_id_str = str(user_id or "").strip()
+        session_id_str = str(session_id or "").strip()
+        if not user_id_str or not session_id_str:
+            return False
+        try:
+            from bson import ObjectId
+            lookup_id = ObjectId(session_id_str) if ObjectId.is_valid(session_id_str) else session_id_str
+        except Exception:
+            lookup_id = session_id_str
+        now = datetime.now(timezone.utc).isoformat()
+        result = await raw_db.sessions.update_one(
+            {"_id": lookup_id, "user_id": user_id_str, "status": "active"},
+            {"$set": {"status": "revoked", "revoked_at": now, "revoked_reason": reason}},
+        )
+        return getattr(result, "modified_count", 0) > 0
+
+    @staticmethod
     async def has_active_user_session(user_id: str, email: str = None) -> bool:
         """Return True when this account has an active session."""
         raw_db = _raw_db()
