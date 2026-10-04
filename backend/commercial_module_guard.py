@@ -654,7 +654,21 @@ def _hydrate_tenant_user(user: User, license_doc: dict) -> User:
         admin_permissions["can_view_aiweave"] = False
     data["permissions"] = admin_permissions
 
-    return User.model_validate(data)
+    hydrated_user = User.model_validate(data)
+    # AIWeave is explicitly user-governed. Re-apply the authenticated
+    # administrator's pre-hydration grant using a validated Pydantic copy so
+    # permission-model serialization/normalization cannot silently turn it off.
+    if "aiweave" in resolve_license_modules(license_doc):
+        hydrated_permissions = hydrated_user.permissions.model_copy(
+            update={
+                "can_access_aiweave": explicit_ai_access,
+                "can_view_aiweave": explicit_ai_view,
+            }
+        )
+        hydrated_user = hydrated_user.model_copy(
+            update={"permissions": hydrated_permissions}
+        )
+    return hydrated_user
 
 
 def _hydrate_admin(user: User, license_doc: dict) -> User:
