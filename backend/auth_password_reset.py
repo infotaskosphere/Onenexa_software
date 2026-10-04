@@ -178,10 +178,10 @@ async def reset_password(data: ResetPasswordRequest, request: Request):
             detail="OTP has expired. Please request a new one."
         )
 
-    if len(data.new_password) < 6:
+    if len(data.new_password) < 12:
         raise HTTPException(
             status_code=400,
-            detail="Password must be at least 6 characters."
+            detail="Password must be at least 12 characters."
         )
 
     user = await db.users.find_one({"email": email})
