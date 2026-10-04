@@ -6,6 +6,10 @@ No router is removed or re-registered by this module.
 from types import MappingProxyType
 
 ROUTE_OWNERSHIP = MappingProxyType({
+    "core.identity": ("backend.dependencies", "/api/auth"),
+    "core.user_admin": ("backend.server_modules.users_todos_admin", "/api/users"),
+    "core.security": ("backend.server_modules.auth_routes", "/api/auth/sessions"),
+    "core.settings": ("backend.server_modules.application_runtime", "/api/settings"),
     "taskosphere.tasks": ("backend.server_modules.task_routes", "/api"),
     "taskosphere.attendance": ("backend.server_modules.attendance_routes", "/api"),
     "taskosphere.clients": ("backend.server_modules.client_management", "/api"),
