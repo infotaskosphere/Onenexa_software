@@ -374,10 +374,16 @@ app.use((req, res, next) => {
 });
 app.use(express.json({ limit: "2mb" }));
 
-app.use("/media", express.static(UPLOAD_DIR, {
+app.use("/media", (req, res, next) => {
+  const filename = path.basename(req.path || "");
+  if (!mediaSignatureMatches(filename, req.query.expires, req.query.sig)) {
+    return res.status(401).json({ error: "Media authorization required or expired" });
+  }
+  next();
+}, express.static(UPLOAD_DIR, {
   setHeaders: (res) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.setHeader("Cache-Control", "private, max-age=300");
   },
 }));
 
