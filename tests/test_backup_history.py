@@ -70,12 +70,12 @@ def test_delete_history_removes_metadata_and_gridfs_artifact():
 
 
 def test_create_backup_persists_completed_artifact_before_response():
-    from backend.backup_restore import create_backup
+    from backend.backup_restore import _run_backup_job
 
-    source = inspect.getsource(create_backup)
+    source = inspect.getsource(_run_backup_job)
     assert "_persist_backup_artifact" in source
-    assert "X-Backup-History-ID" in source
-    assert "BackgroundTask" in source
+    assert "_set_backup_progress" in source
+    assert "history_persisted" in source
 
 
 def test_history_artifacts_are_not_recursively_backed_up():
