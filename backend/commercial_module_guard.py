@@ -614,12 +614,21 @@ def _hydrate_tenant_user(user: User, license_doc: dict) -> User:
 
     # Ordinary licensed modules remain role-granted to the tenant admin.
     # AIWeave is the exception: preserve only the administrator's previously
-    # explicit AIWeave grant from the stored permission record. A license
+    # explicit AIWeave grant from the user's actual permission state. A license
     # purchase alone must never recreate that grant.
+    source_permissions = getattr(user, "permissions", None)
+    if hasattr(source_permissions, "model_dump"):
+        source_permissions = source_permissions.model_dump()
+    if not isinstance(source_permissions, dict):
+        source_permissions = {}
     admin_permissions = get_all_admin_permissions(license_doc)
-    stored_permissions = data.get("permissions") or {}
-    if hasattr(stored_permissions, "model_dump"):
-        stored_permissions = stored_permissions.model_dump()
+    stored_permissions = dict(source_permissions)
+    if not stored_permissions:
+        fallback_permissions = data.get("permissions") or {}
+        if hasattr(fallback_permissions, "model_dump"):
+            fallback_permissions = fallback_permissions.model_dump()
+        if isinstance(fallback_permissions, dict):
+            stored_permissions = dict(fallback_permissions)
     if "aiweave" in resolve_license_modules(license_doc):
         admin_permissions["can_access_aiweave"] = bool(stored_permissions.get("can_access_aiweave", False))
         admin_permissions["can_view_aiweave"] = bool(stored_permissions.get("can_view_aiweave", False))
