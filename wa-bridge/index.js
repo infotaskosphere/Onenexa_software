@@ -344,7 +344,14 @@ async function drainQ(q) {
 
 // ── Express ──────────────────────────────────────────────────────────────────
 const app = express();
-app.use(cors({ origin: "*", exposedHeaders: ["Content-Disposition"] }));
+app.use(cors({ origin: IS_PRODUCTION ? false : "*", exposedHeaders: ["Content-Disposition"] }));
+app.use((req, res, next) => {
+  if (req.path === "/health" || req.path.startsWith("/media/")) return next();
+  if (!BRIDGE_SECRET || !bridgeSecretMatches(req.get("X-WA-Bridge-Secret"))) {
+    return res.status(401).json({ error: "Bridge authentication required" });
+  }
+  next();
+});
 app.use(express.json({ limit: "2mb" }));
 
 app.use("/media", express.static(UPLOAD_DIR, {
