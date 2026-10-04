@@ -21,7 +21,7 @@ SHARED_COLLECTION_OWNERS: Mapping[str, str] = MappingProxyType(
         "access_requests": "core",
 
         # Cross-domain business records
-        "clients": "taskosphere",
+        "clients": "records",
         "quotations": "leadsense",
         "invoices": "finix_ai",
 
