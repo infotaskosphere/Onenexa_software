@@ -60,6 +60,8 @@ def _deny(request: Request, user: User, detail: str, license_doc: Optional[dict]
 
 CORE_PREFIXES = (
     "/users",
+    "/activity",
+    "/staff-activity",
     "/master",
     "/companies",
     "/settings",
@@ -85,9 +87,6 @@ MODULE_PREFIXES = {
         "/reports/efficiency",
         "/reports/performance-rankings",
         "/reports/export",
-        "/activity",
-        "/staff-activity",
-        "/desktop-agent",
     ),
     "finix": (
         "/finix-dashboard",
