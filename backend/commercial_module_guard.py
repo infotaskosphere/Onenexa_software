@@ -177,6 +177,12 @@ MODULE_PREFIXES = {
 
 
 FEATURE_PREFIXES = {
+    "core": {
+        "can_view_reports": ("/reports/efficiency", "/reports/performance-rankings"),
+        "can_download_reports": ("/reports/export",),
+        "can_view_staff_activity": ("/activity", "/staff-activity"),
+        "can_view_user_page": ("/users",),
+    },
     "taskosphere": {
         "can_view_dashboard": ("/dashboard",),
         "can_view_tasks": ("/tasks",),
@@ -186,9 +192,6 @@ FEATURE_PREFIXES = {
         "can_view_action_center": ("/action-center",),
         "can_view_client_visits": ("/visits",),
         "can_view_client_portal": ("/client-portal-manager",),
-        "can_view_reports": ("/reports/efficiency", "/reports/performance-rankings"),
-        "can_download_reports": ("/reports/export",),
-        "can_view_staff_activity": ("/activity", "/staff-activity"),
         "can_reset_client_passwords": (
             "/client-portal-manager/password",
             "/client-portal-manager/reset",
