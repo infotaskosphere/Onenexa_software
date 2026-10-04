@@ -137,6 +137,13 @@ async def security_headers(request: Request, call_next):
             "Strict-Transport-Security",
             "max-age=31536000; includeSubDomains"
         )
+    # Authentication/session responses must never be cached by the browser,
+    # proxy, or CDN because they can contain account/session metadata.
+    request_path = str(request.url.path or "")
+    if request_path.startswith("/api/auth") or request_path.startswith("/api/security"):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
     return response
 
 
