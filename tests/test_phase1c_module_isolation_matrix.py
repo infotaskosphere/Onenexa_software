@@ -256,6 +256,59 @@ async def test_aiweave_only_requires_explicit_user_ai_permission(monkeypatch):
         raise AssertionError("AIWeave license alone recreated user AI access")
 
 
+async def test_aiweave_license_preserves_explicit_admin_grant_after_hydration(monkeypatch):
+    user = _admin_user()
+    user.permissions = {
+        "can_access_aiweave": True,
+        "can_view_aiweave": True,
+    }
+    license_doc = _license(["aiweave"])
+
+    async def fake_base(_credentials):
+        return user
+
+    async def fake_license(_user, *_args, **_kwargs):
+        return license_doc
+
+    monkeypatch.setattr(guard, "_BASE_GET_CURRENT_USER", fake_base)
+    monkeypatch.setattr(guard, "_commercial_license", fake_license)
+
+    hydrated = await guard.get_current_user_with_commercial_guard(
+        _request("/aiweave"),
+        credentials=type("Creds", (), {"credentials": "test"})(),
+    )
+    assert hydrated.permissions.can_access_aiweave is True
+    assert hydrated.permissions.can_view_aiweave is True
+
+
+async def test_aiweave_license_does_not_create_admin_grant_when_absent(monkeypatch):
+    user = _admin_user()
+    user.permissions = {
+        "can_access_aiweave": False,
+        "can_view_aiweave": False,
+    }
+    license_doc = _license(["aiweave"])
+
+    async def fake_base(_credentials):
+        return user
+
+    async def fake_license(_user, *_args, **_kwargs):
+        return license_doc
+
+    monkeypatch.setattr(guard, "_BASE_GET_CURRENT_USER", fake_base)
+    monkeypatch.setattr(guard, "_commercial_license", fake_license)
+
+    try:
+        await guard.get_current_user_with_commercial_guard(
+            _request("/aiweave"),
+            credentials=type("Creds", (), {"credentials": "test"})(),
+        )
+    except HTTPException as exc:
+        assert exc.status_code == 403
+    else:
+        raise AssertionError("AIWeave license alone recreated admin access")
+
+
 async def test_core_admin_routes_remain_available_on_single_module_license(monkeypatch):
     for route in CORE_ROUTES:
         await _run_guard(monkeypatch, route, ["taskosphere"])
