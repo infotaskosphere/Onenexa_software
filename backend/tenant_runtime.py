@@ -17,6 +17,17 @@ COMPANY_ID_FIELD = "id"
 TENANT_COLLECTIONS = {
     # Identity / user master data
     "users",
+    # Additional tenant business / operational collections discovered by static audit
+    "activity_logs", "api_usage", "automation_settings", "bank_learned_mappings",
+    "billing_history", "client", "client_email_templates", "client_portal_reset_tokens",
+    "computer_activity", "copilot_actions", "copilot_sessions", "customer_usage",
+    "dashboard_cache", "desktop_activity", "desktop_agents", "desktop_browser",
+    "desktop_dsc", "desktop_health", "desktop_logs", "desktop_productivity",
+    "desktop_updates", "desktop_usb", "embeddings", "gst_audit_logs", "journals",
+    "performance_metrics", "plugin_events", "portal_folder_template", "portal_messages",
+    "portal_settings", "products", "rule_improvements", "telegram_conversations",
+    "unprepared_incomes", "vector_embeddings", "vendor_intelligence", "website_configs",
+    "workflow_templates",
     # Tasks & Todos & Visits
     "tasks", "todos", "reminders", "visits", "due_dates",
     # Clients, Drive, & Discussions
