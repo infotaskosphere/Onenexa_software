@@ -14,7 +14,8 @@ def missing_tenant_coverage() -> dict[str, list[str]]:
     for domain, contract in DOMAIN_CONTRACTS.items():
         missing = [
             collection for collection in contract["owns"]
-            if collection not in TENANT_COLLECTIONS
+            if domain != "platform"
+            and collection not in TENANT_COLLECTIONS
             and collection not in {"role_definitions", "access_requests"}
         ]
         if missing:
