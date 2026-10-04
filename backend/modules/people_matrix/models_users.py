@@ -705,6 +705,20 @@ class User(BaseModel):
     punch_out_time: Optional[str] = "19:00"
     telegram_id: Optional[int] = None
     permissions: UserPermissions = Field(default_factory=UserPermissions)
+
+    @field_validator("permissions", mode="before")
+    @classmethod
+    def normalize_permissions_input(cls, value):
+        # Permission records come from MongoDB as plain dictionaries. Validate
+        # them explicitly before User-level role/default normalization so an
+        # explicitly granted AIWeave flag cannot be silently replaced by the
+        # role template.
+        if isinstance(value, UserPermissions):
+            return value
+        if isinstance(value, dict):
+            return UserPermissions.model_validate(value)
+        return value
+
     created_at: Optional[Any] = None
     is_active: bool = True
     status: str = "pending_approval"
