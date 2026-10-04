@@ -34,6 +34,7 @@ const QRCode     = require("qrcode");
 const axios      = require("axios");
 const path       = require("path");
 const fs         = require("fs");
+const crypto      = require("crypto");
 const multer     = require("multer");
 const {
   default: makeWASocket,
@@ -60,6 +61,16 @@ async function getWAVersion() {
 const PORT              = parseInt(process.env.PORT || process.env.WA_BRIDGE_PORT || "3002");
 const BACKEND_URL       = process.env.BACKEND_URL    || "http://localhost:8000";
 const BRIDGE_PUBLIC_URL = (process.env.BRIDGE_PUBLIC_URL || `http://localhost:${PORT}`).replace(/\/$/, "");
+const BRIDGE_SECRET     = String(process.env.WA_BRIDGE_SECRET || "").trim();
+const IS_PRODUCTION     = String(process.env.NODE_ENV || "").toLowerCase() === "production";
+if (IS_PRODUCTION && !BRIDGE_SECRET) throw new Error("WA_BRIDGE_SECRET is required in production.");
+
+function bridgeSecretMatches(value) {
+  if (!BRIDGE_SECRET || !value) return false;
+  const a = Buffer.from(String(value));
+  const b = Buffer.from(BRIDGE_SECRET);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
 const SESSIONS_DIR      = path.join(__dirname, "sessions");
 const UPLOAD_DIR        = path.join(__dirname, "uploads");
 const logger            = pino({ level: "warn" });
