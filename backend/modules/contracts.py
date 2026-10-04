@@ -33,6 +33,16 @@ def _contract(
     )
 
 
+PLATFORM = _contract(
+    owns=("companies", "subscriptions", "audit_logs"),
+    consumes=("users",),
+    current_sources=(
+        "backend/platform_owner.py",
+        "backend/licensing_api.py",
+        "backend/security/audit_security.py",
+    ),
+)
+
 CORE = _contract(
     owns=("users", "role_definitions", "access_requests"),
     consumes=("companies", "subscriptions", "audit_logs"),
@@ -134,7 +144,7 @@ LEADSENSE = _contract(
 )
 
 PEOPLE_MATRIX = _contract(
-    owns=("access_requests", "role_definitions"),
+    owns=(),
     consumes=("users", "companies"),
     current_sources=(
         "backend/permission_governance.py",
@@ -170,6 +180,7 @@ TRADEMARK = _contract(
 
 DOMAIN_CONTRACTS: Mapping[str, Mapping[str, tuple[str, ...]]] = MappingProxyType(
     {
+        "platform": PLATFORM,
         "core": CORE,
         "taskosphere": TASKOSPHERE,
         "finix_ai": FINIX_AI,
