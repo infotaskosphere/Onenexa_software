@@ -127,11 +127,11 @@ export function normalizedSelectedFeatures(user) {
     result[moduleId] = effectiveFlags;
   }
 
+  // Licensed modules without an explicit Platform Owner page selection
+  // receive no page access. A module purchase alone never reopens stale/full access.
   for (const moduleId of licensed) {
     if (result[moduleId]) continue;
-    result[moduleId] = hasExplicitSelections
-      ? new Set()
-      : new Set(ALL_PAGE_FLAGS_BY_MODULE[moduleId] || []);
+    result[moduleId] = new Set();
   }
 
   return result;
@@ -151,8 +151,11 @@ export function hasModuleAccess(user, moduleId) {
   const modules = normalizeModules(user);
   // Commercial license is the hard ceiling: unlicensed modules cannot be accessed by anyone in the company
   if (modules.size > 0 && !modules.has(moduleId)) return false;
-  // Licensee admin gets all licensed modules
-  if (String(user.role || "").toLowerCase() === "admin") return true;
+  // Licensee administrator module visibility is also controlled by the
+  // Platform Owner's explicit page selection.
+  if (String(user.role || "").toLowerCase() === "admin") {
+    return (normalizedSelectedFeatures(user)[moduleId] || new Set()).size > 0;
+  };
 
   // Non-admin licensee users (manager/staff) are governed by the
   // licensee-admin Permission Matrix. The commercial license is only the
