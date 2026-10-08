@@ -86,6 +86,16 @@ const DASHBOARD_FLAG_BY_MODULE = Object.freeze({
   people_matrix: "can_view_user_page",
 });
 
+const FEATURE_FALLBACKS = Object.freeze({
+  taskosphere: [["can_view_dashboard","Dashboard"],["can_view_tasks","Tasks"],["can_view_todo_dashboard","To-Do"],["can_view_attendance","Attendance"],["can_view_reminders","Reminders"],["can_view_action_center","Action Center"],["can_view_client_visits","Client Visits"],["can_view_client_portal","Client Portal Manager"],["can_reset_client_passwords","Password Reset"]],
+  finix: [["can_view_accounting_reports","Finix Dashboard & Accounting Reports"],["can_view_sale","Sales / Invoicing"],["can_view_purchase","Purchase"],["can_view_bank","Bank Accounts"],["can_view_chart_of_accounts","Chart of Accounts (view)"],["can_manage_chart_of_accounts","Chart of Accounts (manage)"],["can_view_journal_entries","Journal Entries (view)"],["can_post_journal_entries","Journal Entries & Zero Touch Entry (post)"],["can_match_bank","Bank Reconciliation (match/unmatch)"]],
+  aiweave: [["can_view_aiweave","AIWeave Workspace"]],
+  compliance: [["can_view_compliance","Compliance Tracker (view)"],["can_manage_compliance","Compliance Tracker (manage)"],["can_view_gst_reconciliation","GST Reconciliation"],["can_view_trademark_sphere","Trademark Sphere"],["can_view_mis_report","MIS Report (view)"],["can_manage_mis_report","MIS Report (manage)"],["can_view_salary_slips","Salary Slip Generator (view)"],["can_manage_salary_slips","Salary Slip Generator (manage)"],["can_view_roc_sphere","ROC Sphere (view)"],["can_manage_roc_sphere","ROC Sphere (manage)"]],
+  records: [["can_view_all_dsc","DSC Register"],["can_view_documents","Document Register"],["can_view_passwords","Password Vault (view)"],["can_edit_passwords","Password Vault (manage)"],["can_view_all_clients","Clients — visibility of other users' clients"],["can_edit_clients","Clients — edit / update any client"],["can_approve_clients","Clients — approve newly added clients"],["can_approve_whatsapp_wishes","Automation — approve WhatsApp birthday/festival wishes"],["can_approve_email_wishes","Automation — approve Email birthday/festival wishes"]],
+  proposals: [["can_view_all_leads","Lead Management"],["can_create_quotations","Quotations"],["can_view_client_discussion","Client Discussion (view)"],["can_manage_client_discussion","Client Discussion (manage)"]],
+  people_matrix: [["can_view_leave","Leave (view)"],["can_manage_leave","Leave (manage)"],["can_view_payroll","Payroll (view)"],["can_manage_payroll","Payroll (manage)"],["can_view_hr","HR (view)"],["can_manage_hr","HR (manage)"],["can_view_recruitment","Recruitment (view)"],["can_manage_recruitment","Recruitment (manage)"],["can_view_performance","Performance (view)"],["can_manage_performance","Performance (manage)"]],
+});
+
 const dashboardReady = (module, selected) => {
   const dashboardFlag = DASHBOARD_FLAG_BY_MODULE[module?.id];
   if (!dashboardFlag) return false;
@@ -156,7 +166,7 @@ export default function MasterConsole() {
   const [refreshing, setRefreshing] = useState(false);
   const [licenseeEmailCustomer, setLicenseeEmailCustomer] = useState(null);
 
-  const activeModules = useMemo(() => (Array.isArray(modules) ? modules : []).filter((m) => m.id !== "admin" && m.active !== false), [modules]);
+  const activeModules = useMemo(() => (Array.isArray(modules) ? modules : []).filter((m) => m.id !== "admin" && m.active !== false).map((m) => ({ ...m, features: Array.isArray(m.features) && m.features.length ? m.features : (FEATURE_FALLBACKS[m.id] || []).map(([id, label]) => ({ id, label, actions: ["view"] })) })), [modules]);
   const defaultSelectedFeatures = useMemo(() => {
     return Object.fromEntries(
       activeModules.map((module) => [
