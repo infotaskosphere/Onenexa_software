@@ -73,19 +73,30 @@ export function isPlatformOwner(user) {
   const id = String(user.id || "").trim();
   const companyId = String(user.company_id || user.company?.id || "").trim().toLowerCase();
 
-  // A user carrying a commercial license/customer identity is a licensee.
-  // Do not let a misconfigured VITE_PLATFORM_OWNER_EMAIL(S) turn a customer
-  // account into the Platform Owner and thereby bypass all license controls.
+  const ownerEmails = getPlatformOwnerEmails();
+
+  // Canonical Platform Owner identities take precedence over stale commercial
+  // markers left by historical migrations. Known owner identity must never lose
+  // its control-plane access merely because an old license/customer field exists.
+  if (
+    ownerEmails.has(email) ||
+    id === "usr-admin-01" ||
+    id === "saas-bootstrap-admin" ||
+    companyId === "platform-owner-48fe785fdd75127f" ||
+    companyId.startsWith("platform-owner-")
+  ) {
+    return true;
+  }
+
+  // Remaining identities carrying commercial license/customer markers are
+  // licensees and therefore remain subject to the commercial entitlement cap.
   const commercialIdentity = Boolean(
     user.license_id ||
     user.commercial_customer_id ||
     user.company?.commercial_customer_id ||
     user.company?.license_id
   );
-  if (commercialIdentity) return false;
-
-  const ownerEmails = getPlatformOwnerEmails();
-  return ownerEmails.has(email) || id === "usr-admin-01" || id === "saas-bootstrap-admin" || companyId === "platform-owner-48fe785fdd75127f" || companyId.startsWith("platform-owner-");
+  return !commercialIdentity && false;
 }
 
 export function normalizeModules(user) {
