@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext.jsx';
 import { useActivityTracker } from '@/hooks/useActivityTracker';
-import { canAccessPath, hasModuleAccess, isCommercialTenant } from '@/lib/commercialPermissionMatrix';
+import { canAccessPath, hasModuleAccess, isCommercialTenant, COMMERCIAL_ADMIN_LINKED_MODULES } from '@/lib/commercialPermissionMatrix';
 import {
   LayoutDashboard, CheckSquare, FileText, Clock, BarChart3,
   Users, LogOut, Menu, Activity, ChevronDown,
@@ -148,7 +148,20 @@ const DashboardLayout = ({ children }) => {
     return new Set(values.map((value) => String(value || '').trim().toLowerCase().replace(/-/g, '_')).filter(Boolean));
   };
 
-  const checkNavPermission = (item) => { if (item.adminOnly) return user?.role === 'admin'; if (isCommercialTenant(user)) return canAccessPath(user, item.path); const groupId = ITEM_GROUP_ID.get(item.path); const moduleFlag = GROUP_MODULE_FLAG[groupId]; if (moduleFlag && !hasPermission(moduleFlag)) return false; const permission = item.permission; if (!permission) return true; if (Array.isArray(permission)) return permission.some(p => hasPermission(p)); return hasPermission(permission); };
+  const checkNavPermission = (item) => {
+    if (item.adminOnly) {
+      if (user?.role !== 'admin') return false;
+      if (isPlatformOwner) return true;
+      const linkedModule = Object.entries(COMMERCIAL_ADMIN_LINKED_MODULES).find(
+        ([prefix]) => item.path === prefix || item.path.startsWith(prefix + '/')
+      )?.[1];
+      if (linkedModule) return hasModuleAccess(user, linkedModule);
+      // Global Admin control-plane pages are available to every tenant admin.
+      return true;
+    }
+    if (isCommercialTenant(user)) return canAccessPath(user, item.path);
+    const groupId = ITEM_GROUP_ID.get(item.path); const moduleFlag = GROUP_MODULE_FLAG[groupId]; if (moduleFlag && !hasPermission(moduleFlag)) return false; const permission = item.permission; if (!permission) return true; if (Array.isArray(permission)) return permission.some(p => hasPermission(p)); return hasPermission(permission);
+  };
   const allNavItems = NAV_GROUPS.flatMap(g => g.items); const activeLabel = useMemo(() => { const path = location.pathname; let best = null; for (const item of allNavItems) if (path === item.path || path.startsWith(item.path + '/')) if (!best || item.path.length > best.path.length) best = item; if (best) return best.label; if (EXTRA_PAGE_TITLES[path]) return EXTRA_PAGE_TITLES[path]; const matchedPrefix = Object.keys(EXTRA_PAGE_TITLES).filter(k => path.startsWith(k + '/')).sort((a,b) => b.length-a.length)[0]; if (matchedPrefix) return EXTRA_PAGE_TITLES[matchedPrefix]; const slug = path.split('/').filter(Boolean).pop(); return slug ? slug.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : 'Dashboard'; }, [location.pathname]);
   useEffect(() => { document.title = `${activeLabel} · Task-O-Sphere`; }, [activeLabel]); const activeSectionId = useMemo(() => getSectionForPath(location.pathname), [location.pathname]);
   const sectionHasAccess = (sectionId) => {
