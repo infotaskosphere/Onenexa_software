@@ -178,7 +178,7 @@ def _apply_license_entitlements(role: str, modules: List[str], selected_features
 
     for module_id, module_flag in MODULE_FLAG_BY_ID.items():
         allowed = module_id in selected_modules
-        permissions[module_flag] = False if module_id == "aiweave" else allowed
+        permissions[module_flag] = bool(allowed and selected_flags)
         module_def = MODULE_HIERARCHY.get(module_id, {})
 
         if not allowed:
