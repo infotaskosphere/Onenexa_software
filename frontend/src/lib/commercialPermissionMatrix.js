@@ -270,13 +270,11 @@ export function hasEffectivePermission(user, permission) {
       "can_access_admin",
       "can_view_user_page",
       "can_manage_permissions",
-      "can_view_audit_logs",
       "can_manage_settings",
       "can_view_master_data",
       "can_manage_master_data",
       "can_view_roles",
       "can_manage_roles",
-      "can_view_staff_activity",
       "can_view_backup_restore",
     ]);
     if (adminControlPlanePermissions.has(permission)) return true;
