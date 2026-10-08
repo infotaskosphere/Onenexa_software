@@ -261,7 +261,7 @@ export default function MasterConsole() {
     const current = selectedFeatures[moduleId] || [];
     const next = current.includes(featureId) ? current.filter((id) => id !== featureId) : [...current, featureId];
     const nextFeatures = { ...selectedFeatures, [moduleId]: next };
-    setSelectedFeatures(normalizeDashboardSelection(activeModules, nextFeatures));
+    setSelectedFeatures(nextFeatures);
   };
 
   const calculatedAmount = useMemo(() => {
