@@ -215,7 +215,7 @@ def get_all_admin_permissions(license_doc: Optional[Dict[str, Any]] = None) -> D
             # AIWeave is licensed separately but never auto-granted to the
             # tenant admin. The admin must explicitly enable the module AND
             # page through Permission Matrix / Access Governance.
-            permissions[module_flag] = False if module_id == "aiweave" else module_allowed
+            permissions[module_flag] = module_allowed
 
         # The licensee admin is also capped by the Platform Owner page
         # selections. Manager/Staff permissions can only further reduce access.
