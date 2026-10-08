@@ -259,6 +259,67 @@ export function saveStoredMockCustomers(customers) {
   }
 }
 
+export const DEFAULT_MOCK_COMPANIES = [
+  {
+    id: "comp-tasko-01",
+    name: "Taskosphere Commercial Services",
+    contact_name: "Operations Director",
+    email: "admin@taskosphere.com",
+    phone: "+91 98765 00000",
+    gstin: "27AAAAA0000A1Z5",
+    address: "Suite 401, Business Center, Mumbai",
+    city: "Mumbai",
+    state: "Maharashtra",
+    pincode: "400001",
+    status: "active",
+    has_gst: true,
+    licensed_modules: ["taskosphere", "finix", "compliance", "records", "proposals", "people_matrix", "aiweave"],
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: "cust-ent-01",
+    name: "Enterprise Solutions & Associates",
+    contact_name: "Operations Director",
+    email: "admin@enterprisesolutions.com",
+    phone: "+91 98765 00000",
+    gstin: "27AAAAA0000A1Z5",
+    address: "Suite 401, Business Center, Mumbai",
+    city: "Mumbai",
+    state: "Maharashtra",
+    pincode: "400001",
+    status: "active",
+    has_gst: true,
+    commercial_customer_id: "cust-ent-01",
+    license_id: "lic-01",
+    license_key: "TSO-COMM-2026-DEMO-0001",
+    source: "commercial-license",
+    licensed_modules: ["taskosphere", "finix", "compliance", "records", "proposals", "people_matrix", "aiweave"],
+    created_at: new Date().toISOString(),
+  },
+];
+
+export function getStoredMockCompanies() {
+  if (typeof window !== "undefined" && window.localStorage) {
+    try {
+      const stored = window.localStorage.getItem("taskosphere_mock_companies");
+      if (stored) return JSON.parse(stored);
+    } catch {}
+  }
+  if (!globalThis.__mockCompanies) {
+    globalThis.__mockCompanies = JSON.parse(JSON.stringify(DEFAULT_MOCK_COMPANIES));
+  }
+  return globalThis.__mockCompanies;
+}
+
+export function saveStoredMockCompanies(companies) {
+  globalThis.__mockCompanies = companies;
+  if (typeof window !== "undefined" && window.localStorage) {
+    try {
+      window.localStorage.setItem("taskosphere_mock_companies", JSON.stringify(companies));
+    } catch {}
+  }
+}
+
 export const MOCK_USER = {
   id: "lic-usr-01",
   email: "admin@enterprisesolutions.com",
@@ -522,6 +583,45 @@ export function handleMockRoute(method, url, data) {
   }
 
   const getActiveMockUser = () => {
+    if (typeof window !== "undefined") {
+      try {
+        const storedStr = window.sessionStorage.getItem("tasko_active_mock_user") ||
+                          window.localStorage.getItem("tasko_active_mock_user") ||
+                          window.sessionStorage.getItem("user") ||
+                          window.localStorage.getItem("user");
+        if (storedStr) {
+          const parsed = JSON.parse(storedStr);
+          if (parsed && (parsed.is_platform_owner || isPlatformOwner(parsed))) {
+            return {
+              ...parsed,
+              is_platform_owner: true,
+              role: "admin",
+              permissions: {
+                ...derivePermissionsFromModules(["taskosphere", "finix", "compliance", "records", "proposals", "people_matrix", "aiweave"]),
+                can_access_admin: true,
+                can_view_master_data: true,
+                can_manage_master_data: true,
+                can_view_roles: true,
+                can_manage_roles: true,
+                can_view_audit_logs: true,
+                can_view_staff_activity: true,
+              },
+            };
+          }
+          if (parsed && parsed.email) {
+            const userModules = parsed.licensed_modules || parsed.modules || ["taskosphere"];
+            return {
+              ...parsed,
+              licensed_modules: userModules,
+              permissions: {
+                ...derivePermissionsFromModules(userModules),
+                ...(parsed.permissions || {}),
+              },
+            };
+          }
+        }
+      } catch {}
+    }
     const licenses = getStoredMockLicenses();
     const activeLic = licenses.find((l) => l.id === MOCK_USER.license_id || l.customer_id === MOCK_USER.company_id) || licenses[0];
     const userModules = activeLic ? (activeLic.modules || activeLic.licensed_modules || ["taskosphere"]) : ["taskosphere"];
@@ -539,7 +639,7 @@ export function handleMockRoute(method, url, data) {
 
   if (normUrl === "/auth/login" || normUrl === "/auth/signin") {
     const email = String(data?.email || "").trim().toLowerCase();
-    const isOwner = isPlatformOwner({ email, role: data?.role });
+    const isOwner = email === "csmanthandesai@gmail.com" || isPlatformOwner({ email, role: data?.role });
     const newSessionToken = "sess_" + Date.now() + "_" + Math.random().toString(36).substring(2, 9);
 
     if (typeof window !== "undefined" && window.localStorage && !isOwner && email) {
@@ -556,6 +656,22 @@ export function handleMockRoute(method, url, data) {
       activeUser.company_id = "platform-owner-48fe785fdd75127f";
       activeUser.company = { id: "platform-owner-48fe785fdd75127f", name: "Taskosphere Platform Operational" };
       delete activeUser.subscription;
+      activeUser.permissions = {
+        ...derivePermissionsFromModules(["taskosphere", "finix", "compliance", "records", "proposals", "people_matrix", "aiweave"]),
+        can_access_admin: true,
+        can_view_master_data: true,
+        can_manage_master_data: true,
+        can_view_roles: true,
+        can_manage_roles: true,
+        can_view_audit_logs: true,
+        can_view_staff_activity: true,
+      };
+    }
+    if (typeof window !== "undefined") {
+      try {
+        window.sessionStorage.setItem("tasko_active_mock_user", JSON.stringify(activeUser));
+        window.localStorage.setItem("tasko_active_mock_user", JSON.stringify(activeUser));
+      } catch {}
     }
     return {
       status: 200,
@@ -593,6 +709,12 @@ export function handleMockRoute(method, url, data) {
   }
 
   if (normUrl === "/auth/logout") {
+    if (typeof window !== "undefined") {
+      try {
+        window.sessionStorage.removeItem("tasko_active_mock_user");
+        window.localStorage.removeItem("tasko_active_mock_user");
+      } catch {}
+    }
     return { status: 200, data: { success: true } };
   }
 
@@ -914,26 +1036,31 @@ export function handleMockRoute(method, url, data) {
   }
 
   if (normUrl.startsWith("/commercial-onboarding/lookup")) {
-    const compName = data?.company_name || "Enterprise Solutions & Associates";
+    const licenses = getStoredMockLicenses();
+    const customers = getStoredMockCustomers();
+    const reqKey = String(data?.license_key || "").trim().toUpperCase();
+    const reqCompany = String(data?.company_name || "").trim().toLowerCase();
+
+    let lic = licenses.find((l) =>
+      (reqKey && String(l.license_key || "").toUpperCase() === reqKey) ||
+      (reqCompany && String(l.company_name || "").toLowerCase().includes(reqCompany))
+    );
+    let cust = lic ? customers.find((c) => c.id === lic.customer_id) : null;
+    if (!cust && reqCompany) {
+      cust = customers.find((c) => String(c.company_name || "").toLowerCase().includes(reqCompany));
+      if (cust) {
+        lic = licenses.find((l) => l.customer_id === cust.id);
+      }
+    }
+    if (!lic) lic = licenses[0] || DEFAULT_MOCK_LICENSES[0];
+    if (!cust) cust = customers.find((c) => c.id === lic?.customer_id) || customers[0] || DEFAULT_MOCK_CUSTOMERS[0];
+
     return {
       status: 200,
       data: {
         success: true,
-        customer: {
-          id: "cust-ent-01",
-          company_name: compName,
-          email: "admin@enterprisesolutions.com",
-          gstin: "27AAAAA0000A1Z5",
-          phone: "+91 98765 00000",
-          address: "Suite 401, Business Center, Mumbai",
-        },
-        license: {
-          id: "lic-01",
-          license_key: data?.license_key || "TSO-COMM-2026-DEMO-0001",
-          package_name: "Commercial Enterprise Suite",
-          valid_until: "2028-12-31T23:59:59Z",
-          validity_months: 12,
-        },
+        customer: cust,
+        license: lic,
       },
     };
   }
@@ -943,17 +1070,66 @@ export function handleMockRoute(method, url, data) {
     normUrl.startsWith("/commercial-onboarding/create-user") ||
     normUrl.startsWith("/commercial-onboarding/create-staff")
   ) {
+    const licenses = getStoredMockLicenses();
+    const customers = getStoredMockCustomers();
+    const reqKey = String(data?.license_key || "").trim().toUpperCase();
+    const lic = licenses.find((l) => String(l.license_key || "").toUpperCase() === reqKey) || licenses[0];
+    const cust = lic ? customers.find((c) => c.id === lic.customer_id) : customers[0];
+
     const newUser = {
-      ...MOCK_USER,
-      email: data?.email || MOCK_USER.email,
-      full_name: data?.full_name || MOCK_USER.full_name,
-      company_name: data?.company_name || "Enterprise Solutions & Associates",
+      id: `lic-usr-${Date.now()}`,
+      email: data?.email || cust?.email || MOCK_USER.email,
+      full_name: data?.full_name || cust?.contact_name || MOCK_USER.full_name,
+      role: "admin",
+      status: "active",
+      is_active: true,
+      company_id: cust?.id || lic?.customer_id || "cust-ent-01",
+      commercial_customer_id: cust?.id || lic?.customer_id || "cust-ent-01",
+      license_id: lic?.id || "lic-01",
+      licensed_modules: lic?.modules || lic?.licensed_modules || ["taskosphere"],
+      selected_features: lic?.selected_features || {},
+      company: {
+        id: cust?.id || "cust-ent-01",
+        name: data?.company_name || cust?.company_name || "Enterprise Solutions",
+      },
+      permissions: derivePermissionsFromModules(lic?.modules || lic?.licensed_modules || ["taskosphere"]),
     };
+
+    if (!globalThis.__mockPlatformUsers) {
+      globalThis.__mockPlatformUsers = [];
+    }
+    globalThis.__mockPlatformUsers.unshift(newUser);
+
+    const companies = getStoredMockCompanies();
+    if (!companies.some((c) => c.id === newUser.company_id)) {
+      companies.unshift({
+        id: newUser.company_id,
+        name: newUser.company.name,
+        email: newUser.email,
+        status: "active",
+        commercial_customer_id: newUser.commercial_customer_id,
+        license_id: newUser.license_id,
+        license_key: lic?.license_key,
+        created_at: new Date().toISOString(),
+      });
+      saveStoredMockCompanies(companies);
+    }
+
+    if (typeof window !== "undefined") {
+      try {
+        window.sessionStorage.setItem("tasko_active_mock_user", JSON.stringify(newUser));
+        window.localStorage.setItem("tasko_active_mock_user", JSON.stringify(newUser));
+      } catch {}
+    }
+
+    const newSess = "sess_" + Date.now();
     return {
       status: 200,
       data: {
-        access_token: "mock-jwt-token-taskosphere",
-        token: "mock-jwt-token-taskosphere",
+        success: true,
+        access_token: `mock-jwt-token-${newUser.email}-${newSess}`,
+        token: `mock-jwt-token-${newUser.email}-${newSess}`,
+        session_token: newSess,
         user: newUser,
       },
     };
@@ -1011,6 +1187,50 @@ export function handleMockRoute(method, url, data) {
     licenses.unshift(newLicense);
     saveStoredMockCustomers(customers);
     saveStoredMockLicenses(licenses);
+
+    const newCompany = {
+      id: newCustId,
+      name: newCustomer.company_name,
+      contact_name: newCustomer.contact_name,
+      email: newCustomer.email,
+      phone: newCustomer.phone,
+      gstin: newCustomer.gstin,
+      address: newCustomer.address,
+      city: newCustomer.city,
+      state: newCustomer.state,
+      pincode: newCustomer.pincode,
+      status: "active",
+      has_gst: Boolean(newCustomer.gstin),
+      commercial_customer_id: newCustId,
+      license_id: newLicId,
+      license_key: licenseKey,
+      source: "commercial-license",
+      licensed_modules: newLicense.modules,
+      created_at: new Date().toISOString(),
+    };
+    const currentCompanies = getStoredMockCompanies();
+    currentCompanies.unshift(newCompany);
+    saveStoredMockCompanies(currentCompanies);
+
+    if (!globalThis.__mockPlatformUsers) {
+      globalThis.__mockPlatformUsers = [];
+    }
+    const newAdminUser = {
+      id: `lic-usr-${Date.now()}`,
+      email: newCustomer.email || `admin@${newCustomer.company_name.toLowerCase().replace(/[^a-z0-9]/g, "") || "company"}.com`,
+      full_name: newCustomer.contact_name || `${newCustomer.company_name} Admin`,
+      role: "admin",
+      status: "active",
+      is_active: true,
+      phone: newCustomer.phone || "",
+      company_id: newCustId,
+      commercial_customer_id: newCustId,
+      license_id: newLicId,
+      licensed_modules: newLicense.modules,
+      selected_features: newLicense.selected_features,
+      created_at: new Date().toISOString(),
+    };
+    globalThis.__mockPlatformUsers.unshift(newAdminUser);
 
     return {
       status: 200,
@@ -1126,15 +1346,85 @@ export function handleMockRoute(method, url, data) {
   }
 
   if (normUrl.startsWith("/companies")) {
+    const companies = getStoredMockCompanies();
+    const parts = normUrl.split("/").filter(Boolean);
+    const companyId = parts[1];
+
+    if (method === "delete" && companyId) {
+      const filtered = companies.filter((c) => c.id !== companyId);
+      saveStoredMockCompanies(filtered);
+      return { status: 200, data: { success: true, message: "Company deleted" } };
+    }
+
+    if (method === "put" && companyId) {
+      const idx = companies.findIndex((c) => c.id === companyId);
+      if (idx !== -1) {
+        companies[idx] = { ...companies[idx], ...data };
+        saveStoredMockCompanies(companies);
+        return { status: 200, data: companies[idx] };
+      }
+      return { status: 404, data: { detail: "Company not found" } };
+    }
+
+    if (method === "post") {
+      const newComp = {
+        id: `comp-${Date.now()}`,
+        status: "active",
+        ...data,
+        created_at: new Date().toISOString(),
+      };
+      companies.unshift(newComp);
+      saveStoredMockCompanies(companies);
+      return { status: 201, data: newComp };
+    }
+
     return {
       status: 200,
-      data: [
-        {
-          id: "comp-tasko-01",
-          name: "Taskosphere Commercial Services",
-          status: "active",
+      data: companies,
+    };
+  }
+
+  if (normUrl.startsWith("/commercial-licensee-stats")) {
+    const licenses = getStoredMockLicenses();
+    const customers = getStoredMockCustomers();
+    const licId = (url.split("license_id=")[1] || "").split("&")[0] || "lic-01";
+    const lic = licenses.find((l) => l.id === licId || l.license_key === licId) || licenses[0];
+    const cust = customers.find((c) => c.id === lic?.customer_id) || customers[0];
+    const users = globalThis.__mockPlatformUsers || [];
+    return {
+      status: 200,
+      data: {
+        generated_at: new Date().toISOString(),
+        customer: {
+          id: cust?.id || "cust-01",
+          company_name: cust?.company_name || lic?.company_name || "Commercial Customer",
+          email: cust?.email || "admin@customer.com",
         },
-      ],
+        license: {
+          id: lic?.id || "lic-01",
+          key: lic?.license_key || "TSO-COMM-0001",
+          status: lic?.status || "active",
+          max_users: lic?.max_users || 10,
+          days_remaining: 365,
+          modules: lic?.modules || lic?.licensed_modules || ["taskosphere"],
+        },
+        users: {
+          total: users.length || 2,
+          active: users.filter((u) => u.status === "active" || u.is_active).length || 2,
+          online: 1,
+          managers: users.filter((u) => u.role === "manager").length,
+          staff: users.filter((u) => u.role === "staff").length,
+          admins: users.filter((u) => u.role === "admin").length || 1,
+          seat_utilization_percent: Math.round(((users.length || 2) * 100) / (lic?.max_users || 10)),
+        },
+        tasks: { total: MOCK_TASKS.length || 6, open: 3, completed: 3, overdue: 0 },
+        clients: { total: MOCK_CLIENTS.length || 4 },
+        invoices: { total: 2, paid_amount: 15000, outstanding_amount: 5000 },
+        documents: { total: 4 },
+        compliance: { total: MOCK_COMPLIANCE.length || 3 },
+        attendance: { records_today: 2 },
+        activity: { reports_today: 5 },
+      },
     };
   }
 
@@ -1188,11 +1478,36 @@ export function handleMockRoute(method, url, data) {
     const lastPart = parts[parts.length - 1];
     const secondLast = parts[parts.length - 2];
 
+    if (lastPart === "deleted" && method === "get") {
+      if (!globalThis.__mockDeletedPlatformUsers) globalThis.__mockDeletedPlatformUsers = [];
+      return {
+        status: 200,
+        data: { users: globalThis.__mockDeletedPlatformUsers },
+      };
+    }
+
     if (method === "delete" || (method === "post" && lastPart === "delete")) {
       const targetId = lastPart === "delete" ? secondLast : lastPart;
-      const idx = users.findIndex(u => u.id === targetId);
-      if (idx !== -1) users.splice(idx, 1);
+      const idx = users.findIndex((u) => u.id === targetId);
+      if (idx !== -1) {
+        const removed = users.splice(idx, 1)[0];
+        if (!globalThis.__mockDeletedPlatformUsers) globalThis.__mockDeletedPlatformUsers = [];
+        globalThis.__mockDeletedPlatformUsers.unshift({ ...removed, deleted_at: new Date().toISOString() });
+      }
       return { status: 200, data: { success: true, message: "User deleted" } };
+    }
+
+    if (method === "post" && lastPart === "restore") {
+      const targetId = secondLast;
+      if (!globalThis.__mockDeletedPlatformUsers) globalThis.__mockDeletedPlatformUsers = [];
+      const idx = globalThis.__mockDeletedPlatformUsers.findIndex((u) => u.id === targetId);
+      if (idx !== -1) {
+        const restored = globalThis.__mockDeletedPlatformUsers.splice(idx, 1)[0];
+        delete restored.deleted_at;
+        users.unshift(restored);
+        return { status: 200, data: { success: true, user: restored } };
+      }
+      return { status: 200, data: { success: true } };
     }
 
     if (method === "post" && (lastPart === "activate" || lastPart === "deactivate")) {
@@ -1556,6 +1871,262 @@ export function handleMockRoute(method, url, data) {
         { id: "reg-2", gstin: "27AAACT2882H1Z7", active: true, created_at: new Date().toISOString() },
       ],
     };
+  }
+
+  // ── Commercial Console Endpoints (Platform Owner Administration) ─────────────
+  if (normUrl === "/commercial-console/system-health") {
+    return {
+      status: 200,
+      data: {
+        status: "Healthy",
+        last_checked: new Date().toISOString(),
+        services: [
+          { name: "MongoDB Primary", category: "database", status: "Healthy", latency_ms: 1.5, message: "Operational, responsive", last_checked: new Date().toISOString() },
+          { name: "FastAPI Core Application", category: "backend", status: "Healthy", latency_ms: 1.2, message: "Uvicorn async worker running on Python 3.11", last_checked: new Date().toISOString() },
+          { name: "AIWeave Omni Engine", category: "ai", status: "Healthy", latency_ms: 4.5, message: "Omni Route active with 3 provisioned accounts", last_checked: new Date().toISOString() },
+          { name: "Website Studio & Public Renderer", category: "website", status: "Healthy", latency_ms: 2.1, message: "Visual builder active with SSR/CSR hydration", last_checked: new Date().toISOString() },
+          { name: "Commercial Entitlement Engine", category: "licensing", status: "Healthy", latency_ms: 0.8, message: "Enforcing company/license boundaries across all tenants", last_checked: new Date().toISOString() },
+          { name: "Transactional Email Service", category: "integrations", status: "Healthy", latency_ms: 10.0, message: "Configured and encrypted", last_checked: new Date().toISOString() },
+        ],
+        environment: { node_env: "development", region: "global", server_time: new Date().toISOString() },
+      },
+    };
+  }
+
+  if (normUrl === "/commercial-console/analytics") {
+    const licenses = getStoredMockLicenses();
+    const count = licenses.length || 4;
+    return {
+      status: 200,
+      data: {
+        customers: { total: count, active: count, new_this_month: 1, suspended: 0 },
+        licenses: { total: count, active: count, expiring_soon: 0, expired: 0 },
+        subscriptions: { active: count, trial: 0, past_due: 0, cancelled: 0 },
+        usage: { total_users: count * 5, ai_requests: 3420, ai_tokens_estimate: 2804400, storage_gb: 4.2, website_traffic: 1420 },
+        mrr_inr: count * 4500,
+        arr_inr: count * 54000,
+      },
+    };
+  }
+
+  if (normUrl === "/commercial-console/activity") {
+    return {
+      status: 200,
+      data: {
+        logs: [
+          { id: "act-1", action: "CONSOLE_INITIALIZED", actor: "admin@taskosphere.com", actor_name: "Platform Owner", target: "Commercial Console Operating System", customer: "System", timestamp: new Date().toISOString(), status: "SUCCESS", details: "Control center session active" },
+          { id: "act-2", action: "OMNI_ROUTE_MOUNTED", actor: "System", actor_name: "AIWeave Architecture", target: "POST /api/aiweave/omni", customer: "Global", timestamp: new Date(Date.now() - 1800000).toISOString(), status: "SUCCESS", details: "Universal model routing engine active with automatic fallback" },
+          { id: "act-3", action: "LICENSE_ACTIVE", actor: "System", actor_name: "Commercial Entitlement", target: "Apex Global Logistics", customer: "Apex Global", timestamp: new Date(Date.now() - 3600000).toISOString(), status: "SUCCESS", details: "Enterprise suite active" },
+        ],
+      },
+    };
+  }
+
+  if (normUrl === "/commercial-console/omni-settings") {
+    if (method === "put") {
+      return { status: 200, data: { status: "success", settings: data } };
+    }
+    return {
+      status: 200,
+      data: {
+        key: "aiweave_omni_config",
+        routing_mode: "AUTO",
+        fallback_enabled: true,
+        max_attempts: 3,
+        timeout_seconds: 30,
+        circuit_breaker_enabled: true,
+        cooldown_seconds: 60,
+        preferred_provider: "auto",
+        updated_at: new Date().toISOString(),
+      },
+    };
+  }
+
+  if (normUrl === "/commercial-console/domains") {
+    if (method === "post") {
+      return {
+        status: 200,
+        data: {
+          status: "success",
+          domain: {
+            id: `dom-${Date.now()}`,
+            domain: data?.domain || "custom.example.com",
+            website_id: data?.website_id || "default",
+            status: "dns_pending",
+            ssl: "pending",
+            dns_status: "cname_required",
+            is_primary: Boolean(data?.is_primary),
+            target_cname: "sites.taskosphere.com",
+            created_at: new Date().toISOString(),
+          },
+        },
+      };
+    }
+    return {
+      status: 200,
+      data: {
+        domains: [
+          { id: "dom-1", domain: "taskosphere.com", website_id: "default", status: "connected", ssl: "active", dns_status: "verified", is_primary: true, created_at: new Date().toISOString() },
+        ],
+      },
+    };
+  }
+
+  if (normUrl.startsWith("/commercial-console/domains/")) {
+    return { status: 200, data: { status: "success", deleted: normUrl.split("/").pop() } };
+  }
+
+  if (normUrl === "/commercial-console/plans") {
+    if (method === "post") {
+      return { status: 200, data: { status: "success", plan: { ...data, id: data?.id || `plan-${Date.now()}` } } };
+    }
+    return {
+      status: 200,
+      data: {
+        plans: [
+          { id: "starter", name: "Starter", code: "PLAN-STARTER", description: "Essential task management and invoicing for small firms", modules: ["taskosphere", "finix"], max_users: 5, max_storage_gb: 5, max_ai_requests: 25000, monthly_price: 2499.0, support_level: "Standard", active: true },
+          { id: "professional", name: "Professional", code: "PLAN-PRO", description: "Full accounting, compliance, AI documents, and task management", modules: ["taskosphere", "finix", "aiweave", "compliance"], max_users: 20, max_storage_gb: 25, max_ai_requests: 100000, monthly_price: 5999.0, support_level: "Priority", active: true },
+          { id: "enterprise", name: "Enterprise Complete", code: "PLAN-ENTERPRISE", description: "Unlimited full suite with LeadSense, Records, People Matrix & Website Studio", modules: ["taskosphere", "finix", "aiweave", "compliance", "records", "proposals", "people_matrix"], max_users: 100, max_storage_gb: 100, max_ai_requests: 500000, monthly_price: 14999.0, support_level: "Dedicated 24/7", active: true },
+        ],
+      },
+    };
+  }
+
+  if (normUrl === "/commercial-console/email/config") {
+    if (method === "put") {
+      return { status: 200, data: { status: "success", config: data } };
+    }
+    return {
+      status: 200,
+      data: {
+        provider_type: "smtp",
+        smtp_host: "smtp.sendgrid.net",
+        smtp_port: 587,
+        smtp_username: "apikey",
+        smtp_password_masked: "••••••••",
+        sender_name: "TaskoSphere Commercial",
+        sender_email: "notifications@taskosphere.com",
+        reply_to: "support@taskosphere.com",
+        is_active: true,
+      },
+    };
+  }
+
+  if (normUrl === "/commercial-console/email/test") {
+    return { status: 200, data: { status: "success", message: `Test email dispatched to ${data?.recipient_email}` } };
+  }
+
+  if (normUrl === "/commercial-console/email/stats") {
+    return {
+      status: 200,
+      data: { total_sent: 1240, delivered: 1215, failed: 25, pending: 0, bounce_rate: 1.2 },
+    };
+  }
+
+  if (normUrl === "/commercial-console/email/templates") {
+    return {
+      status: 200,
+      data: {
+        templates: [
+          { code: "AUTH_WELCOME", name: "Welcome Email", category: "auth", subject: "Welcome to {{company_name}}", is_active: true, variables: ["user_name", "company_name", "login_url"] },
+          { code: "PASSWORD_RESET", name: "Password Reset Request", category: "security", subject: "Reset your password", is_active: true, variables: ["user_name", "otp", "reset_link", "expiry_minutes"] },
+          { code: "EMAIL_VERIFICATION", name: "Verify Your Email Address", category: "auth", subject: "Verify your email", is_active: true, variables: ["user_name", "verification_link"] },
+          { code: "LICENSE_ACTIVATED", name: "Commercial License Activated", category: "licensing", subject: "Your Taskosphere license is active", is_active: true, variables: ["licensee_name", "license_key", "package_name", "max_users"] },
+          { code: "LICENSE_EXPIRING", name: "License Expiring Soon Alert", category: "licensing", subject: "Your license expires soon", is_active: true, variables: ["licensee_name", "expiry_date", "days_remaining"] },
+        ],
+      },
+    };
+  }
+
+  if (normUrl.startsWith("/commercial-console/email/templates/") && normUrl.endsWith("/preview")) {
+    return {
+      status: 200,
+      data: {
+        status: "success",
+        rendered: {
+          subject: "Preview: Welcome to TaskoSphere",
+          html_body: "<div style='font-family:sans-serif;'><h2>Hello Manthan,</h2><p>Welcome to <strong>TaskoSphere</strong>. Your account is ready.</p></div>",
+          text_body: "Hello Manthan,\nWelcome to TaskoSphere. Your account is ready.",
+        },
+      },
+    };
+  }
+
+  if (normUrl.startsWith("/commercial-console/email/templates/") && normUrl.endsWith("/test-send")) {
+    return { status: 200, data: { status: "success", message: `Test email sent to ${data?.recipient_email}` } };
+  }
+
+  if (normUrl.startsWith("/commercial-console/email/templates/") && normUrl.endsWith("/reset")) {
+    return { status: 200, data: { status: "success", message: "Template reset to default." } };
+  }
+
+  if (normUrl === "/commercial-console/email/logs") {
+    return {
+      status: 200,
+      data: {
+        logs: [
+          { id: "log-1", template_code: "AUTH_WELCOME", recipient: "manthan@taskosphere.com", status: "delivered", attempts: 1, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+          { id: "log-2", template_code: "LICENSE_ACTIVATED", recipient: "admin@apexlogistics.com", status: "delivered", attempts: 1, created_at: new Date(Date.now() - 3600000).toISOString(), updated_at: new Date(Date.now() - 3600000).toISOString() },
+        ],
+        total: 2,
+      },
+    };
+  }
+
+  if (normUrl.startsWith("/commercial-console/email/logs/") && normUrl.endsWith("/retry")) {
+    return { status: 200, data: { status: "success", message: "Dispatched retry." } };
+  }
+
+  if (normUrl === "/commercial-console/recovery-settings") {
+    if (method === "put") {
+      return { status: 200, data: { status: "success", settings: data } };
+    }
+    return {
+      status: 200,
+      data: {
+        settings: {
+          otp_expiry_minutes: 15,
+          password_reset_token_expiry_minutes: 15,
+          max_login_attempts: 5,
+          lockout_duration_minutes: 30,
+          require_email_verification: true,
+          allow_password_reset: true,
+        },
+      },
+    };
+  }
+
+  if (normUrl.includes("/commercial-console/licensees/") && normUrl.endsWith("/email-settings")) {
+    if (method === "put") {
+      return { status: 200, data: { status: "success", message: "Saved licensee email settings." } };
+    }
+    return {
+      status: 200,
+      data: {
+        customer_id: "cust-1",
+        company_name: "Apex Global Logistics Pvt Ltd",
+        primary_email: "billing@apexlogistics.com",
+        secondary_email: "admin@apexlogistics.com",
+        billing_email: "accounts@apexlogistics.com",
+        notification_email: "alerts@apexlogistics.com",
+        recovery_email: "",
+        email_enabled: true,
+        email_verified: true,
+        notification_preferences: {
+          security: true,
+          billing: true,
+          license: true,
+          system: true,
+          product_updates: true,
+          user_invitations: true,
+        },
+        last_email_sent: new Date().toISOString(),
+      },
+    };
+  }
+
+  if (normUrl.includes("/commercial-console/users/")) {
+    return { status: 200, data: { status: "success", message: "User administrative email action executed successfully." } };
   }
 
   // Generic fallback for any other GET/POST

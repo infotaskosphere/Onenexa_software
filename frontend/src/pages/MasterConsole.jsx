@@ -87,14 +87,40 @@ const DASHBOARD_FLAG_BY_MODULE = Object.freeze({
 });
 
 const FEATURE_FALLBACKS = Object.freeze({
-  taskosphere: [["can_view_dashboard","Dashboard"],["can_view_tasks","Tasks"],["can_view_todo_dashboard","To-Do"],["can_view_attendance","Attendance"],["can_view_reminders","Reminders"],["can_view_action_center","Action Center"],["can_view_client_visits","Client Visits"],["can_view_client_portal","Client Portal Manager"],["can_reset_client_passwords","Password Reset"],["can_view_staff_activity","Team Activity"],["can_view_reports","Reports"],["can_view_audit_logs","Audit Logs"]],
-  finix: [["can_view_accounting_reports","Accounting Reports"],["can_view_sale","Sales / Invoicing"],["can_view_purchase","Purchase"],["can_view_bank","Bank Accounts"],["can_view_chart_of_accounts","Chart of Accounts (view)"],["can_manage_chart_of_accounts","Chart of Accounts (manage)"],["can_view_journal_entries","Journal Entries (view)"],["can_post_journal_entries","Journal Entries (post)"],["can_match_bank","Bank Reconciliation (match/unmatch)"],["can_view_zero_touch_entries","Zero Touch Entries"],["can_view_extended_accounts_reports","Extended Accounts Reports"],["can_view_gst_portal_sync","Live GST Portal Sync"],["can_view_accounting_integrity","Accounting Integrity"],["can_view_depreciation","Depreciation"],["can_view_tds_tcs","TDS / TCS"],["can_view_financial_ratios","Financial Ratios"],["can_view_comparative_report","Comparative Report"],["can_view_yearly_report","Yearly Report"],["can_view_opening_balances","Opening Balances"],["can_view_accounting_audit_trail","Accounting Audit Trail"],["can_view_bulk_import","Bulk Import"],["can_view_due_dates","Due Dates"],["can_view_import_invoices","Import Invoices"]],
+  taskosphere: [["can_view_dashboard","Dashboard"],["can_view_tasks","Tasks"],["can_view_todo_dashboard","To-Do"],["can_view_attendance","Attendance"],["can_view_reminders","Reminders"],["can_view_action_center","Action Center"],["can_view_client_visits","Client Visits"],["can_view_client_portal","Client Portal Manager"],["can_reset_client_passwords","Password Reset"]],
+  finix: [["can_view_accounting_reports","Finix Dashboard & Accounting Reports"],["can_view_sale","Sales / Invoicing"],["can_view_purchase","Purchase"],["can_view_bank","Bank Accounts"],["can_view_chart_of_accounts","Chart of Accounts (view)"],["can_manage_chart_of_accounts","Chart of Accounts (manage)"],["can_view_journal_entries","Journal Entries (view)"],["can_post_journal_entries","Journal Entries & Zero Touch Entry (post)"],["can_match_bank","Bank Reconciliation (match/unmatch)"]],
   aiweave: [["can_view_aiweave","AIWeave Workspace"]],
   compliance: [["can_view_compliance","Compliance Tracker (view)"],["can_manage_compliance","Compliance Tracker (manage)"],["can_view_gst_reconciliation","GST Reconciliation"],["can_view_trademark_sphere","Trademark Sphere"],["can_view_mis_report","MIS Report (view)"],["can_manage_mis_report","MIS Report (manage)"],["can_view_salary_slips","Salary Slip Generator (view)"],["can_manage_salary_slips","Salary Slip Generator (manage)"],["can_view_roc_sphere","ROC Sphere (view)"],["can_manage_roc_sphere","ROC Sphere (manage)"]],
-  records: [["can_view_all_dsc","DSC Register"],["can_view_documents","Document Register"],["can_view_passwords","Password Vault (view)"],["can_edit_passwords","Password Vault (manage)"],["can_view_all_clients","Clients — visibility of other users' clients"],["can_edit_clients","Clients — edit / update any client"],["can_approve_clients","Clients — approve newly added clients"],["can_access_whatsapp_hub","Unified Inbox"],["can_view_automation_approvals","Automation Approvals"],["can_approve_whatsapp_wishes","Automation — approve WhatsApp birthday/festival wishes"],["can_approve_email_wishes","Automation — approve Email birthday/festival wishes"]],
+  records: [["can_view_all_dsc","DSC Register"],["can_view_documents","Document Register"],["can_view_passwords","Password Vault (view)"],["can_edit_passwords","Password Vault (manage)"],["can_view_all_clients","Clients — visibility of other users' clients"],["can_edit_clients","Clients — edit / update any client"],["can_approve_clients","Clients — approve newly added clients"],["can_approve_whatsapp_wishes","Automation — approve WhatsApp birthday/festival wishes"],["can_approve_email_wishes","Automation — approve Email birthday/festival wishes"]],
   proposals: [["can_view_all_leads","Lead Management"],["can_create_quotations","Quotations"],["can_view_client_discussion","Client Discussion (view)"],["can_manage_client_discussion","Client Discussion (manage)"]],
   people_matrix: [["can_view_leave","Leave (view)"],["can_manage_leave","Leave (manage)"],["can_view_payroll","Payroll (view)"],["can_manage_payroll","Payroll (manage)"],["can_view_hr","HR (view)"],["can_manage_hr","HR (manage)"],["can_view_recruitment","Recruitment (view)"],["can_manage_recruitment","Recruitment (manage)"],["can_view_performance","Performance (view)"],["can_manage_performance","Performance (manage)"]],
 });
+
+const dashboardReady = (module, selected) => {
+  const dashboardFlag = DASHBOARD_FLAG_BY_MODULE[module?.id];
+  if (!dashboardFlag) return false;
+  const required = (module?.features || []).map((feature) => feature.id).filter((id) => id !== dashboardFlag);
+  return required.length > 0 && required.every((id) => (selected || []).includes(id));
+};
+
+const normalizeDashboardSelection = (catalog, selections) => {
+  const next = { ...(selections || {}) };
+  (catalog || []).forEach((module) => {
+    const dashboardFlag = DASHBOARD_FLAG_BY_MODULE[module.id];
+    if (!dashboardFlag) return;
+    const current = Array.from(new Set(next[module.id] || []));
+    next[module.id] = dashboardReady(module, current)
+      ? Array.from(new Set([...current, dashboardFlag]))
+      : current.filter((id) => id !== dashboardFlag);
+  });
+  return next;
+};
+
+const isFeatureChecked = (module, feature, selected) => {
+  const dashboardFlag = DASHBOARD_FLAG_BY_MODULE[module?.id];
+  return feature.id === dashboardFlag ? dashboardReady(module, selected) : (selected || []).includes(feature.id);
+};
+
 function Field({ label, children }) {
   return (
     <label className="text-sm font-medium text-slate-700">
@@ -236,7 +262,7 @@ export default function MasterConsole() {
     const defaultFeatures = { ...defaultSelectedFeatures };
     const initialModules = activeModules.map((m) => m.id);
     setSelectedModules(initialModules);
-    setSelectedFeatures(defaultFeatures);
+    setSelectedFeatures(normalizeDashboardSelection(activeModules, defaultFeatures));
     setExpandedModules({});
     setForm({ ...emptyForm, invoice_company_id: invoiceCompanies[0]?.id || "" });
     setShowCreate(true);
@@ -254,14 +280,14 @@ export default function MasterConsole() {
       delete nextFeatures[moduleId];
     }
     setSelectedModules(nextModules);
-    setSelectedFeatures(nextFeatures);
+    setSelectedFeatures(normalizeDashboardSelection(activeModules, nextFeatures));
   };
 
   const toggleFeature = (moduleId, featureId) => {
     const current = selectedFeatures[moduleId] || [];
     const next = current.includes(featureId) ? current.filter((id) => id !== featureId) : [...current, featureId];
     const nextFeatures = { ...selectedFeatures, [moduleId]: next };
-    setSelectedFeatures(nextFeatures);
+    setSelectedFeatures(normalizeDashboardSelection(activeModules, nextFeatures));
   };
 
   const calculatedAmount = useMemo(() => {
@@ -294,7 +320,7 @@ export default function MasterConsole() {
       const response = await generateCommercialLicense({
         ...form,
         selected_modules: selectedModules,
-        selected_features: selectedFeatures,
+        selected_features: normalizeDashboardSelection(activeModules, selectedFeatures),
         validity_months: Number(form.validity_months || 0),
         amount_charged: form.amount_charged === "" ? calculatedAmount : Number(form.amount_charged),
         max_users: Number(form.max_users),
@@ -905,8 +931,8 @@ export default function MasterConsole() {
                           <label key={feature.id} className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
                             <input
                               type="checkbox"
-                              disabled={generating}
-                              checked={(selectedFeatures[module.id] || []).includes(feature.id)}
+                              disabled={generating || feature.id === DASHBOARD_FLAG_BY_MODULE[module.id]}
+                              checked={isFeatureChecked(module, feature, selectedFeatures[module.id] || [])}
                               onChange={() => toggleFeature(module.id, feature.id)}
                               className="rounded border-slate-300 text-[#0D3B66]"
                             />

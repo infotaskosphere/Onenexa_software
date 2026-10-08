@@ -24,7 +24,6 @@ import {
 import AccessGovernancePanel, { GovCard } from '@/components/governance/AccessGovernancePanel';
 import { DEFAULT_ROLE_PERMISSIONS, PERMISSION_TEMPLATE_ROLES } from '@/lib/permissionTemplates';
 import { GLOBAL_PERMS, OPS_PERMS, EDIT_PERMS, permTabs as PERM_TABS, MODULE_PERM_KEYS } from '@/lib/permissionCatalog';
-import { PAGE_MATRIX } from '@/lib/commercialPermissionMatrix';
 
 const TXT = { overflowWrap: 'break-word', wordBreak: 'normal' };
 const PERMISSION_ICON_MAP = {
@@ -51,15 +50,9 @@ function PermissionMatrixSummary({ permissions }) {
     'can_manage_salary_slips', 'can_view_recruitment', 'can_manage_recruitment',
   ];
   const all = [...GLOBAL_PERMS, ...OPS_PERMS, ...EDIT_PERMS];
-  const commercialPageKeys = [...new Set(
-    PAGE_MATRIX
-      .filter(([module]) => !["core", "admin"].includes(module))
-      .map(([, flag]) => flag)
-  )];
   const granted = all.filter((p) => permissions?.[p.key]).length +
-    MODULE_PERM_KEYS.filter((key) => permissions?.[key]).length +
-    commercialPageKeys.filter((key) => permissions?.[key]).length;
-  const total = all.length + MODULE_PERM_KEYS.length + commercialPageKeys.length;
+    MODULE_PERM_KEYS.filter((key) => permissions?.[key]).length;
+  const total = all.length + MODULE_PERM_KEYS.length;
   const pct = total ? Math.round((granted / total) * 100) : 0;
   return (
     <GovCard icon={ShieldCheck} title="Permission Coverage" badge={`${granted}/${total}`} color={HUB_COLORS.emeraldGreen}>

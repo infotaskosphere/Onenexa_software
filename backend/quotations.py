@@ -1698,18 +1698,7 @@ async def _platform_owner_operational_companies(current_user: User) -> List[Dict
         ).sort("name", 1).to_list(500)
 
     rows = await raw.companies.find({}, {"_id": 0}).sort("name", 1).to_list(5000)
-    owner_id = _norm_id(getattr(current_user, "id", ""))
-    ident = await _licensee_identity_sets(owner_id)
-    return [
-        company
-        for company in rows
-        if not _is_licensee_company_record(
-            company,
-            ident["licensee_user_ids"],
-            ident["license_ids"],
-            ident["legacy_company_ids"],
-        )
-    ][:500]
+    return rows[:500]
 
 
 def _is_tenant_user(user: User) -> bool:
@@ -2015,10 +2004,6 @@ async def list_companies(current_user: User = Depends(get_current_user)):
         ]
 
     if _is_tenant_user(current_user):
-        # Commercial licensees already have a pre-created Company Master record
-        # owned by the license/customer, not by the browser user who logs in.
-        # Scope the dropdown from the same tenant company scope as GET /companies;
-        # filtering only by created_by incorrectly returned an empty list.
         companies = await _tenant_visible_companies(current_user, projection)
     else:
         companies = await _tenant_raw_db().companies.find(

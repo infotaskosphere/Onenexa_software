@@ -2,6 +2,7 @@ import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext.jsx';
 import { canAccessPath, firstAccessiblePath, isPlatformOwner as matrixIsPlatformOwner, moduleForPath, isCommercialTenant } from '@/lib/commercialPermissionMatrix';
+import { checkLicensePermissions, normalizeModuleKey, LicenseRouteGate } from '@/lib/licenseRouteGate.jsx';
 import NoModuleAccess from '@/components/NoModuleAccess.jsx';
 
 const MODULE_FLAGS = {
@@ -11,6 +12,8 @@ const MODULE_FLAGS = {
   records: 'can_access_records',
   proposals: 'can_access_proposals',
   peopleMatrix: 'can_access_people_matrix',
+  people_matrix: 'can_access_people_matrix',
+  accounting: 'can_access_finix',
   aiweave: 'can_access_aiweave',
 };
 
@@ -49,31 +52,20 @@ const ROUTE_PAGE_PREFIXES = {
   finix: [
     ['can_view_accounting_reports', '/finix-dashboard'],
     ['can_view_sale', '/invoicing'],
+    ['can_view_sale', '/sales'],
+    ['can_view_sale', '/invoices'],
     ['can_view_purchase', '/purchase'],
+    ['can_view_purchase', '/purchase-invoices'],
     ['can_view_bank', '/bank-accounts'],
+    ['can_view_bank', '/cash-bank-book'],
+    ['can_view_bank', '/cash-flow'],
     ['can_view_chart_of_accounts', '/chart-of-accounts'],
     ['can_manage_chart_of_accounts', '/chart-of-accounts/manage'],
     ['can_view_journal_entries', '/journal-entries'],
+    ['can_view_journal_entries', '/day-book'],
     ['can_post_journal_entries', '/journal-entries/post'],
-    ['can_view_zero_touch_entries', '/zero-touch-entry'],
-    ['can_view_accounting_reports', '/accounting-reports'],
-    ['can_view_extended_accounts_reports', '/day-book'],
-    ['can_view_extended_accounts_reports', '/cash-bank-book'],
-    ['can_view_extended_accounts_reports', '/cash-flow'],
-    ['can_view_extended_accounts_reports', '/outstanding-report'],
+    ['can_post_journal_entries', '/zero-touch-entry'],
     ['can_match_bank', '/bank-reconciliation'],
-    ['can_view_gst_portal_sync', '/gst-portal-sync'],
-    ['can_view_accounting_integrity', '/accounting-integrity'],
-    ['can_view_depreciation', '/depreciation'],
-    ['can_view_tds_tcs', '/tds-tcs'],
-    ['can_view_financial_ratios', '/financial-ratios'],
-    ['can_view_comparative_report', '/comparative-report'],
-    ['can_view_yearly_report', '/yearly-report'],
-    ['can_view_opening_balances', '/opening-balances'],
-    ['can_view_accounting_audit_trail', '/accounting-audit-trail'],
-    ['can_view_bulk_import', '/bulk-import'],
-    ['can_view_due_dates', '/due-dates'],
-    ['can_view_import_invoices', '/import-invoices'],
   ],
   compliance: [
     ['can_view_compliance', '/compliance-dashboard'],
@@ -150,13 +142,16 @@ function firstAccessibleHome(hasPermission, preferredModule = null) {
 function ModuleGate({ module, children }) {
   const { user, hasPermission, isPlatformOwner } = useAuth();
   const location = useLocation();
-  const flag = MODULE_FLAGS[module];
 
   if (!user) return <Navigate to="/login" replace />;
 
+  const canonical = normalizeModuleKey(module);
+  const targetKey = canonical?.id || module;
+  const flag = MODULE_FLAGS[targetKey] || canonical?.flag;
+
   // Platform Owner is outside commercial license enforcement, including AIWeave.
   // Licensees still require both explicit AIWeave module and page grants.
-  if (module === 'aiweave') {
+  if (targetKey === 'aiweave') {
     if (matrixIsPlatformOwner(user) || isPlatformOwner) return children;
     const aiGranted =
       user?.permissions?.can_access_aiweave === true &&
@@ -166,6 +161,16 @@ function ModuleGate({ module, children }) {
   }
 
   if (matrixIsPlatformOwner(user) || isPlatformOwner) return children;
+
+  // Validate active subscription and license permissions for the requested module
+  const licenseCheck = checkLicensePermissions(user, targetKey);
+  if (!licenseCheck.allowed) {
+    const dest = firstAccessiblePath(user, targetKey);
+    if (!dest || dest === '/login' || dest === location.pathname) {
+      return <NoModuleAccess />;
+    }
+    return <Navigate to={dest} replace />;
+  }
 
   // firstAccessiblePath() answers "/login" when the account has no entitled page
   // at all. Redirecting a signed-in user to /login bounces straight back (login is
@@ -187,13 +192,13 @@ function ModuleGate({ module, children }) {
     const routeModule = moduleForPath(location.pathname);
     if (routeModule) {
       if (!canAccessPath(user, location.pathname)) {
-        return redirectOrBlock(firstAccessiblePath(user, module));
+        return redirectOrBlock(firstAccessiblePath(user, targetKey));
       }
       return children;
     }
     // This component was invoked for a commercial module route that the matrix
     // does not know about. Do not grant it merely because the module is licensed.
-    return redirectOrBlock(firstAccessiblePath(user, module));
+    return redirectOrBlock(firstAccessiblePath(user, targetKey));
   }
 
   if (flag && !hasPermission(flag)) {
@@ -201,4 +206,6 @@ function ModuleGate({ module, children }) {
   }
   return children;
 }
+
+export { LicenseRouteGate };
 export default ModuleGate;

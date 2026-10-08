@@ -105,7 +105,7 @@ def _monthly_total(catalog: List[Dict[str, Any]], selected_features: Dict[str, L
 def _apply_feature_entitlements(role: str, selected_modules: List[str], selected_features: Dict[str, List[str]] | None = None) -> Dict[str, Any]:
     permissions = copy.deepcopy(DEFAULT_ROLE_PERMISSIONS.get(role, DEFAULT_ROLE_PERMISSIONS["staff"]))
     selected = set(selected_modules)
-    selected_features = selected_features if isinstance(selected_features, dict) else {}
+    selected_features = selected_features or {module_id: _all_feature_flags(module_id) for module_id in selected_modules}
     for module_id, module_flag in MODULE_FLAG_BY_ID.items():
         # A purchased module is only the ceiling. The Platform Owner's explicit
         # page selection is the complete commercial entitlement.
@@ -260,129 +260,30 @@ async def lookup_custom_license(payload: Dict[str, Any]):
 @router.post("/create-admin")
 async def create_custom_admin(payload: Dict[str, Any]):
     customer, license_doc = await _find_customer_for_license(payload.get("license_key"), payload.get("company_name"))
+    existing_admin = await db.users.find_one({"company_id": customer.get("id"), "role": "admin"}, {"_id": 1})
+    if existing_admin:
+        raise HTTPException(status_code=409, detail="The company administrator has already been created. Please sign in with the existing administrator account.")
     full_name = str(payload.get("full_name") or "").strip()
     email = str(payload.get("email") or "").strip().lower()
     password = str(payload.get("password") or "")
     if not full_name or not email or len(password) < 8:
         raise HTTPException(status_code=400, detail="Full name, email and a password of at least 8 characters are required.")
-
+    if await db.users.find_one({"email": email}):
+        raise HTTPException(status_code=409, detail="An account already exists for this email address.")
     company = await _ensure_company_master(customer, license_doc)
-
-    # License issuance already creates a locked, credentials-pending admin
-    # identity. First activation must complete THAT identity rather than
-    # attempting to insert a second admin and returning 409.
-    existing_admin = await db.users.find_one(
-        {
-            "$or": [
-                {"company_id": str(company.get("id") or "")},
-                {"commercial_customer_id": str(customer.get("id") or "")},
-            ],
-            "role": "admin",
-        },
-        {"_id": 0},
-    )
-
-    from backend.commercial_licensee_admin import get_all_admin_permissions
-    permissions = get_all_admin_permissions(license_doc)
     now = _now().isoformat()
+    user_id = str(uuid.uuid4())
+    from backend.commercial_licensee_admin import get_all_admin_permissions
+    # The administrator created through the license-activation flow must be
+    # hydrated from THIS license. Passing no license here falls back to the
+    # unrestricted internal admin template and can expose modules/pages that
+    # were never purchased for this tenant.
+    permissions = get_all_admin_permissions(license_doc)
+    user_doc = {"id": user_id, "email": email, "full_name": full_name, "role": "admin", "password": pwd_context.hash(password), "permissions": permissions, "departments": [], "phone": customer.get("phone"), "is_active": True, "status": "active", "approved_by": "commercial-license", "approved_at": now, "created_at": now, "company_id": company.get("id"), "company_name": customer.get("company_name"), "commercial_customer_id": str(customer.get("id") or ""), "license_id": license_doc.get("id"), "license_key": license_doc.get("license_key"), "licensed_modules": list(license_doc.get("modules") or []), "selected_features": license_doc.get("selected_features") or {}}
+    await db.users.insert_one(user_doc)
+    safe_user = {k: v for k, v in user_doc.items() if k != "password"}
+    return {"access_token": create_access_token({"sub": user_id}), "token_type": "bearer", "user": safe_user, "company": company, "license": _public_license(license_doc)}
 
-    if existing_admin:
-        existing_email = str(existing_admin.get("email") or "").strip().lower()
-        pending = bool(
-            existing_admin.get("admin_credentials_pending") is True
-            or existing_admin.get("status") == "pending_admin_setup"
-            or not existing_admin.get("password")
-        )
-        if not pending:
-            if existing_email != email:
-                raise HTTPException(
-                    status_code=409,
-                    detail="The company administrator has already been created. Please sign in with the existing administrator account.",
-                )
-            raise HTTPException(
-                status_code=409,
-                detail="The company administrator has already been created. Please sign in with the existing administrator account.",
-            )
-
-        if existing_email and existing_email != email:
-            raise HTTPException(
-                status_code=400,
-                detail="Use the administrator email registered on this license.",
-            )
-
-        await db.users.update_one(
-            {"id": existing_admin.get("id")},
-            {
-                "$set": {
-                    "full_name": full_name,
-                    "email": email or existing_email,
-                    "password": pwd_context.hash(password),
-                    "role": "admin",
-                    "permissions": permissions,
-                    "is_active": True,
-                    "status": "active",
-                    "admin_credentials_pending": False,
-                    "approved_by": "commercial-license",
-                    "approved_at": now,
-                    "company_id": company.get("id"),
-                    "company_name": customer.get("company_name"),
-                    "commercial_customer_id": str(customer.get("id") or ""),
-                    "license_id": license_doc.get("id"),
-                    "license_key": license_doc.get("license_key"),
-                    "licensed_modules": list(license_doc.get("modules") or []),
-                    "selected_features": license_doc.get("selected_features") or {},
-                }
-            },
-        )
-        user_id = str(existing_admin.get("id"))
-    else:
-        # Compatibility for very old licenses where the issuance flow did not
-        # create the pending admin placeholder.
-        if await db.users.find_one({"email": email}, {"_id": 1}):
-            raise HTTPException(status_code=409, detail="An account already exists for this email address.")
-        user_id = str(uuid.uuid4())
-        user_doc = {
-            "id": user_id,
-            "email": email,
-            "full_name": full_name,
-            "role": "admin",
-            "password": pwd_context.hash(password),
-            "permissions": permissions,
-            "departments": [],
-            "phone": customer.get("phone"),
-            "is_active": True,
-            "status": "active",
-            "admin_credentials_pending": False,
-            "approved_by": "commercial-license",
-            "approved_at": now,
-            "created_at": now,
-            "company_id": company.get("id"),
-            "company_name": customer.get("company_name"),
-            "commercial_customer_id": str(customer.get("id") or ""),
-            "license_id": license_doc.get("id"),
-            "license_key": license_doc.get("license_key"),
-            "licensed_modules": list(license_doc.get("modules") or []),
-            "selected_features": license_doc.get("selected_features") or {},
-        }
-        await db.users.insert_one(user_doc)
-
-    user = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0, "password_hash": 0, "password_salt": 0})
-    safe_user = dict(user or {})
-    safe_user["permissions"] = permissions
-    safe_user["licensed_modules"] = list(license_doc.get("modules") or [])
-    safe_user["selected_features"] = license_doc.get("selected_features") or {}
-    safe_user["license_id"] = license_doc.get("id")
-    safe_user["license_key"] = license_doc.get("license_key")
-    safe_user["company_id"] = company.get("id")
-    safe_user["company_name"] = customer.get("company_name")
-
-    return {
-        "access_token": create_access_token({"sub": user_id}),
-        "token_type": "bearer",
-        "user": safe_user,
-        "company": company,
-        "license": _public_license(license_doc),
-    }
 
 @router.post("/create-staff")
 async def create_custom_staff(payload: Dict[str, Any], current_user: User = Depends(get_current_user)):

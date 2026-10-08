@@ -4,7 +4,7 @@ MODULE_HIERARCHY = {
     "taskosphere": {
         "flag": "can_access_taskosphere",
         "label": "Taskosphere",
-        "description": "Core workspace — Dashboard, Tasks, To-Do, Attendance, Reminders, Action Center, Client Visits, Client Portal Manager, Team Activity, Reports and Audit Logs.",
+        "description": "Core workspace — Tasks, To-Do, Attendance, Reminders, Action Center, Client Visits and Client Portal Manager.",
         "pages": [
             {"flag": "can_view_dashboard", "label": "Dashboard", "actions": ["view"]},
             {"flag": "can_view_tasks", "label": "Tasks", "actions": ["view", "create", "edit", "delete"]},
@@ -15,17 +15,14 @@ MODULE_HIERARCHY = {
             {"flag": "can_view_client_visits", "label": "Client Visits", "actions": ["view", "create", "edit", "delete"]},
             {"flag": "can_view_client_portal", "label": "Client Portal Manager", "actions": ["view", "create", "edit", "delete", "export", "print", "share"]},
             {"flag": "can_reset_client_passwords", "label": "Password Reset", "actions": ["view", "edit", "export"]},
-            {"flag": "can_view_staff_activity", "label": "Team Activity", "actions": ["view", "export"]},
-            {"flag": "can_view_reports", "label": "Reports", "actions": ["view", "export"]},
-            {"flag": "can_view_audit_logs", "label": "Audit Logs", "actions": ["view", "export"]},
         ],
     },
     "finix": {
         "flag": "can_access_finix",
         "label": "Finix",
-        "description": "Accounting & finance — Sales, Purchase, Bank Accounts, Chart of Accounts, Journal Entries, Accounting Reports and supporting accounting tools.",
+        "description": "Accounting & finance — Sales, Purchase, Bank Accounts, Chart of Accounts, Journal Entries and Accounting Reports.",
         "pages": [
-            {"flag": "can_view_accounting_reports", "label": "Accounting Reports", "actions": ["view", "export", "print"]},
+            {"flag": "can_view_accounting_reports", "label": "Finix Dashboard & Accounting Reports", "actions": ["view", "export", "print"]},
             {"flag": "can_view_sale", "label": "Sales / Invoicing", "actions": ["view", "create", "edit", "delete", "export", "print", "share"]},
             {"flag": "can_view_purchase", "label": "Purchase", "actions": ["view", "create", "edit", "delete", "export", "print"]},
             {"flag": "can_view_bank", "label": "Bank Accounts", "actions": ["view", "create", "export"]},
@@ -34,20 +31,6 @@ MODULE_HIERARCHY = {
             {"flag": "can_view_journal_entries", "label": "Journal Entries (view)", "actions": ["view", "export"]},
             {"flag": "can_post_journal_entries", "label": "Journal Entries & Zero Touch Entry (post)", "actions": ["create", "edit", "approve"]},
             {"flag": "can_match_bank", "label": "Bank Reconciliation (match/unmatch)", "actions": ["edit"]},
-            {"flag": "can_view_zero_touch_entries", "label": "Zero Touch Entries", "actions": ["view", "create", "edit"]},
-            {"flag": "can_view_extended_accounts_reports", "label": "Extended Accounts Reports", "actions": ["view", "export", "print"]},
-            {"flag": "can_view_gst_portal_sync", "label": "Live GST Portal Sync", "actions": ["view", "export"]},
-            {"flag": "can_view_accounting_integrity", "label": "Accounting Integrity", "actions": ["view", "edit", "approve"]},
-            {"flag": "can_view_depreciation", "label": "Depreciation", "actions": ["view", "export", "print"]},
-            {"flag": "can_view_tds_tcs", "label": "TDS / TCS", "actions": ["view", "export", "print"]},
-            {"flag": "can_view_financial_ratios", "label": "Financial Ratios", "actions": ["view", "export", "print"]},
-            {"flag": "can_view_comparative_report", "label": "Comparative Report", "actions": ["view", "export", "print"]},
-            {"flag": "can_view_yearly_report", "label": "Yearly Report", "actions": ["view", "export", "print"]},
-            {"flag": "can_view_opening_balances", "label": "Opening Balances", "actions": ["view", "create", "edit"]},
-            {"flag": "can_view_accounting_audit_trail", "label": "Accounting Audit Trail", "actions": ["view", "export"]},
-            {"flag": "can_view_bulk_import", "label": "Bulk Import", "actions": ["view", "create", "export"]},
-            {"flag": "can_view_due_dates", "label": "Due Dates", "actions": ["view", "create", "edit", "delete", "export"]},
-            {"flag": "can_view_import_invoices", "label": "Import Invoices", "actions": ["view", "create", "export"]},
         ],
     },
     "aiweave": {
@@ -76,7 +59,7 @@ MODULE_HIERARCHY = {
     "records": {
         "flag": "can_access_records",
         "label": "Client Records",
-        "description": "DSC Register, Document Register, Clients, Password Vault, Unified Inbox and Automation Approvals.",
+        "description": "DSC Register, Document Register, Clients (with approval workflow) and Password Vault.",
         "pages": [
             {"flag": "can_view_all_dsc", "label": "DSC Register", "actions": ["view", "export"]},
             {"flag": "can_view_documents", "label": "Document Register", "actions": ["view", "export"]},
@@ -85,8 +68,6 @@ MODULE_HIERARCHY = {
             {"flag": "can_view_all_clients", "label": "Clients — visibility of other users' clients", "actions": ["view"]},
             {"flag": "can_edit_clients", "label": "Clients — edit / update any client", "actions": ["edit", "update"]},
             {"flag": "can_approve_clients", "label": "Clients — approve newly added clients", "actions": ["approve"]},
-            {"flag": "can_access_whatsapp_hub", "label": "Unified Inbox", "actions": ["view", "create", "edit", "delete"]},
-            {"flag": "can_view_automation_approvals", "label": "Automation Approvals", "actions": ["view", "approve", "reject"]},
             {"flag": "can_approve_whatsapp_wishes", "label": "Automation — approve WhatsApp birthday/festival wishes", "actions": ["approve"]},
             {"flag": "can_approve_email_wishes", "label": "Automation — approve Email birthday/festival wishes", "actions": ["approve"]},
         ],
@@ -122,16 +103,17 @@ MODULE_HIERARCHY = {
     "admin": {
         "flag": "can_access_admin",
         "label": "Admin",
-        "description": "Tenant administration — Users, Permission Matrix, Settings, Master Data and Roles.",
+        "description": "Users, Permission Matrix, Audit Logs, Settings, Master Data, Roles and Activity Logs.",
         "pages": [
             {"flag": "can_view_user_page", "label": "Users", "actions": ["view", "create", "edit", "delete"]},
             {"flag": "can_manage_permissions", "label": "Permission Matrix", "actions": ["view", "edit", "approve"]},
+            {"flag": "can_view_audit_logs", "label": "Audit Logs", "actions": ["view", "export"]},
             {"flag": "can_manage_settings", "label": "Settings", "actions": ["view", "edit"]},
             {"flag": "can_view_master_data", "label": "Master Data (view)", "actions": ["view"]},
             {"flag": "can_manage_master_data", "label": "Master Data (manage)", "actions": ["create", "edit", "delete"]},
             {"flag": "can_view_roles", "label": "Roles (view)", "actions": ["view"]},
             {"flag": "can_manage_roles", "label": "Roles (manage)", "actions": ["create", "edit", "delete"]},
+            {"flag": "can_view_staff_activity", "label": "Activity Logs", "actions": ["view", "export"]},
         ],
-    }
-
+    },
 }

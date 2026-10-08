@@ -54,27 +54,16 @@ MODULE_ROUTES = {
 
 CORE_ROUTES = (
     "/users",
+    "/reports/efficiency",
+    "/reports/performance-rankings",
+    "/reports/export",
     "/users/example-user/permissions",
+    "/activity",
+    "/staff-activity",
     "/settings/general",
 )
 
 ALL_BILLABLE_MODULES = tuple(MODULE_ROUTES)
-
-LINKED_ADMIN_ROUTES = {
-    "taskosphere": (
-        "/staff-activity",
-        "/reports/efficiency",
-        "/reports/performance-rankings",
-        "/reports/export",
-        "/task-audit",
-        "/audit-logs",
-        "/activity",
-    ),
-    "records": (
-        "/whatsapp-hub",
-        "/automation/approvals",
-    ),
-}
 
 
 def _request(path: str, method: str = "GET") -> Request:
@@ -227,37 +216,13 @@ async def test_leadsense_only_admin_cannot_enter_finix(monkeypatch):
         raise AssertionError("LeadSense-only admin reached Finix")
 
 
-async def test_aiweave_requires_explicit_page_selection(monkeypatch):
+async def test_aiweave_only_requires_explicit_user_ai_permission(monkeypatch):
     user = _admin_user()
     user.permissions = {
         "can_access_aiweave": True,
         "can_view_aiweave": True,
     }
-    license_doc = {
-        **_license(["aiweave"]),
-        "selected_features": {"aiweave": ["can_view_aiweave"]},
-    }
-
-    async def fake_base(_credentials):
-        return user
-
-    async def fake_license(_user, *_args, **_kwargs):
-        return license_doc
-
-    async def fake_sync(_user, _license):
-        return _user
-
-    monkeypatch.setattr(guard, "_BASE_GET_CURRENT_USER", fake_base)
-    monkeypatch.setattr(guard, "_commercial_license", fake_license)
-    monkeypatch.setattr(
-        "backend.commercial_licensee_admin.sync_user_to_licensee_admin",
-        fake_sync,
-    )
-
-    await guard.get_current_user_with_commercial_guard(
-        _request("/aiweave"),
-        credentials=type("Creds", (), {"credentials": "test"})(),
-    )
+    await _run_guard(monkeypatch, "/aiweave", ["aiweave"], user=user)
 
     user.permissions = {
         "can_access_aiweave": False,
@@ -294,24 +259,6 @@ async def test_aiweave_requires_explicit_page_selection(monkeypatch):
 async def test_core_admin_routes_remain_available_on_single_module_license(monkeypatch):
     for route in CORE_ROUTES:
         await _run_guard(monkeypatch, route, ["taskosphere"])
-
-
-async def test_linked_admin_routes_follow_their_module_license(monkeypatch):
-    for route in LINKED_ADMIN_ROUTES["taskosphere"]:
-        try:
-            await _run_guard(monkeypatch, route, ["finix"])
-        except HTTPException as exc:
-            assert exc.status_code == 403
-        else:
-            raise AssertionError(f"Finix-only admin reached Taskosphere linked route: {route}")
-
-    for route in LINKED_ADMIN_ROUTES["records"]:
-        try:
-            await _run_guard(monkeypatch, route, ["finix"])
-        except HTTPException as exc:
-            assert exc.status_code == 403
-        else:
-            raise AssertionError(f"Finix-only admin reached Records linked route: {route}")
 
 
 async def test_same_route_never_maps_to_two_billable_modules():

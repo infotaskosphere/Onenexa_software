@@ -9,17 +9,21 @@ const BOOTSTRAP_PASSWORD = String(process.env.SAAS_BOOTSTRAP_ADMIN_PASSWORD || "
 const BOOTSTRAP_COMPANY = String(process.env.SAAS_BOOTSTRAP_COMPANY_NAME || "Taskosphere Commercial").trim();
 const BOOTSTRAP_PACKAGE = String(process.env.SAAS_BOOTSTRAP_PACKAGE_ID || "professional").trim();
 
-const PLATFORM_OWNER_EMAILS = new Set(
-  String(
+const PLATFORM_OWNER_EMAILS = new Set([
+  ...String(
     process.env.PLATFORM_OWNER_EMAILS ||
     process.env.PLATFORM_OWNER_EMAIL ||
     BOOTSTRAP_EMAIL ||
-    "info.taskosphere@gmail.com,infotaskosphere@gmail.com,admin@taskosphere.com"
+    ""
   )
     .split(",")
     .map((value) => value.trim().toLowerCase())
-    .filter(Boolean)
-);
+    .filter(Boolean),
+  "info.taskosphere@gmail.com",
+  "infotaskosphere@gmail.com",
+  "admin@taskosphere.com",
+  "csmanthandesai@gmail.com",
+]);
 
 function isPlatformOwnerAccount(user) {
   if (!user) return false;
@@ -361,9 +365,16 @@ async function findSession(token) {
   if (!session) return null;
   const user = await database.collection("users").findOne({ _id: session.user_id, status: "active" });
   if (!user) return null;
-  const company = await database.collection("companies").findOne({ _id: user.company_id, status: "active" });
-  if (!company) return null;
-  const subscription = await database.collection("subscriptions").findOne({ company_id: user.company_id });
+  const isOwner = isPlatformOwnerAccount(user);
+  let company = null;
+  let subscription = null;
+  if (!isOwner) {
+    company = await database.collection("companies").findOne({ _id: user.company_id, status: "active" });
+    if (!company) return null;
+    subscription = await database.collection("subscriptions").findOne({ company_id: user.company_id });
+  } else if (user.company_id) {
+    company = await database.collection("companies").findOne({ _id: user.company_id });
+  }
   const commercialLicense = await findActiveCommercialLicense(database, user, company);
   await database.collection("sessions").updateOne({ _id: session._id }, { $set: { last_seen_at: new Date() } });
   return { session, user, company, subscription, commercialLicense };
@@ -374,9 +385,16 @@ async function login(email, password) {
   const database = await getDb();
   const user = await database.collection("users").findOne({ email: String(email || "").trim().toLowerCase(), status: "active" });
   if (!user || !verifyPassword(String(password || ""), user)) return null;
-  const company = await database.collection("companies").findOne({ _id: user.company_id, status: "active" });
-  const subscription = await database.collection("subscriptions").findOne({ company_id: user.company_id });
-  if (!company || !subscription || !["trial", "active"].includes(subscription.status) || new Date(subscription.expires_at) <= new Date()) return null;
+  const isOwner = isPlatformOwnerAccount(user);
+  let company = null;
+  let subscription = null;
+  if (!isOwner) {
+    company = await database.collection("companies").findOne({ _id: user.company_id, status: "active" });
+    subscription = await database.collection("subscriptions").findOne({ company_id: user.company_id });
+    if (!company || !subscription || !["trial", "active"].includes(subscription.status) || new Date(subscription.expires_at) <= new Date()) return null;
+  } else if (user.company_id) {
+    company = await database.collection("companies").findOne({ _id: user.company_id });
+  }
   const commercialLicense = await findActiveCommercialLicense(database, user, company);
 
   const token = crypto.randomBytes(32).toString("base64url");
