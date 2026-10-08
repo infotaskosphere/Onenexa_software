@@ -126,7 +126,15 @@ def _normalized_modules(values: Iterable[Any]) -> set[str]:
 
 
 def apply_license_cap(d: Dict[str, Any]) -> Dict[str, Any]:
+    """Apply the Platform Owner's commercial module/page selection as a hard cap.
+
+    This function runs while building the authenticated user for /auth/me.
+    Commercial licensing is fail-closed: a module is visible only when it is
+    licensed AND has at least one explicitly selected page in selected_features.
+    A missing/empty selected_features entry never expands a module to full access.
+    """
     normalized = _dependencies._normalize_permissions_original(d)
+
     modules = _normalized_modules(
         normalized.get("licensed_modules")
         or normalized.get("modules")
@@ -141,54 +149,70 @@ def apply_license_cap(d: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(raw_selected, dict):
         raw_selected = {}
 
+    alias_lookup = {
+        "taskosphere": {"taskosphere", "tasks"},
+        "finix": {"finix", "invoicing", "accounting"},
+        "compliance": {"compliance"},
+        "records": {"records"},
+        "proposals": {"proposals", "client_proposals", "client-proposals", "leadsense"},
+        "people_matrix": {"people_matrix", "people-matrix", "hrms", "peoplematrix"},
+        "aiweave": {"aiweave", "ai-weave"},
+    }
+
+    def selected_for(module_id: str) -> set[str]:
+        values = raw_selected.get(module_id)
+        if values is None:
+            accepted = {str(x).strip().lower().replace("-", "_") for x in alias_lookup.get(module_id, {module_id})}
+            for raw_key, candidate in raw_selected.items():
+                if str(raw_key).strip().lower().replace("-", "_") in accepted:
+                    values = candidate
+                    break
+        if not isinstance(values, (list, tuple, set)):
+            return set()
+        allowed = set(_MODULE_PAGES.get(module_id, ()))
+        return {str(flag).strip() for flag in values if str(flag).strip() in allowed}
+
     permissions = dict(normalized.get("permissions") or {})
-    is_admin = str(normalized.get("role") or "").strip().lower() == "admin"
 
     for module_id, module_flag in _MODULE_FLAGS.items():
-        module_allowed = module_id in modules
-        permissions[module_flag] = module_allowed
-
-        # If the license explicitly contains a feature list for this module,
-        # that list is the page-level ceiling. When no list exists, retain the
-        # legacy behavior: the entire licensed module remains available.
-        selected_value = raw_selected.get(module_id)
-        if selected_value is None:
-            for raw_key, value in raw_selected.items():
-                if _MODULE_ALIASES.get(str(raw_key).strip().lower().replace(" ", "_")) == module_id:
-                    selected_value = value
-                    break
-
-        # An empty list is "nothing selected yet", not "everything forbidden": treat it
-        # like a missing list so a licensed module grants its own pages (only its own).
-        restriction_exists = selected_value is not None and not (isinstance(selected_value, list) and len(selected_value) == 0)
-        selected = {str(flag).strip() for flag in (selected_value or [])} if isinstance(selected_value, list) else set()
-        _dash = {"taskosphere": "can_view_dashboard", "finix": "can_view_accounting_reports", "compliance": "can_view_compliance", "records": "can_view_documents", "proposals": "can_view_all_leads", "people_matrix": "can_view_user_page"}.get(module_id)
-        if module_allowed and selected and _dash:
-            selected.add(_dash)
-
-        # Backward compatibility: Client Discussion was introduced after the
-        # original Proposals/Lead Management entitlement. The frontend already
-        # treats can_view_all_leads as a view entitlement for Client Discussion;
-        # keep the backend entitlement cap in sync so the page does not produce
-        # a 403 after the frontend has decided it is accessible.
-        if module_id == "proposals" and "can_view_all_leads" in selected:
-            selected.add("can_view_client_discussion")
-
-        for page_flag in _MODULE_PAGES[module_id]:
-            if not module_allowed:
+        if module_id not in modules:
+            permissions[module_flag] = False
+            for page_flag in _MODULE_PAGES[module_id]:
                 permissions[page_flag] = False
-            elif restriction_exists:
-                permissions[page_flag] = page_flag in selected
-            elif is_admin:
-                # Commercial Admins receive the pages contained in the
-                # licensed module when the license has no page restriction.
-                # This keeps Admin access governed by the commercial license
-                # while fixing older Admin records that predate these flags.
-                permissions[page_flag] = True
-            # Without an explicit restriction for non-admin roles, preserve
-            # the role permission already normalized above.
+            continue
+
+        selected = selected_for(module_id)
+
+        # Module visibility exists only when at least one page was explicitly
+        # granted by the Platform Owner.
+        permissions[module_flag] = bool(selected)
+
+        # No dashboard/report is derived from another selection. Every page is
+        # individually controlled by selected_features.
+        for page_flag in _MODULE_PAGES[module_id]:
+            permissions[page_flag] = page_flag in selected
+
+    # Keep legacy aliases synchronized with the same selected-page ceiling.
+    finix = selected_for("finix")
+    records = selected_for("records")
+    proposals = selected_for("proposals")
+    permissions["can_manage_invoices"] = "can_view_sale" in finix
+    permissions["can_view_clients"] = "can_view_all_clients" in records
+    permissions["can_edit_clients"] = "can_edit_clients" in records
+    permissions["can_approve_clients"] = "can_approve_clients" in records
+    permissions["can_view_passwords"] = "can_view_passwords" in records
+    permissions["can_edit_passwords"] = "can_edit_passwords" in records
+    permissions["can_approve_whatsapp_wishes"] = "can_approve_whatsapp_wishes" in records
+    permissions["can_approve_email_wishes"] = "can_approve_email_wishes" in records
+    permissions["can_view_all_leads"] = "can_view_all_leads" in proposals
+    permissions["can_create_quotations"] = "can_create_quotations" in proposals
 
     normalized["permissions"] = permissions
+    normalized["licensed_modules"] = sorted(modules)
+    normalized["selected_features"] = {
+        module_id: sorted(selected_for(module_id))
+        for module_id in modules
+    }
     return normalized
 
 
