@@ -24,7 +24,7 @@ from bson import ObjectId
 import logging
 import uuid
 
-from backend.dependencies import get_current_user, get_db, admin_required, db
+from backend.dependencies import get_current_user, get_db, admin_required, require_commercial_admin_module, db
 from backend.models import User
 from backend.tenant_runtime import enforce_company_value
 from backend.platform_owner import is_platform_owner
@@ -648,7 +648,7 @@ async def get_connected_agents(
     user_id: Optional[str] = Query(default=None, description="Filter by user_id"),
     search: Optional[str] = Query(default=None),
     limit: int = Query(default=100, le=500),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_commercial_admin_module("taskosphere")),
     db=Depends(get_db),
 ):
     """
@@ -701,7 +701,7 @@ async def get_connected_agents(
 @router.get("/agent/{agent_id}")
 async def get_agent_detail(
     agent_id: str,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_commercial_admin_module("taskosphere")),
     db=Depends(get_db),
 ):
     """Returns detailed info for a single agent. Admin only."""
@@ -729,7 +729,7 @@ async def get_activity_reports(
     date_from: Optional[str] = Query(default=None, alias="from"),
     date_to: Optional[str] = Query(default=None, alias="to"),
     limit: int = Query(default=50, le=200),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_commercial_admin_module("taskosphere")),
     db=Depends(get_db),
 ):
     """Returns activity reports. Admin sees all; staff sees own."""
@@ -777,7 +777,7 @@ async def get_browser_reports(
     date_from: Optional[str] = Query(default=None, alias="from"),
     date_to: Optional[str] = Query(default=None, alias="to"),
     limit: int = Query(default=50, le=200),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_commercial_admin_module("taskosphere")),
     db=Depends(get_db),
 ):
     """Returns browser tracking reports. Admin sees all; staff sees own."""
@@ -820,7 +820,7 @@ async def get_browser_reports(
 async def get_dsc_status(
     agent_id: Optional[str] = Query(default=None),
     limit: int = Query(default=50, le=200),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_commercial_admin_module("taskosphere")),
     db=Depends(get_db),
 ):
     """Returns DSC status events. Admin only."""
@@ -853,7 +853,7 @@ async def get_dsc_status(
 async def get_usb_events(
     agent_id: Optional[str] = Query(default=None),
     limit: int = Query(default=100, le=500),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_commercial_admin_module("taskosphere")),
     db=Depends(get_db),
 ):
     """Returns USB device events. Admin only."""
@@ -889,7 +889,7 @@ async def get_productivity_reports(
     date_from: Optional[str] = Query(default=None, alias="from"),
     date_to: Optional[str] = Query(default=None, alias="to"),
     limit: int = Query(default=50, le=200),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_commercial_admin_module("taskosphere")),
     db=Depends(get_db),
 ):
     """Returns productivity reports. Admin sees all; staff sees own."""
@@ -932,7 +932,7 @@ async def get_productivity_reports(
 async def get_agent_health(
     agent_id: str,
     hours: int = Query(default=24, le=168),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_commercial_admin_module("taskosphere")),
     db=Depends(get_db),
 ):
     """Returns health history for an agent over the specified hours."""
@@ -966,7 +966,7 @@ async def get_agent_health(
 
 @router.get("/summary")
 async def get_desktop_summary(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_commercial_admin_module("taskosphere")),
     db=Depends(get_db),
 ):
     """
@@ -1030,7 +1030,7 @@ async def export_reports(
     report_type: str,
     date_from: Optional[str] = Query(default=None, alias="from"),
     date_to: Optional[str] = Query(default=None, alias="to"),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_commercial_admin_module("taskosphere")),
     db=Depends(get_db),
 ):
     """
