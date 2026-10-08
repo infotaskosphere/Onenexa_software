@@ -88,7 +88,7 @@ async def ensure_identity_indexes(db) -> None:
         "license_uid", unique=True, sparse=True, background=True
     )
     await db.companies.create_index(
-        "licensee_uid", unique=True, sparse=True, background=True
+        "licensee_uid", sparse=True, background=True
     )
     await db.users.create_index(
         "user_uid", unique=True, sparse=True, background=True
