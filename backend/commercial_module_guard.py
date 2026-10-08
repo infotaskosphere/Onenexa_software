@@ -820,10 +820,16 @@ def _permission_flag(
                 and permissions.get("can_view_aiweave", False) is True
             )
 
+        # Every commercial role, including the licensee administrator, is
+        # capped by the Platform Owner's explicit page selection.
+        selected_pages = _selected_license_features(
+            license_doc,
+            module,
+        )
+        if flag not in selected_pages:
+            return False
+
         if is_admin:
-            # Purchased-module access is the tenant-admin ceiling. The
-            # granular selected_features list applies to additional users,
-            # not the licensee administrator.
             return True
 
         # Non-admin licensee user: licensee admin has full control over user permissions
@@ -865,10 +871,10 @@ def _permission_flag(
 
         return bool(permissions.get(flag, False))
 
-    # The license ceiling above has passed. A tenant admin is governed by the
-    # license alone, so do not additionally require a per-user permission dict.
+    # Routes without an explicit module mapping are never implicitly granted
+    # to a commercial tenant admin. Known module/page routes are checked above.
     if is_admin:
-        return True
+        return False
 
     permissions = getattr(user, "permissions", None)
     if hasattr(permissions, "model_dump"):
