@@ -261,6 +261,12 @@ async def ensure_user_uid(
     existing_org = _clean(user.get("identity_org_uid") or organization_uid)
     if _USER_UID_RE.match(current):
         if existing_org:
+            await ensure_identity_email_link(
+                db,
+                user.get("email"),
+                existing_org,
+                identity_type="platform_owner" if existing_org.upper().startswith("PO-") else "licensee",
+            )
             await _set_counter_max(
                 db,
                 f"{existing_org}:user",
