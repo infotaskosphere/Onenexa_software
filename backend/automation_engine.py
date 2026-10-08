@@ -37,7 +37,7 @@ import asyncio
 import logging
 import uuid
 
-from backend.dependencies import db, get_current_user, personal_birthday_candidates, get_user_permissions
+from backend.dependencies import require_commercial_admin_module, db, get_current_user, personal_birthday_candidates, get_user_permissions
 from backend.notifications import create_notification
 from backend.client_activity import log_client_activity
 
@@ -356,12 +356,12 @@ async def _queue_or_send(kind, channel, client, recipient_name, recipient_contac
 # ====================== SERVICE EXPIRY ALERTS (renewals) ======================
 
 @expiry_router.get("", response_model=List[ServiceExpiry])
-async def list_service_expiries(client_id: str, current_user=Depends(require_admin)):
+async def list_service_expiries(client_id: str, current_user=Depends(require_commercial_admin_module("records"))):
     return await db.service_expiries.find({"client_id": client_id}, {"_id": 0}).sort("expiry_date", 1).to_list(200)
 
 
 @expiry_router.post("", response_model=ServiceExpiry, status_code=201)
-async def create_service_expiry(client_id: str, payload: ServiceExpiryCreate, current_user=Depends(require_admin)):
+async def create_service_expiry(client_id: str, payload: ServiceExpiryCreate, current_user=Depends(require_commercial_admin_module("records"))):
     client = await db.clients.find_one({"id": client_id}, {"_id": 0, "id": 1})
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
@@ -381,7 +381,7 @@ async def create_service_expiry(client_id: str, payload: ServiceExpiryCreate, cu
 
 
 @expiry_router.patch("/{expiry_id}", response_model=ServiceExpiry)
-async def update_service_expiry(client_id: str, expiry_id: str, payload: ServiceExpiryCreate, current_user=Depends(require_admin)):
+async def update_service_expiry(client_id: str, expiry_id: str, payload: ServiceExpiryCreate, current_user=Depends(require_commercial_admin_module("records"))):
     updates = payload.model_dump(exclude_unset=True)
     result = await db.service_expiries.find_one_and_update(
         {"id": expiry_id, "client_id": client_id}, {"$set": updates}, return_document=True,
@@ -393,7 +393,7 @@ async def update_service_expiry(client_id: str, expiry_id: str, payload: Service
 
 
 @expiry_router.delete("/{expiry_id}", status_code=204)
-async def delete_service_expiry(client_id: str, expiry_id: str, current_user=Depends(require_admin)):
+async def delete_service_expiry(client_id: str, expiry_id: str, current_user=Depends(require_commercial_admin_module("records"))):
     await db.service_expiries.delete_one({"id": expiry_id, "client_id": client_id})
     return None
 
