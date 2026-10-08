@@ -23,7 +23,7 @@ _USER_UID_RE = re.compile(r"^(PO|L)-(\d{6})-U-(\d{6})$")
 _LICENSE_UID_RE = re.compile(r"^LIC-(PO|L)-(\d{6})-(\d{2,})$")
 logger = logging.getLogger("identity_hierarchy")
 IDENTITY_EMAIL_LINK_COLLECTION = "identity_email_links"
-EMAIL_IDENTITY_LINK_MIGRATION_KEY = "email_identity_link_v1"
+EMAIL_IDENTITY_LINK_MIGRATION_KEY = "email_identity_link_v2"
 
 
 def _clean(value: Any) -> str:
@@ -443,6 +443,29 @@ async def _migrate_platform_owner_users(db, owner_uid: str) -> int:
             else "platform_owner_user"
         )
         user["email_normalized"] = _normalized_email(user.get("email"))
+
+        # Platform Owner email addresses are reserved identities. When legacy
+        # data has the same email linked to an L-* tenant, resolve the existing
+        # conflict in favour of the authoritative PO-* identity before the user
+        # receives its hierarchical user UID.
+        if user["email_normalized"]:
+            await db[IDENTITY_EMAIL_LINK_COLLECTION].update_one(
+                {"email_normalized": user["email_normalized"]},
+                {
+                    "$set": {
+                        "email": _clean(user.get("email")),
+                        "email_normalized": user["email_normalized"],
+                        "identity_uid": user["platform_owner_uid"],
+                        "identity_type": "platform_owner",
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    },
+                    "$setOnInsert": {
+                        "_id": user["email_normalized"],
+                        "created_at": datetime.now(timezone.utc).isoformat(),
+                    },
+                },
+                upsert=True,
+            )
 
         uid = await ensure_user_uid(
             db,
