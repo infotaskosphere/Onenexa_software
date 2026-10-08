@@ -78,9 +78,29 @@ const normalize = (value) => String(value || "").trim().toLowerCase().replace(/-
 
 export function isPlatformOwner(user) {
   if (!user) return false;
+
+  // Commercial tenant identity wins over all legacy owner-email/role fallbacks.
+  // This prevents a licensee using a historical Platform Owner email from
+  // receiving unrestricted module/page access.
+  const identityType = String(user.identity_type || "").trim().toLowerCase();
+  if (
+    identityType.startsWith("licensee") ||
+    identityType === "commercial" ||
+    user.licensee_uid ||
+    user.commercial_customer_id ||
+    user.license_id
+  ) {
+    return false;
+  }
+
   if (user.is_platform_owner === true || user.isPlatformOwner === true) return true;
-  const role = String(user.role || "").trim().toLowerCase();
+  const role = String(user.role?.value || user.role || "").trim().toLowerCase();
   if (role === "platform_owner" || role === "superadmin" || role === "saas_admin") return true;
+
+  const platformOwnerUid = String(user.platform_owner_uid || "").trim().toUpperCase();
+  const userUid = String(user.user_uid || "").trim().toUpperCase();
+  if (platformOwnerUid.startsWith("PO-") || userUid.startsWith("PO-")) return true;
+
   const email = String(user.email || "").trim().toLowerCase();
   const id = String(user.id || "").trim();
   const companyId = String(user.company_id || user.company?.id || "").trim().toLowerCase();
