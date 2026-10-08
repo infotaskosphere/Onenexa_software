@@ -279,16 +279,55 @@ async def _get_saas_session_user(token: str):
             except Exception: pass
         if not company:
             return None
-        subscription=await raw_db.subscriptions.find_one({"company_id": company_id})
-        if not subscription:
-            try: subscription=await raw_db.subscriptions.find_one({"company_id": ObjectId(str(company_id))})
-            except Exception: pass
-        if not subscription or subscription.get("status") not in ("trial", "active"):
-            return None
-        expires_at=subscription.get("expires_at")
-        if expires_at:
-            if expires_at.tzinfo is None: expires_at=expires_at.replace(tzinfo=timezone.utc)
-            if expires_at <= datetime.now(timezone.utc): return None
+        # Commercial licenses are authoritative for commercial SaaS tenants.
+        # Legacy subscription records remain supported for non-commercial users,
+        # but a valid issued license must not fail because the old subscription
+        # collection was never populated.
+        commercial_license = None
+        user_license_id = str(user.get("license_id") or "").strip()
+        user_customer_id = str(
+            user.get("commercial_customer_id")
+            or company.get("commercial_customer_id")
+            or ""
+        ).strip()
+        commercial_query = []
+        if user_license_id:
+            commercial_query.append({"id": user_license_id})
+        if user_customer_id:
+            commercial_query.append({"customer_id": user_customer_id})
+        commercial_query.append({"company_id": str(company.get("id") or company_id)})
+        commercial_license = await raw_db.commercial_licenses.find_one(
+            {"$or": commercial_query, "status": {"$in": ["active", "trial"]}},
+            {"_id": 0},
+            sort=[("issued_at", -1)],
+        )
+        if commercial_license:
+            expires_at = commercial_license.get("expires_at")
+            if expires_at and isinstance(expires_at, str):
+                try:
+                    expires_at = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+                except Exception:
+                    expires_at = None
+            if expires_at:
+                if expires_at.tzinfo is None:
+                    expires_at = expires_at.replace(tzinfo=timezone.utc)
+                if expires_at <= datetime.now(timezone.utc):
+                    return None
+        else:
+            subscription=await raw_db.subscriptions.find_one({"company_id": company_id})
+            if not subscription:
+                try: subscription=await raw_db.subscriptions.find_one({"company_id": ObjectId(str(company_id))})
+                except Exception: pass
+            if not subscription or subscription.get("status") not in ("trial", "active"):
+                return None
+            expires_at=subscription.get("expires_at")
+            if expires_at:
+                if isinstance(expires_at, str):
+                    try: expires_at=datetime.fromisoformat(expires_at.replace("Z","+00:00"))
+                    except Exception: expires_at=None
+                if expires_at:
+                    if expires_at.tzinfo is None: expires_at=expires_at.replace(tzinfo=timezone.utc)
+                    if expires_at <= datetime.now(timezone.utc): return None
         await _touch_saas_session_if_due(raw_db, session)
         user_data={k:v for k,v in user.items() if k != "_id"}
         user_data["id"]=str(user.get("_id") or user.get("id"))
