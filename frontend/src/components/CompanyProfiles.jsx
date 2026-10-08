@@ -456,6 +456,7 @@ export function CompanyProfilesList({ onRefresh, dense = false, onFormOpenChange
   useEffect(() => { fetchCompanies(); }, []);
 
   useEffect(() => { setCompanyPage(1); setSelectedCompanyIds([]); }, [companies.length]);
+  useEffect(() => { const max = Math.max(1, Math.ceil(companies.length / COMPANY_PAGE_SIZE)); if (companyPage > max) setCompanyPage(max); }, [companies.length, companyPage]);
 
   const companyPageCount = Math.max(1, Math.ceil(companies.length / COMPANY_PAGE_SIZE));
   const paginatedCompanies = companies.slice((companyPage - 1) * COMPANY_PAGE_SIZE, companyPage * COMPANY_PAGE_SIZE);
