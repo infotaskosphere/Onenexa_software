@@ -603,6 +603,16 @@ async def create_custom_admin(payload: Dict[str, Any]):
 
         now = _now().isoformat()
         from backend.commercial_licensee_admin import get_all_admin_permissions
+        from backend.identity_hierarchy import ensure_licensee_uid, ensure_user_uid
+        licensee_uid = str(customer.get("licensee_uid") or license_doc.get("licensee_uid") or "").strip()
+        if not licensee_uid:
+            licensee_uid = await ensure_licensee_uid(db, str(customer.get("id") or license_doc.get("customer_id") or ""), customer)
+        existing_admin_uid = await ensure_user_uid(
+            db,
+            existing_admin,
+            organization_uid=licensee_uid,
+            identity_type="licensee_admin",
+        )
         permissions = get_all_admin_permissions(license_doc)
         updates = {
             "email": email,
@@ -617,8 +627,9 @@ async def create_custom_admin(payload: Dict[str, Any]):
             "approved_at": now,
             "license_id": license_doc.get("id"),
             "license_key": license_doc.get("license_key"),
-            "licensee_uid": customer.get("licensee_uid") or license_doc.get("licensee_uid"),
-            "identity_org_uid": customer.get("licensee_uid") or license_doc.get("licensee_uid"),
+            "licensee_uid": licensee_uid,
+            "identity_org_uid": licensee_uid,
+            "user_uid": existing_admin_uid,
             "identity_type": "licensee_admin",
             "email_normalized": email,
             "license_uid": license_doc.get("license_uid"),
@@ -657,16 +668,25 @@ async def create_custom_admin(payload: Dict[str, Any]):
 
     now = _now().isoformat()
     user_id = str(uuid.uuid4())
+    user_uid = await ensure_user_uid(
+        db,
+        {"id": user_id, "email": email},
+        organization_uid=licensee_uid,
+        identity_type="licensee_admin",
+    )
     from backend.commercial_licensee_admin import get_all_admin_permissions
     permissions = get_all_admin_permissions(license_doc)
     user_doc = {
-        "id": user_id, "email": email, "full_name": full_name, "role": "admin",
+        "id": user_id, "user_uid": user_uid, "email": email, "full_name": full_name, "role": "admin",
         "password": pwd_context.hash(password), "permissions": permissions, "departments": [],
         "phone": customer.get("phone"), "is_active": True, "status": "active",
         "admin_credentials_pending": False,
         "approved_by": "commercial-license", "approved_at": now, "created_at": now,
         "company_id": company_id, "company_name": customer.get("company_name"),
         "commercial_customer_id": str(customer.get("id") or ""),
+        "licensee_uid": licensee_uid, "identity_org_uid": licensee_uid,
+        "identity_type": "licensee_admin", "email_normalized": email,
+        "license_uid": license_doc.get("license_uid"),
         "license_id": license_doc.get("id"), "license_key": license_doc.get("license_key"),
         "licensed_modules": list(license_doc.get("modules") or []),
         "selected_features": license_doc.get("selected_features") or {},
