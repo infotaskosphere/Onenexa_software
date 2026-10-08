@@ -849,9 +849,6 @@ class UserUpdate(BaseModel):
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
-    # Required only when the same email is used in more than one workspace.
-    # Accepts PO-###### or L-######.
-    organization_id: Optional[str] = None
 
 
 class Token(BaseModel):
