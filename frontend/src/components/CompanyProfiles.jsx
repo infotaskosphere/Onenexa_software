@@ -529,6 +529,7 @@ export function CompanyProfilesList({ onRefresh, dense = false, onFormOpenChange
             <Plus className="h-4 w-4 mr-1.5" />Add Company
           </Button>
         </div>
+        </div>
       )}
 
       {loading
