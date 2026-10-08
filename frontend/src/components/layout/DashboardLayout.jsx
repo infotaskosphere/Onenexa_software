@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext.jsx';
 import { useActivityTracker } from '@/hooks/useActivityTracker';
-import { canAccessPath, hasModuleAccess, isCommercialTenant, COMMERCIAL_ADMIN_LINKED_MODULES } from '@/lib/commercialPermissionMatrix';
+import { canAccessPath, hasModuleAccess, isCommercialTenant, COMMERCIAL_ADMIN_LINKED_PAGES } from '@/lib/commercialPermissionMatrix';
 import {
   LayoutDashboard, CheckSquare, FileText, Clock, BarChart3,
   Users, LogOut, Menu, Activity, ChevronDown,
@@ -152,10 +152,13 @@ const DashboardLayout = ({ children }) => {
     if (item.adminOnly) {
       if (user?.role !== 'admin') return false;
       if (isPlatformOwner) return true;
-      const linkedModule = Object.entries(COMMERCIAL_ADMIN_LINKED_MODULES).find(
+      const linkedPage = Object.entries(COMMERCIAL_ADMIN_LINKED_PAGES).find(
         ([prefix]) => item.path === prefix || item.path.startsWith(prefix + '/')
       )?.[1];
-      if (linkedModule) return hasModuleAccess(user, linkedModule);
+      if (linkedPage) {
+        return hasModuleAccess(user, linkedPage.module) &&
+          hasPermission(linkedPage.flag);
+      }
       // Global Admin control-plane pages are available to every tenant admin.
       return true;
     }
