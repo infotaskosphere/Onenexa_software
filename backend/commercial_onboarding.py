@@ -122,18 +122,30 @@ async def _ensure_company_master(customer: Dict[str, Any], license_doc: Dict[str
     customer_id = str(customer.get("id") or "")
     existing = await db.companies.find_one({"commercial_customer_id": customer_id, "source": "commercial-license"}, {"_id": 0})
     if existing:
-        # Defensive self-heal: some historical company records (created before
-        # "id" was always stamped on write, or left partially written by a
-        # prior failed request) can be missing the "id" field even though
-        # they were matched by commercial_customer_id above. Every caller of
-        # this function relies on company["id"] being present, so backfill it
-        # here rather than letting every call site crash with a KeyError.
-        if not existing.get("id"):
-            existing["id"] = customer_id
-            await db.companies.update_one(
-                {"commercial_customer_id": customer_id, "source": "commercial-license"},
-                {"$set": {"id": customer_id}},
-            )
+        # Keep the pre-created tenant company synchronized with the license.
+        # This company is the canonical Master Data company for the licensee.
+        patch = {
+            "id": existing.get("id") or customer_id,
+            "name": customer.get("company_name") or existing.get("name"),
+            "gstin": customer.get("gstin") if customer.get("gstin") is not None else existing.get("gstin"),
+            "address": customer.get("address") or customer.get("gst_address") or existing.get("address"),
+            "state": customer.get("state") or existing.get("state"),
+            "pincode": customer.get("pincode") or existing.get("pincode"),
+            "email": customer.get("email") or existing.get("email"),
+            "phone": customer.get("phone") or existing.get("phone"),
+            "commercial_customer_id": customer_id,
+            "licensed_modules": list(license_doc.get("modules") or license_doc.get("licensed_modules") or []),
+            "selected_features": license_doc.get("selected_features") or {},
+            "license_id": license_doc.get("id"),
+            "license_key": license_doc.get("license_key"),
+            "source": "commercial-license",
+            "status": "active",
+        }
+        await db.companies.update_one(
+            {"commercial_customer_id": customer_id, "source": "commercial-license"},
+            {"$set": patch},
+        )
+        existing.update(patch)
         return existing
     now = _now().isoformat()
     company_doc = {
