@@ -248,6 +248,12 @@ async def _get_saas_session_user(token: str):
         if not user:
             return None
 
+        try:
+            from backend.identity_hierarchy import enrich_user_identity
+            user = await enrich_user_identity(raw_db, user)
+        except Exception as identity_err:
+            logger.warning("SaaS session identity hydration warning: %s", identity_err)
+
         # The platform owner is not a commercial tenant: they have no
         # company_id by design and must not be forced through the
         # company/subscription checks below (that path is only for
@@ -428,6 +434,11 @@ async def get_current_user(credentials=Depends(security)):
     for key,value in list(d.items()):
         if value=="":d[key]=None
     d=_normalize_permissions(d)
+    try:
+        from backend.identity_hierarchy import enrich_user_identity
+        d = await enrich_user_identity(db, d)
+    except Exception as identity_err:
+        logger.warning("JWT identity hydration warning: %s", identity_err)
     try:user=User(**d)
     except Exception as e:logger.error("User validation failed for %s: %s",user_id,e);raise HTTPException(status_code=500,detail="User profile data is corrupted")
     if not is_platform_owner(user):
