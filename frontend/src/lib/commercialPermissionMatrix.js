@@ -99,30 +99,41 @@ export function normalizedSelectedFeatures(user) {
   // MODULE ISOLATION RULE (identical for every module):
   //  * a module that is not on the license grants nothing, even if a stale entry
   //    for it is still present in selected_features;
-  //  * a licensed module with no explicit page list (missing or empty) grants all
-  //    pages of THAT module, and only that module.
+  //  * when explicit selected_features are present, the listed pages are the
+  //    complete source of truth for that module. Missing module entries grant
+  //    nothing, not full-module access;
+  //  * when selected_features is completely absent, retain legacy module-only
+  //    compatibility and allow all pages of each licensed module.
   const licensed = normalizeModules(user);
   const raw = user?.selected_features || user?.company?.selected_features || user?.license?.selected_features;
-  const source = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  const hasExplicitSelections = raw && typeof raw === "object" && !Array.isArray(raw) && Object.keys(raw).length > 0;
+  const source = hasExplicitSelections ? raw : {};
   const result = {};
+
   for (const [moduleKey, flags] of Object.entries(source)) {
     const normalizedModule = normalize(moduleKey);
     const moduleId = Object.entries(MODULES).find(([id, def]) => id === normalizedModule || def.aliases.includes(normalizedModule))?.[0] || normalizedModule;
     if (licensed.size > 0 && !licensed.has(moduleId)) continue;
+
     const list = Array.isArray(flags) ? flags.map((flag) => normalize(flag)) : [];
     const hasAll = list.some((flag) => ["all", "*", "all_features", "full", "complete"].includes(flag));
-    const effectiveFlags = new Set(hasAll ? (ALL_PAGE_FLAGS_BY_MODULE[moduleId] || []) : list.map((flag) => String(flag).trim()));
-    if (effectiveFlags.size === 0 && licensed.has(moduleId)) (ALL_PAGE_FLAGS_BY_MODULE[moduleId] || []).forEach((flag) => effectiveFlags.add(flag));
-    // Dashboard/report landing access is a derived entitlement. Existing
-    // licenses can contain selected pages without the persisted derived flag.
-    const dashboardFlag = DASHBOARD_FLAG_BY_MODULE[moduleId];
-    if (dashboardFlag && effectiveFlags.size > 0) effectiveFlags.add(dashboardFlag);
+    const effectiveFlags = new Set(
+      hasAll
+        ? (ALL_PAGE_FLAGS_BY_MODULE[moduleId] || [])
+        : list.map((flag) => String(flag).trim())
+    );
+    // Do NOT derive a dashboard/report entitlement from another selected page.
+    // The Platform Owner must explicitly select the dashboard/report page too.
     result[moduleId] = effectiveFlags;
   }
-  // Licensed modules that have no selected_features entry at all.
+
   for (const moduleId of licensed) {
-    if (!result[moduleId] && ALL_PAGE_FLAGS_BY_MODULE[moduleId]) result[moduleId] = new Set(ALL_PAGE_FLAGS_BY_MODULE[moduleId]);
+    if (result[moduleId]) continue;
+    result[moduleId] = hasExplicitSelections
+      ? new Set()
+      : new Set(ALL_PAGE_FLAGS_BY_MODULE[moduleId] || []);
   }
+
   return result;
 }
 
@@ -184,8 +195,10 @@ export function hasPageLicense(user, pageFlag, moduleId = null) {
   const modules = normalizeModules(user);
   if (modules.size > 0 && !modules.has(module)) return false;
 
-  // If company is licensed for the module, licensee admin has full control over pages for tenant users
-  return true;
+  // Page access is still governed by the Platform Owner's explicit
+  // selected_features grant. A licensed module alone is never sufficient.
+  const selected = normalizedSelectedFeatures(user)[module] || new Set();
+  return selected.has(pageFlag);
 }
 
 export function hasEffectivePermission(user, permission) {
@@ -228,10 +241,10 @@ export function hasEffectivePermission(user, permission) {
     // Commercial licensee admins are governed by the active commercial
     // module + selected-page ceiling. Platform Owner is handled above.
     if (String(user.role || "").toLowerCase() === "admin") {
-      // Tenant-admin access is also capped by the Platform Owner's selected
-      // page entitlements. A purchased module does not automatically expose
-      // every page inside that module.
-      return user.permissions?.[permission] === true;
+      // Tenant-admin access is also capped by the Platform Owner's explicit
+      // selected page entitlements. Never trust stale stored permissions to
+      // reopen a page that is not present in the active license selection.
+      return hasPageLicense(user, permission, moduleId);
     }
     // For non-admin (manager, staff): verify parent module is accessible
     const modDef = MODULES[moduleId];
