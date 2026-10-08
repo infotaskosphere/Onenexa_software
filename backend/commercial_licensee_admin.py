@@ -228,13 +228,10 @@ def get_all_admin_permissions(license_doc: Optional[Dict[str, Any]] = None) -> D
         # invites under this tenant; see _permission_flag in
         # commercial_module_guard.py for that enforcement point.
         if module_allowed:
-            # Licensee admin access is capped by purchased modules, not by the
-            # granular page selection used for additional tenant users.
-            selected = {
-                str(page.get("flag")).strip()
-                for page in module_def.get("pages", []) or []
-                if page.get("flag")
-            }
+            # A purchased module is only the ceiling. The Platform Owner's
+            # selected_features is the source of truth for which pages the
+            # licensee administrator may see and access.
+            selected = set(selected_features.get(module_id) or [])
         else:
             selected = set()
         # AIWeave is intentionally different from the other modules: purchasing
