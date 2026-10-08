@@ -127,12 +127,13 @@ def normalize_license_selected_features(
                     values = candidate
                     break
 
-        # Legacy module-only licenses and empty feature lists mean the entire
-        # licensed module remains available.
+        # Page-selective commercial licenses are fail-closed. A missing module
+        # entry or an explicitly empty page list means the Platform Owner did
+        # not grant any page in that module.
         if values is None or (
             isinstance(values, (list, tuple, set)) and len(values) == 0
         ):
-            normalized[module_id] = list(all_flags)
+            normalized[module_id] = []
             continue
 
         # Legacy commercial records sometimes persisted only the selected-page
