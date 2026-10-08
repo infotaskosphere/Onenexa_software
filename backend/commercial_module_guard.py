@@ -727,6 +727,11 @@ def _selected_license_features(
     raw = license_doc.get("selected_features")
 
     if not isinstance(raw, dict):
+        # Current custom/page-selective licenses must fail closed when their
+        # explicit feature map is missing. Legacy module-only licenses retain
+        # their historical whole-module compatibility behavior.
+        if str(license_doc.get("package_id") or "").strip().lower() in {"custom", "custom-modules", "page-selective", "selective"}:
+            return set()
         return all_module_flags
 
     values = raw.get(module)
