@@ -418,6 +418,91 @@ async def enrich_user_identity(db, user: dict) -> dict:
     return data
 
 
+async def repair_platform_owner_identity_records(db) -> int:
+    """Repair legacy Platform Owner records without changing MongoDB ids."""
+    from backend.platform_owner import platform_owner_emails
+
+    owner_uid = await ensure_platform_owner_identity(db)
+    emails = sorted(platform_owner_emails())
+    query = {
+        "$or": [
+            {"is_platform_owner": True},
+            {"role": {"$in": ["platform_owner", "superadmin", "saas_admin"]}},
+            {"id": {"$in": ["saas-bootstrap-admin", "usr-admin-01"]}},
+            {"company_id": {"$regex": r"^platform-owner-", "$options": "i"}},
+            {"email": {"$in": emails}},
+            {"platform_owner_uid": owner_uid},
+            {"identity_org_uid": owner_uid},
+        ]
+    }
+    users = await db.users.find(query, {"_id": 1, "id": 1, "email": 1, "role": 1, "user_uid": 1}).to_list(5000)
+    repaired = 0
+
+    for user in users:
+        email = _normalized_email(user.get("email"))
+        if email and email in emails:
+            await db[IDENTITY_EMAIL_LINK_COLLECTION].update_one(
+                {"email_normalized": email},
+                {
+                    "$set": {
+                        "email": _clean(user.get("email")),
+                        "email_normalized": email,
+                        "identity_uid": owner_uid,
+                        "identity_type": "platform_owner",
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    },
+                    "$setOnInsert": {
+                        "_id": email,
+                        "created_at": datetime.now(timezone.utc).isoformat(),
+                    },
+                },
+                upsert=True,
+            )
+
+        identity_type = (
+            "platform_owner_admin"
+            if str(user.get("role") or "").lower() == "admin"
+            else "platform_owner_user"
+        )
+        working = dict(user)
+        working["platform_owner_uid"] = owner_uid
+        working["identity_org_uid"] = owner_uid
+        working["identity_type"] = identity_type
+        working["email_normalized"] = email
+        uid = await ensure_user_uid(
+            db,
+            working,
+            organization_uid=owner_uid,
+            identity_type=identity_type,
+        )
+
+        key = {"_id": user.get("_id")} if user.get("_id") is not None else {"id": user.get("id")}
+        await db.users.update_one(
+            key,
+            {
+                "$set": {
+                    "platform_owner_uid": owner_uid,
+                    "identity_org_uid": owner_uid,
+                    "identity_type": identity_type,
+                    "email_normalized": email,
+                    "user_uid": uid,
+                    "is_platform_owner": True,
+                },
+                "$unset": {
+                    "licensee_uid": "",
+                    "commercial_customer_id": "",
+                    "license_id": "",
+                    "license_key": "",
+                    "licensed_modules": "",
+                    "selected_features": "",
+                },
+            },
+        )
+        repaired += 1
+
+    return repaired
+
+
 async def _migrate_platform_owner_users(db, owner_uid: str) -> int:
     from backend.platform_owner import platform_owner_emails
 
@@ -729,6 +814,10 @@ async def migrate_hierarchical_identities(db) -> dict:
     marker = await db.identity_migrations.find_one({"_id": IDENTITY_MIGRATION_KEY})
     if marker and marker.get("completed") is True:
         try:
+            await repair_platform_owner_identity_records(db)
+        except Exception:
+            logger.exception("Platform Owner identity repair warning.")
+        try:
             await migrate_identity_email_links(db)
         except Exception:
             logger.exception("Email identity link bootstrap warning.")
@@ -743,6 +832,10 @@ async def migrate_hierarchical_identities(db) -> dict:
 
     owner_uid = await ensure_platform_owner_identity(db)
     owner_users = await _migrate_platform_owner_users(db, owner_uid)
+    try:
+        owner_users += await repair_platform_owner_identity_records(db)
+    except Exception:
+        logger.exception("Platform Owner identity repair warning.")
     licensees, commercial_users = await _migrate_licensees(db)
 
     # Link the already-assigned organization UIDs to their emails only after
