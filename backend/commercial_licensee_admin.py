@@ -235,12 +235,8 @@ def get_all_admin_permissions(license_doc: Optional[Dict[str, Any]] = None) -> D
             selected = set(selected_features.get(module_id) or [])
         else:
             selected = set()
-        # AIWeave is intentionally different from the other modules: purchasing
-        # the module creates the license entitlement, but NEVER creates a user
-        # permission. Even the licensee administrator must be explicitly granted
-        # AIWeave through Permission Matrix / Access Governance.
-        if module_id == "aiweave":
-            selected = set()
+        # No module has a special bypass. AIWeave follows the same explicit
+        # Platform Owner module/page selection rule as every other module.
         for page in module_def.get("pages", []) or []:
             flag = page.get("flag")
             if flag:
