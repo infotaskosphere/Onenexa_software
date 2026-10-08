@@ -2015,6 +2015,10 @@ async def list_companies(current_user: User = Depends(get_current_user)):
         ]
 
     if _is_tenant_user(current_user):
+        # Commercial licensees already have a pre-created Company Master record
+        # owned by the license/customer, not by the browser user who logs in.
+        # Scope the dropdown from the same tenant company scope as GET /companies;
+        # filtering only by created_by incorrectly returned an empty list.
         companies = await _tenant_visible_companies(current_user, projection)
     else:
         companies = await _tenant_raw_db().companies.find(
