@@ -445,8 +445,96 @@ async def get_current_user(credentials=Depends(security)):
             logger.warning(f"Could not hydrate license modules in get_current_user: {e}")
     return user
 
+def _commercial_permission_allows(user, permission):
+    """Return whether the active commercial license grants this permission.
+
+    Platform Owner/internal accounts are unaffected. For commercial tenants,
+    the active license's selected_features is the hard ceiling, including for
+    tenant administrators. Permissions outside the commercial catalog remain
+    governed by the normal role/permission system.
+    """
+    if not user or is_platform_owner(user):
+        return True
+
+    commercial = bool(
+        getattr(user, "license_id", None)
+        or getattr(user, "commercial_customer_id", None)
+        or getattr(user, "licensed_modules", None)
+    )
+    if not commercial:
+        return True
+
+    try:
+        from backend.modules.people_matrix.permissions.catalog import MODULE_HIERARCHY
+    except Exception:
+        return True
+
+    legacy = {
+        "can_manage_invoices": "can_view_sale",
+        "can_view_clients": "can_view_all_clients",
+        "can_create_quotations": "can_create_quotations",
+    }
+    flag = legacy.get(permission, permission)
+
+    module_id = None
+    for candidate_id, module in MODULE_HIERARCHY.items():
+        if module.get("flag") == flag:
+            module_id = candidate_id
+            break
+        if any(page.get("flag") == flag for page in module.get("pages", []) or []):
+            module_id = candidate_id
+            break
+
+    if not module_id or module_id == "admin":
+        return True
+
+    aliases = {
+        "taskosphere": {"taskosphere", "tasks"},
+        "finix": {"finix", "invoicing", "accounting"},
+        "compliance": {"compliance"},
+        "records": {"records"},
+        "proposals": {"proposals", "client_proposals", "client-proposals", "leadsense"},
+        "people_matrix": {"people_matrix", "people-matrix", "hrms", "peoplematrix"},
+        "aiweave": {"aiweave", "ai-weave"},
+    }
+
+    licensed = set()
+    for raw in getattr(user, "licensed_modules", []) or []:
+        key = str(raw or "").strip().lower().replace("-", "_")
+        for canonical, accepted in aliases.items():
+            if key == canonical or key in {str(a).replace("-", "_") for a in accepted}:
+                licensed.add(canonical)
+                break
+
+    if module_id not in licensed:
+        return False
+
+    raw = getattr(user, "selected_features", {}) or {}
+    if not isinstance(raw, dict):
+        return False
+
+    values = raw.get(module_id)
+    if values is None:
+        accepted = {str(a).replace("-", "_") for a in aliases.get(module_id, {module_id})}
+        for raw_key, candidate in raw.items():
+            if str(raw_key or "").strip().lower().replace("-", "_") in accepted:
+                values = candidate
+                break
+
+    if not isinstance(values, (list, tuple, set)):
+        return False
+
+    selected = {str(v or "").strip() for v in values}
+    if flag == MODULE_HIERARCHY[module_id].get("flag"):
+        return bool(selected)
+
+    return flag in selected
+
+
 def check_permission(required_permission):
     async def checker(current_user=Depends(get_current_user)):
+        if not _commercial_permission_allows(current_user, required_permission):
+            raise HTTPException(status_code=403, detail=f"Commercial license does not include: {required_permission}")
         if current_user.role=="admin" or _get_perm(current_user,required_permission,False):return current_user
         raise HTTPException(status_code=403,detail=f"Required permission: {required_permission}")
     return checker
@@ -545,8 +633,10 @@ MODULE_ACTION_MAP={"tasks.view":"can_view_tasks","tasks.create":"can_edit_tasks"
 def check_module_permission(module,action):
     key=f"{module}.{action}";flag=MODULE_ACTION_MAP.get(key)
     async def checker(current_user=Depends(get_current_user)):
-        if current_user.role=="admin":return current_user
         if flag is None:raise HTTPException(status_code=403,detail=f"No permission mapping found for {module}.{action}")
+        if not _commercial_permission_allows(current_user, flag):
+            raise HTTPException(status_code=403,detail=f"Commercial license does not include: {module}.{action}")
+        if current_user.role=="admin":return current_user
         if _get_perm(current_user,flag,False):return current_user
         raise HTTPException(status_code=403,detail=f"Permission required: {module}.{action} (flag: {flag})")
     return checker
