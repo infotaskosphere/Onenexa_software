@@ -412,7 +412,10 @@ export const AuthProvider = ({ children }) => {
     };
   }, [refreshUser]);
 
-  const isCommercialAdmin = (candidate = user) => String(candidate?.role || "").toLowerCase() === "admin" && !!candidate?.company_id && String(candidate?.email || "").trim().toLowerCase() !== PLATFORM_OWNER_EMAIL;
+  const isCommercialAdmin = (candidate = user) => {
+    const role = String(candidate?.role?.value || candidate?.role || "").toLowerCase();
+    return role === "admin" && !!candidate?.company_id && !matrixIsPlatformOwner(candidate);
+  };
   const hasPermission = (permission) => {
     if (!user) return false;
     return hasEffectivePermission(user, permission);
