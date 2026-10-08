@@ -749,7 +749,21 @@ async def delete_commercial_company(license_id: str, current_user: User = Depend
     owner_emails = list(platform_owner_emails())
     if customer_id:
         owner_linked = await db.users.find_one(
-            {"company_id": customer_id, "email": {"$in": owner_emails}}, {"_id": 0, "id": 1}
+            {
+                "company_id": customer_id,
+                "$or": [
+                    {"identity_type": {"$regex": r"^platform_owner", "$options": "i"}},
+                    {"platform_owner_uid": {"$regex": r"^PO-", "$options": "i"}},
+                    {"is_platform_owner": True},
+                    {
+                        "email": {"$in": owner_emails},
+                        "licensee_uid": {"$in": [None, ""]},
+                        "commercial_customer_id": {"$in": [None, ""]},
+                        "license_id": {"$in": [None, ""]},
+                    },
+                ],
+            },
+            {"_id": 0, "id": 1},
         )
         if owner_linked:
             raise HTTPException(
@@ -775,7 +789,18 @@ async def delete_commercial_company(license_id: str, current_user: User = Depend
                         {"commercial_customer_id": customer_id},
                     ]
                 },
-                {"email": {"$nin": owner_emails}},
+                # Do not use owner email as the primary boundary. A
+                # legitimate licensee may intentionally use the same email.
+                # Legacy owner-email protection remains only when the user has
+                # no commercial identity markers at all.
+                {
+                    "$or": [
+                        {"email": {"$nin": owner_emails}},
+                        {"licensee_uid": {"$nin": [None, ""]}},
+                        {"commercial_customer_id": {"$nin": [None, ""]}},
+                        {"license_id": {"$nin": [None, ""]}},
+                    ]
+                },
                 {"is_internal_commercial_admin": {"$ne": True}},
                 {"role": {"$ne": "superadmin"}},
             ]
