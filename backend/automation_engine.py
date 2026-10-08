@@ -80,15 +80,21 @@ def require_approval_access(current_user=Depends(get_current_user)):
     # existing delegated approval permissions, but never allow them to bypass
     # the Records module license itself.
     from backend.platform_owner import is_platform_owner
-    if (
-        not is_platform_owner(current_user)
-        and getattr(current_user, "company_id", None)
-        and "records" not in _commercial_license_modules_for_user(current_user)
-    ):
-        raise HTTPException(
-            status_code=403,
-            detail="Automation Approvals requires the licensed Records module.",
-        )
+    if not is_platform_owner(current_user) and getattr(current_user, "company_id", None):
+        licensed = _commercial_license_modules_for_user(current_user)
+        if "records" not in licensed:
+            raise HTTPException(
+                status_code=403,
+                detail="Automation Approvals requires the licensed Records module.",
+            )
+        perms = getattr(current_user, "permissions", {}) or {}
+        if hasattr(perms, "model_dump"):
+            perms = perms.model_dump()
+        if not bool(perms.get("can_view_automation_approvals")):
+            raise HTTPException(
+                status_code=403,
+                detail="Automation Approvals is not enabled for this account.",
+            )
     if not _allowed_channels(current_user):
         raise HTTPException(
             status_code=403,
