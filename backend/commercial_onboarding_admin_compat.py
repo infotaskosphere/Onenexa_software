@@ -87,25 +87,20 @@ async def create_customer_admin_fixed(payload: Dict[str, Any]):
     if not customer_id or customer_id != str(license_doc.get("customer_id") or ""):
         raise HTTPException(status_code=403, detail="The license/customer relationship is invalid.")
 
-    # A first administrator consumes exactly one seat from the customer-wide
-    # license, regardless of which legal company it is attached to.
-    await _require_user_seat(customer_id, 1)
-
     company = await _ensure_company_master(customer, license_doc)
     company_id = str(company.get("id") or "").strip()
     if not company_id:
         raise HTTPException(status_code=500, detail="Licensed company could not be initialized.")
 
     db = _raw_db()
+    # License issuance/onboarding may already have created the administrator
+    # identity as a credential-pending placeholder. In that case the first
+    # customer setup must COMPLETE that same account rather than being rejected
+    # as a duplicate administrator.
     existing_admin = await db.users.find_one(
         {"company_id": company_id, "role": "admin", "commercial_customer_id": customer_id},
-        {"_id": 1, "email": 1},
+        {"_id": 0},
     )
-    if existing_admin:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="The company administrator has already been created. Please sign in with the existing administrator account.",
-        )
 
     full_name = str(payload.get("full_name") or "").strip()
     email = str(payload.get("email") or "").strip().lower()
@@ -113,7 +108,86 @@ async def create_customer_admin_fixed(payload: Dict[str, Any]):
     if not full_name or not email or len(password) < 8:
         raise HTTPException(status_code=400, detail="Full name, email and a password of at least 8 characters are required.")
 
-    existing_email = await db.users.find_one({"email": email}, {"_id": 1, "company_id": 1, "commercial_customer_id": 1})
+    if existing_admin:
+        existing_admin_email = str(existing_admin.get("email") or "").strip().lower()
+        legacy_license_placeholder = (
+            str(existing_admin.get("approved_by") or "").strip().lower() == "commercial-license"
+            and existing_admin_email == str(customer.get("email") or "").strip().lower()
+            and existing_admin.get("admin_credentials_pending") is not False
+        )
+        pending_setup = bool(
+            existing_admin.get("admin_credentials_pending")
+            or not existing_admin.get("password")
+            or existing_admin.get("status") == "pending_admin_setup"
+            or legacy_license_placeholder
+        )
+
+        if not pending_setup:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="The company administrator has already been created. Please sign in with the existing administrator account.",
+            )
+
+        existing_admin_id = str(existing_admin.get("id") or "").strip()
+        if not existing_admin_id:
+            raise HTTPException(status_code=500, detail="The pending administrator record is missing its user ID.")
+
+        # The email on the placeholder is intentionally reusable because this
+        # request is completing the license-created administrator identity.
+        if email != existing_admin_email:
+            conflicting_email = await db.users.find_one(
+                {"email": email, "id": {"$ne": existing_admin_id}, "status": {"$ne": "deleted"}},
+                {"_id": 1},
+            )
+            if conflicting_email:
+                raise HTTPException(status_code=409, detail="An account already exists for this email address.")
+
+        now = _now().isoformat()
+        from backend.commercial_licensee_admin import get_all_admin_permissions
+        permissions = get_all_admin_permissions(license_doc)
+        updates = {
+            "email": email,
+            "full_name": full_name,
+            "password": pwd_context.hash(password),
+            "permissions": permissions,
+            "departments": list(existing_admin.get("departments") or []),
+            "phone": customer.get("phone"),
+            "is_active": True,
+            "status": "active",
+            "admin_credentials_pending": False,
+            "approved_by": "commercial-license",
+            "approved_at": now,
+            "license_id": license_doc.get("id"),
+            "license_key": license_doc.get("license_key"),
+            "licensed_modules": list(license_doc.get("modules") or []),
+            "selected_features": license_doc.get("selected_features") or {},
+        }
+        await db.users.update_one({"id": existing_admin_id}, {"$set": updates})
+        await db.commercial_license_customers.update_one(
+            {"id": customer_id},
+            {"$set": {"email": email, "admin_name": full_name, "contact_name": full_name}},
+        )
+        user_doc = await db.users.find_one(
+            {"id": existing_admin_id},
+            {"_id": 0, "password": 0},
+        )
+        user_id = str(user_doc.get("id") or "")
+        return {
+            "access_token": create_access_token({"sub": user_id}),
+            "token_type": "bearer",
+            "user": user_doc,
+            "company": company,
+            "license": _public_license(license_doc),
+        }
+
+    # No administrator exists yet: this is the normal first-time setup and
+    # consumes one customer-wide license seat.
+    await _require_user_seat(customer_id, 1)
+
+    existing_email = await db.users.find_one(
+        {"email": email, "status": {"$ne": "deleted"}},
+        {"_id": 0, "company_id": 1, "commercial_customer_id": 1},
+    )
     if existing_email:
         existing_customer = str(existing_email.get("commercial_customer_id") or "")
         if existing_customer == customer_id:
@@ -125,7 +199,7 @@ async def create_customer_admin_fixed(payload: Dict[str, Any]):
     now = _now().isoformat()
     user_id = __import__("uuid").uuid4().hex
     from backend.commercial_licensee_admin import get_all_admin_permissions
-    permissions = get_all_admin_permissions()
+    permissions = get_all_admin_permissions(license_doc)
     user_doc = {
         "id": user_id,
         "email": email,
@@ -137,6 +211,7 @@ async def create_customer_admin_fixed(payload: Dict[str, Any]):
         "phone": customer.get("phone"),
         "is_active": True,
         "status": "active",
+        "admin_credentials_pending": False,
         "approved_by": "commercial-license",
         "approved_at": now,
         "created_at": now,
@@ -146,6 +221,7 @@ async def create_customer_admin_fixed(payload: Dict[str, Any]):
         "license_id": license_doc.get("id"),
         "license_key": license_doc.get("license_key"),
         "licensed_modules": list(license_doc.get("modules") or []),
+        "selected_features": license_doc.get("selected_features") or {},
     }
     try:
         await db.users.insert_one(user_doc)
