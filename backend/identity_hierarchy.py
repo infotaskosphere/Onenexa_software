@@ -705,6 +705,10 @@ async def migrate_identity_email_links(db) -> dict:
 async def migrate_hierarchical_identities(db) -> dict:
     marker = await db.identity_migrations.find_one({"_id": IDENTITY_MIGRATION_KEY})
     if marker and marker.get("completed") is True:
+        try:
+            await migrate_identity_email_links(db)
+        except Exception:
+            logger.exception("Email identity link bootstrap warning.")
         return {
             "status": "already-completed",
             "platform_owner_uid": marker.get("platform_owner_uid"),
