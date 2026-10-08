@@ -7,6 +7,7 @@ Platform Owners use PO-###### and commercial licensees use L-######.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from datetime import datetime, timezone
@@ -20,6 +21,9 @@ IDENTITY_MIGRATION_KEY = "hierarchical_identity_v1"
 _UID_RE = re.compile(r"^(PO|L)-(\d{6})$")
 _USER_UID_RE = re.compile(r"^(PO|L)-(\d{6})-U-(\d{6})$")
 _LICENSE_UID_RE = re.compile(r"^LIC-(PO|L)-(\d{6})-(\d{2,})$")
+logger = logging.getLogger("identity_hierarchy")
+IDENTITY_EMAIL_LINK_COLLECTION = "identity_email_links"
+EMAIL_IDENTITY_LINK_MIGRATION_KEY = "email_identity_link_v1"
 
 
 def _clean(value: Any) -> str:
@@ -81,6 +85,9 @@ def is_commercial_identity_record(user: Any) -> bool:
 
 
 async def ensure_identity_indexes(db) -> None:
+    await db.identity_email_links.create_index(
+        "email_normalized", unique=True, sparse=True, background=True
+    )
     await db.commercial_license_customers.create_index(
         "licensee_uid", unique=True, sparse=True, background=True
     )
@@ -107,6 +114,83 @@ async def ensure_identity_indexes(db) -> None:
         )
     except Exception:
         pass
+
+
+async def ensure_identity_email_link(
+    db,
+    email: Any,
+    identity_uid: str,
+    *,
+    identity_type: str = "organization",
+) -> str:
+    """Bind one normalized email to exactly one organization identity UID.
+
+    The UID itself is created by the licensee/platform-owner hierarchy. This
+    helper only records the email -> existing UID relationship and prevents the
+    same email from being bound to a different organization.
+    """
+    normalized = _normalized_email(email)
+    uid = _clean(identity_uid).upper()
+    if not normalized:
+        raise HTTPException(status_code=400, detail="Email is required for identity linking.")
+    if not _UID_RE.match(uid):
+        raise HTTPException(status_code=400, detail="A valid organization identity is required.")
+
+    existing = await db[IDENTITY_EMAIL_LINK_COLLECTION].find_one(
+        {"email_normalized": normalized},
+        {"_id": 0},
+    )
+    if existing:
+        existing_uid = _clean(existing.get("identity_uid")).upper()
+        if existing_uid and existing_uid != uid:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "This email is already linked to another organization identity "
+                    f"({existing_uid}). One email cannot be linked to two unique IDs."
+                ),
+            )
+        await db[IDENTITY_EMAIL_LINK_COLLECTION].update_one(
+            {"email_normalized": normalized},
+            {
+                "$set": {
+                    "email": _clean(email),
+                    "identity_uid": uid,
+                    "identity_type": identity_type,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
+            },
+        )
+        return uid
+
+    payload = {
+        "_id": normalized,
+        "email": _clean(email),
+        "email_normalized": normalized,
+        "identity_uid": uid,
+        "identity_type": identity_type,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        await db[IDENTITY_EMAIL_LINK_COLLECTION].insert_one(payload)
+    except Exception:
+        # Race-safe re-read: if another request won the unique-email insert,
+        # validate that it points to the same UID rather than silently changing it.
+        existing = await db[IDENTITY_EMAIL_LINK_COLLECTION].find_one(
+            {"email_normalized": normalized},
+            {"_id": 0},
+        )
+        existing_uid = _clean((existing or {}).get("identity_uid")).upper()
+        if existing_uid != uid:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "This email is already linked to another organization identity "
+                    f"({existing_uid or 'unknown'}). One email cannot be linked to two unique IDs."
+                ),
+            )
+    return uid
 
 
 async def ensure_licensee_uid(
@@ -190,6 +274,15 @@ async def ensure_user_uid(
             status_code=400,
             detail="A valid organization identity is required for this user.",
         )
+
+    # The login identity is email-only. The hierarchical organization UID is
+    # linked to the user's email, but the UID is never entered on the login form.
+    await ensure_identity_email_link(
+        db,
+        user.get("email"),
+        org_uid,
+        identity_type="platform_owner" if org_uid.startswith("PO-") else "licensee",
+    )
 
     seq = await _allocate_sequence_async(db, f"{org_uid}:user")
     candidate = f"{org_uid}-U-{seq:06d}"
@@ -472,7 +565,106 @@ async def _migrate_licensees(db) -> tuple[int, int]:
     return migrated_customers, migrated_users
 
 
+async def migrate_identity_email_links(db) -> dict:
+    """Backfill existing organization-email links without creating new UIDs."""
+    marker = await db.identity_migrations.find_one(
+        {"_id": EMAIL_IDENTITY_LINK_MIGRATION_KEY}
+    )
+    if marker and marker.get("completed") is True:
+        return {
+            "status": "already-completed",
+            "linked": marker.get("linked", 0),
+            "conflicts": marker.get("conflicts", 0),
+        }
+
+    await ensure_identity_indexes(db)
+    linked = 0
+    conflicts = 0
+
+    try:
+        owner_uid = await ensure_platform_owner_identity(db)
+        owner_users = await _migrate_platform_owner_users(db, owner_uid)
+        for user in await db.users.find(
+            {
+                "$or": [
+                    {"platform_owner_uid": owner_uid},
+                    {"is_platform_owner": True},
+                    {"role": {"$in": ["platform_owner", "superadmin", "saas_admin"]}},
+                ],
+                "status": {"$ne": "deleted"},
+            },
+            {"email": 1},
+        ).to_list(5000):
+            try:
+                if _normalized_email(user.get("email")):
+                    await ensure_identity_email_link(
+                        db,
+                        user.get("email"),
+                        owner_uid,
+                        identity_type="platform_owner",
+                    )
+                    linked += 1
+            except HTTPException as exc:
+                conflicts += 1
+                logger.warning(
+                    "Identity email link conflict for platform owner email %s: %s",
+                    _normalized_email(user.get("email")),
+                    exc.detail,
+                )
+
+        customers = await db.commercial_license_customers.find(
+            {}, {"_id": 0, "id": 1, "email": 1, "licensee_uid": 1}
+        ).to_list(10000)
+        for customer in customers:
+            email = _normalized_email(customer.get("email"))
+            licensee_uid = _clean(customer.get("licensee_uid")).upper()
+            if not email or not _UID_RE.match(licensee_uid):
+                continue
+            try:
+                await ensure_identity_email_link(
+                    db,
+                    customer.get("email"),
+                    licensee_uid,
+                    identity_type="licensee",
+                )
+                linked += 1
+            except HTTPException as exc:
+                conflicts += 1
+                logger.warning(
+                    "Identity email link conflict for licensee %s email %s: %s",
+                    licensee_uid,
+                    email,
+                    exc.detail,
+                )
+    finally:
+        await db.identity_migrations.update_one(
+            {"_id": EMAIL_IDENTITY_LINK_MIGRATION_KEY},
+            {
+                "$set": {
+                    "completed": True,
+                    "linked": linked,
+                    "conflicts": conflicts,
+                    "completed_at": datetime.now(timezone.utc).isoformat(),
+                }
+            },
+            upsert=True,
+        )
+
+    return {
+        "status": "completed",
+        "linked": linked,
+        "conflicts": conflicts,
+    }
+
+
 async def migrate_hierarchical_identities(db) -> dict:
+    # The email -> organization UID map is a separate compatibility layer and
+    # must be available even when the original hierarchy migration already ran.
+    try:
+        await migrate_identity_email_links(db)
+    except Exception:
+        logger.exception("Email identity link bootstrap warning.")
+
     marker = await db.identity_migrations.find_one({"_id": IDENTITY_MIGRATION_KEY})
     if marker and marker.get("completed") is True:
         return {
@@ -512,11 +704,8 @@ async def migrate_hierarchical_identities(db) -> dict:
     }
 
 
-async def resolve_user_for_login(
-    db, email: str, organization_id: Optional[str] = None
-) -> dict:
+async def resolve_user_for_login(db, email: str) -> dict:
     normalized = _normalized_email(email)
-    org = _clean(organization_id)
     base = {
         "status": {"$ne": "deleted"},
         "$or": [
@@ -525,42 +714,67 @@ async def resolve_user_for_login(
         ],
     }
 
-    if org:
-        org = org.upper()
-        if not _UID_RE.match(org):
-            raise HTTPException(
-                status_code=400,
-                detail="Invalid Organization ID. Use PO-000001 or L-000001.",
-            )
-
-        user = await db.users.find_one(
-            {"identity_org_uid": org, **base}
+    # Canonical login resolution is email-only. The identity link chooses
+    # the one organization UID to which this email is permitted to belong.
+    link = await db[IDENTITY_EMAIL_LINK_COLLECTION].find_one(
+        {"email_normalized": normalized},
+        {"_id": 0, "identity_uid": 1},
+    )
+    if link and _clean(link.get("identity_uid")):
+        org_uid = _clean(link.get("identity_uid")).upper()
+        linked_user = await db.users.find_one(
+            {
+                **base,
+                "identity_org_uid": org_uid,
+            },
+            sort=[("status", 1), ("created_at", 1)],
         )
-        if not user:
-            if org.startswith("L-"):
-                candidates = await db.commercial_license_customers.find(
-                    {"licensee_uid": org}, {"id": 1}
-                ).to_list(10)
-                ids = [str(x.get("id")) for x in candidates if x.get("id")]
-                if ids:
-                    user = await db.users.find_one(
-                        {
-                            "commercial_customer_id": {"$in": ids},
-                            **base,
-                        }
-                    )
-            elif org.startswith("PO-"):
-                user = await db.users.find_one(
-                    {"platform_owner_uid": org, **base}
-                )
+        if linked_user:
+            return linked_user
 
-        if not user:
-            raise HTTPException(
-                status_code=401,
-                detail="Invalid Organization ID, email or password.",
+        if org_uid.startswith("PO-"):
+            linked_user = await db.users.find_one(
+                {
+                    **base,
+                    "platform_owner_uid": org_uid,
+                },
+                sort=[("status", 1), ("created_at", 1)],
             )
-        return user
+            if linked_user:
+                return linked_user
 
+        if org_uid.startswith("L-"):
+            customers = await db.commercial_license_customers.find(
+                {"licensee_uid": org_uid},
+                {"id": 1},
+            ).to_list(10)
+            ids = [str(x.get("id")) for x in customers if x.get("id")]
+            if ids:
+                linked_user = await db.users.find_one(
+                    {
+                        **base,
+                        "commercial_customer_id": {"$in": ids},
+                    },
+                    sort=[("status", 1), ("created_at", 1)],
+                )
+                if linked_user:
+                    return linked_user
+
+    users = await db.users.find(
+        base,
+        {"_id": 0},
+    ).limit(10).to_list(10)
+    if len(users) == 1:
+        return users[0]
+    if len(users) > 1:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This email is linked to more than one account. "
+                "One email can belong to only one organization identity."
+            ),
+        )
+    raise HTTPException(status_code=401, detail="Invalid email or password.")
     users = await db.users.find(base, {"_id": 0}).limit(10).to_list(10)
     if len(users) == 1:
         return users[0]
