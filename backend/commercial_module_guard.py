@@ -793,15 +793,11 @@ def _permission_flag(
     is_admin = _is_admin_role(user)
 
     if module is not None:
-        # AIWeave is explicitly user-governed. A commercial license can make
-        # the module available to the tenant, but never auto-grants it — not
-        # even to the licensee administrator.
+        # AIWeave follows the same Platform Owner page-selection rule as
+        # every other commercial module.
         if module == "aiweave":
             selected_pages = _selected_license_features(license_doc, module)
-            return (
-                "can_access_aiweave" in selected_pages
-                and "can_view_aiweave" in selected_pages
-            )
+            return "can_view_aiweave" in selected_pages
 
         # Every commercial role, including the licensee administrator, is
         # capped by the Platform Owner's explicit page selection.
@@ -953,7 +949,7 @@ async def get_current_user_with_commercial_guard(
             object.__setattr__(
                 permissions,
                 "can_access_aiweave",
-                "can_access_aiweave" in selected_ai,
+                bool(selected_ai),
             )
             object.__setattr__(
                 permissions,
