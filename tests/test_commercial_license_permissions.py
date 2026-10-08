@@ -75,6 +75,12 @@ def test_request_guard_allows_licensee_admin_purchased_finix_pages():
         "can_view_accounting_reports",
         license_doc,
         "finix",
+    ) is False
+    assert _permission_flag(
+        user,
+        "can_view_sale",
+        license_doc,
+        "finix",
     ) is True
     assert _permission_flag(
         user,
@@ -82,3 +88,9 @@ def test_request_guard_allows_licensee_admin_purchased_finix_pages():
         license_doc,
         "finix",
     ) is True
+    assert _permission_flag(
+        user,
+        "can_view_bank",
+        license_doc,
+        "finix",
+    ) is False
