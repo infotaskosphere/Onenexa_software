@@ -111,12 +111,21 @@ def is_platform_owner(user) -> bool:
         if isinstance(user, dict)
         else getattr(user, "platform_owner_uid", "") or ""
     ).strip().upper()
+    identity_org_uid = str(
+        user.get("identity_org_uid") or ""
+        if isinstance(user, dict)
+        else getattr(user, "identity_org_uid", "") or ""
+    ).strip().upper()
     user_uid = str(
         user.get("user_uid") or ""
         if isinstance(user, dict)
         else getattr(user, "user_uid", "") or ""
     ).strip().upper()
-    if platform_owner_uid.startswith("PO-") or user_uid.startswith("PO-"):
+    if (
+        platform_owner_uid.startswith("PO-")
+        or identity_org_uid.startswith("PO-")
+        or user_uid.startswith("PO-")
+    ):
         return True
 
     # Commercial tenant identity wins over the legacy owner-email fallback only
