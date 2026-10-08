@@ -72,7 +72,53 @@ def is_platform_owner(user) -> bool:
         role = str(getattr(user, "role", "") or "").strip().lower()
         is_owner_flag = bool(getattr(user, "is_platform_owner", False) or getattr(user, "isPlatformOwner", False))
 
+    # A commercial tenant identity always wins over legacy email/role fallbacks.
+    # This prevents a customer account from being elevated to Platform Owner merely
+    # because it uses an email that historically appeared in the owner allow-list.
+    identity_type = str(
+        user.get("identity_type") or ""
+        if isinstance(user, dict)
+        else getattr(user, "identity_type", "") or ""
+    ).strip().lower()
+    licensee_uid = str(
+        user.get("licensee_uid") or ""
+        if isinstance(user, dict)
+        else getattr(user, "licensee_uid", "") or ""
+    ).strip()
+    commercial_customer_id = str(
+        user.get("commercial_customer_id") or ""
+        if isinstance(user, dict)
+        else getattr(user, "commercial_customer_id", "") or ""
+    ).strip()
+    license_id = str(
+        user.get("license_id") or ""
+        if isinstance(user, dict)
+        else getattr(user, "license_id", "") or ""
+    ).strip()
+    if (
+        identity_type.startswith("licensee")
+        or identity_type == "commercial"
+        or licensee_uid
+        or commercial_customer_id
+        or license_id
+    ):
+        return False
+
     if is_owner_flag or role in {"platform_owner", "superadmin", "saas_admin"}:
+        return True
+
+    # New stable Platform Owner hierarchy. The UID is authoritative once present.
+    platform_owner_uid = str(
+        user.get("platform_owner_uid") or ""
+        if isinstance(user, dict)
+        else getattr(user, "platform_owner_uid", "") or ""
+    ).strip().upper()
+    user_uid = str(
+        user.get("user_uid") or ""
+        if isinstance(user, dict)
+        else getattr(user, "user_uid", "") or ""
+    ).strip().upper()
+    if platform_owner_uid.startswith("PO-") or user_uid.startswith("PO-"):
         return True
 
     owner_emails = platform_owner_emails()
