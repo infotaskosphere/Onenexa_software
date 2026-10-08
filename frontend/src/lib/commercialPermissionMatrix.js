@@ -33,21 +33,31 @@ export const MODULES = Object.freeze({
   aiweave: { flag: "can_access_aiweave", aliases: ["aiweave", "ai-weave"], landing: "/aiweave" },
 });
 
+export const COMMERCIAL_ADMIN_GLOBAL_PATHS = Object.freeze([
+  "/admin-dashboard","/settings/backup","/permission-matrix","/master-data","/roles","/contact-details","/settings","/settings/general","/settings/email","/settings/whatsapp",
+]);
+export const COMMERCIAL_ADMIN_LINKED_PAGES = Object.freeze({
+  "/staff-activity": { module: "taskosphere", flag: "can_view_staff_activity" },
+  "/reports": { module: "taskosphere", flag: "can_view_reports" },
+  "/task-audit": { module: "taskosphere", flag: "can_view_audit_logs" },
+  "/whatsapp-hub": { module: "records", flag: "can_access_whatsapp_hub" },
+  "/automation/approvals": { module: "records", flag: "can_view_automation_approvals" },
+});
 export const PAGE_MATRIX = Object.freeze([
   ["core", "can_view_user_page", "/users"],
   ["core", "can_manage_settings", "/settings"],
   ["core", "can_view_security_sessions", "/security/sessions"],
   ["taskosphere", "can_view_dashboard", "/dashboard"], ["taskosphere", "can_view_tasks", "/tasks"], ["taskosphere", "can_view_todo_dashboard", "/todos"], ["taskosphere", "can_view_attendance", "/attendance"], ["taskosphere", "can_view_reminders", "/reminders"], ["taskosphere", "can_view_action_center", "/action-center"], ["taskosphere", "can_view_client_visits", "/visits"], ["taskosphere", "can_view_client_portal", "/client-portal-manager"], ["taskosphere", "can_reset_client_passwords", "/client-portal-manager/password"], ["taskosphere", "can_reset_client_passwords", "/client-portal-manager/reset"],
-  ["taskosphere", "can_view_staff_activity", "/staff-activity"], ["taskosphere", "can_view_reports", "/reports"], ["taskosphere", "can_view_reports", "/reports/efficiency"], ["taskosphere", "can_view_reports", "/reports/performance-rankings"], ["taskosphere", "can_download_reports", "/reports/export"], ["taskosphere", "can_view_audit_logs", "/task-audit"],
+  ["taskosphere", "can_view_staff_activity", "/staff-activity"], ["taskosphere", "can_view_reports", "/reports"], ["taskosphere", "can_view_reports", "/reports/efficiency"], ["taskosphere", "can_view_reports", "/reports/performance-rankings"], ["taskosphere", "can_download_reports", "/reports/export"], ["taskosphere", "can_view_audit_logs", "/task-audit"], ["taskosphere", "can_view_audit_logs", "/audit-logs"],
   ["finix", "can_view_accounting_reports", "/finix-dashboard"],
-  ["finix", "can_view_accounting_reports", "/reports/day-book"],
+  ["finix", "can_view_extended_accounts_reports", "/reports/day-book"],
   ["finix", "can_view_accounting_reports", "/reports/journal-register"],
-  ["finix", "can_view_accounting_reports", "/reports/cash-bank-book"],
-  ["finix", "can_view_accounting_reports", "/reports/cash-flow"],
-  ["finix", "can_view_accounting_reports", "/reports/outstanding"],
-  ["finix", "can_view_accounting_reports", "/reports/financial-ratios"],
-  ["finix", "can_view_accounting_reports", "/reports/comparative"],
-  ["finix", "can_view_accounting_reports", "/reports/yearly"],
+  ["finix", "can_view_extended_accounts_reports", "/reports/cash-bank-book"],
+  ["finix", "can_view_extended_accounts_reports", "/reports/cash-flow"],
+  ["finix", "can_view_extended_accounts_reports", "/reports/outstanding"],
+  ["finix", "can_view_financial_ratios", "/reports/financial-ratios"],
+  ["finix", "can_view_comparative_report", "/reports/comparative"],
+  ["finix", "can_view_yearly_report", "/reports/yearly"],
   ["finix", "can_view_accounting_reports", "/reports/trial-balance"],
   ["finix", "can_view_accounting_reports", "/reports/profit-loss"],
   ["finix", "can_view_accounting_reports", "/reports/balance-sheet"],
@@ -56,9 +66,9 @@ export const PAGE_MATRIX = Object.freeze([
   ["finix", "can_view_accounting_reports", "/reports/party-ledger"],
   ["finix", "can_view_accounting_reports", "/reports/validation-engine"],
   ["finix", "can_view_accounting_reports", "/reports/ledger-by-code"],
-  ["finix", "can_view_accounting_reports", "/reports/finix-dashboard"], ["finix", "can_view_accounting_reports", "/accounting-reports"], ["finix", "can_post_journal_entries", "/zero-touch-entry"], ["finix", "can_view_accounting_reports", "/gst-portal-sync"], ["finix", "can_manage_chart_of_accounts", "/accounting-integrity"], ["finix", "can_view_accounting_reports", "/day-book"], ["finix", "can_view_accounting_reports", "/cash-bank-book"], ["finix", "can_view_accounting_reports", "/cash-flow"], ["finix", "can_view_accounting_reports", "/outstanding-report"],  ["finix", "can_view_accounting_reports", "/depreciation"], ["finix", "can_view_accounting_reports", "/tds-tcs"], ["finix", "can_view_accounting_reports", "/financial-ratios"], ["finix", "can_view_accounting_reports", "/comparative-report"], ["finix", "can_view_accounting_reports", "/yearly-report"], ["finix", "can_view_accounting_reports", "/opening-balances"], ["finix", "can_view_accounting_reports", "/accounting-audit-trail"], ["finix", "can_view_accounting_reports", "/bulk-import"], ["finix", "can_view_accounting_reports", "/due-dates"], ["finix", "can_view_sale", "/import-invoices"], ["finix", "can_view_sale", "/invoicing"], ["finix", "can_view_purchase", "/purchase"], ["finix", "can_view_bank", "/bank-accounts"], ["finix", "can_view_chart_of_accounts", "/chart-of-accounts"], ["finix", "can_manage_chart_of_accounts", "/chart-of-accounts/manage"], ["finix", "can_view_journal_entries", "/journal-entries"], ["finix", "can_post_journal_entries", "/journal-entries/post"], ["finix", "can_match_bank", "/bank-reconciliation"],
+  ["finix", "can_view_accounting_reports", "/reports/finix-dashboard"], ["finix", "can_view_accounting_reports", "/accounting-reports"], ["finix", "can_view_zero_touch_entries", "/zero-touch-entry"], ["finix", "can_view_gst_portal_sync", "/gst-portal-sync"], ["finix", "can_view_accounting_integrity", "/accounting-integrity"], ["finix", "can_view_extended_accounts_reports", "/day-book"], ["finix", "can_view_extended_accounts_reports", "/cash-bank-book"], ["finix", "can_view_extended_accounts_reports", "/cash-flow"], ["finix", "can_view_extended_accounts_reports", "/outstanding-report"],  ["finix", "can_view_depreciation", "/depreciation"], ["finix", "can_view_tds_tcs", "/tds-tcs"], ["finix", "can_view_financial_ratios", "/financial-ratios"], ["finix", "can_view_comparative_report", "/comparative-report"], ["finix", "can_view_yearly_report", "/yearly-report"], ["finix", "can_view_opening_balances", "/opening-balances"], ["finix", "can_view_accounting_audit_trail", "/accounting-audit-trail"], ["finix", "can_view_bulk_import", "/bulk-import"], ["finix", "can_view_due_dates", "/due-dates"], ["finix", "can_view_import_invoices", "/import-invoices"], ["finix", "can_view_sale", "/invoicing"], ["finix", "can_view_purchase", "/purchase"], ["finix", "can_view_bank", "/bank-accounts"], ["finix", "can_view_chart_of_accounts", "/chart-of-accounts"], ["finix", "can_manage_chart_of_accounts", "/chart-of-accounts/manage"], ["finix", "can_view_journal_entries", "/journal-entries"], ["finix", "can_post_journal_entries", "/journal-entries/post"], ["finix", "can_match_bank", "/bank-reconciliation"],
   ["compliance", "can_view_compliance", "/compliance-dashboard"], ["compliance", "can_view_compliance", "/compliance"], ["compliance", "can_manage_compliance", "/compliance/manage"], ["compliance", "can_view_gst_reconciliation", "/gst-reconciliation"], ["compliance", "can_view_gst_reconciliation", "/gst-sphere"], ["compliance", "can_view_trademark_sphere", "/trademark-sphere"], ["compliance", "can_view_mis_report", "/mis-report"], ["compliance", "can_manage_mis_report", "/mis-report/manage"], ["compliance", "can_view_salary_slips", "/salary-slips"], ["compliance", "can_manage_salary_slips", "/salary-slips/manage"], ["compliance", "can_view_roc_sphere", "/roc-sphere"], ["compliance", "can_manage_roc_sphere", "/roc-sphere/manage"],
-  ["records", "can_view_documents", "/records-dashboard"], ["records", "can_view_all_dsc", "/dsc"], ["records", "can_view_documents", "/documents"], ["records", "can_view_passwords", "/passwords"], ["records", "can_edit_passwords", "/passwords/manage"], ["records", "can_view_all_clients", "/clients"], ["records", "can_view_clients", "/client-approvals"], ["records", "can_edit_clients", "/clients/manage"], ["records", "can_approve_clients", "/clients/approve"], ["records", "can_approve_whatsapp_wishes", "/automation/whatsapp"], ["records", "can_approve_email_wishes", "/automation/email"], ["records", "can_approve_whatsapp_wishes", "/whatsapp-hub"], ["records", "can_approve_whatsapp_wishes", "/automation/approvals"],
+  ["records", "can_view_documents", "/records-dashboard"], ["records", "can_view_all_dsc", "/dsc"], ["records", "can_view_documents", "/documents"], ["records", "can_view_passwords", "/passwords"], ["records", "can_edit_passwords", "/passwords/manage"], ["records", "can_view_all_clients", "/clients"], ["records", "can_view_clients", "/client-approvals"], ["records", "can_edit_clients", "/clients/manage"], ["records", "can_approve_clients", "/clients/approve"], ["records", "can_approve_whatsapp_wishes", "/automation/whatsapp"], ["records", "can_approve_email_wishes", "/automation/email"], ["records", "can_access_whatsapp_hub", "/whatsapp-hub"], ["records", "can_view_automation_approvals", "/automation/approvals"],
   ["proposals", "can_view_all_leads", "/client-proposals-dashboard"], ["proposals", "can_view_all_leads", "/leads"], ["proposals", "can_create_quotations", "/quotations"], ["proposals", "can_view_client_discussion", "/client-discussion"], ["proposals", "can_manage_client_discussion", "/client-discussion/manage"],
   ["aiweave", "can_view_aiweave", "/aiweave"],
   ["people_matrix", "can_view_user_page", "/people-matrix"], ["people_matrix", "can_view_user_page", "/users"], ["people_matrix", "can_view_leave", "/leave"], ["people_matrix", "can_manage_leave", "/leave/manage"], ["people_matrix", "can_view_payroll", "/payroll"], ["people_matrix", "can_manage_payroll", "/payroll/manage"], ["people_matrix", "can_view_hr", "/hr"], ["people_matrix", "can_manage_hr", "/hr/manage"], ["people_matrix", "can_view_recruitment", "/recruitment"], ["people_matrix", "can_manage_recruitment", "/recruitment/manage"], ["people_matrix", "can_view_performance", "/performance"], ["people_matrix", "can_manage_performance", "/performance/manage"],
@@ -88,10 +98,10 @@ export function normalizeModules(user) {
 const DASHBOARD_FLAG_BY_MODULE = Object.freeze({ core: "can_access_admin", taskosphere: "can_view_dashboard", finix: "can_view_accounting_reports", compliance: "can_view_compliance", records: "can_view_documents", proposals: "can_view_all_leads", people_matrix: "can_view_user_page" });
 const ALL_PAGE_FLAGS_BY_MODULE = Object.freeze({
   core: ["can_view_user_page", "can_manage_settings", "can_view_security_sessions"],
-  taskosphere: ["can_view_dashboard", "can_view_tasks", "can_view_todo_dashboard", "can_view_attendance", "can_view_reminders", "can_view_action_center", "can_view_client_visits", "can_view_client_portal", "can_reset_client_passwords", "can_view_staff_activity", "can_view_reports", "can_download_reports", "can_view_audit_logs"],
-  finix: ["can_view_accounting_reports", "can_view_sale", "can_view_purchase", "can_view_bank", "can_view_chart_of_accounts", "can_manage_chart_of_accounts", "can_view_journal_entries", "can_post_journal_entries", "can_match_bank"],
+  taskosphere: ["can_view_dashboard","can_view_tasks","can_view_todo_dashboard","can_view_attendance","can_view_reminders","can_view_action_center","can_view_client_visits","can_view_client_portal","can_reset_client_passwords","can_view_staff_activity","can_view_reports","can_download_reports","can_view_audit_logs"],
+  finix: ["can_view_accounting_reports","can_view_sale","can_view_purchase","can_view_bank","can_view_chart_of_accounts","can_manage_chart_of_accounts","can_view_journal_entries","can_post_journal_entries","can_match_bank","can_view_zero_touch_entries","can_view_extended_accounts_reports","can_view_gst_portal_sync","can_view_accounting_integrity","can_view_depreciation","can_view_tds_tcs","can_view_financial_ratios","can_view_comparative_report","can_view_yearly_report","can_view_opening_balances","can_view_accounting_audit_trail","can_view_bulk_import","can_view_due_dates","can_view_import_invoices"],
   compliance: ["can_view_compliance", "can_manage_compliance", "can_view_gst_reconciliation", "can_view_trademark_sphere", "can_view_mis_report", "can_manage_mis_report", "can_view_salary_slips", "can_manage_salary_slips", "can_view_roc_sphere", "can_manage_roc_sphere"],
-  records: ["can_view_documents", "can_view_all_dsc", "can_view_passwords", "can_edit_passwords", "can_view_all_clients", "can_edit_clients", "can_approve_clients", "can_approve_whatsapp_wishes", "can_approve_email_wishes"],
+  records: ["can_view_documents","can_view_all_dsc","can_view_passwords","can_edit_passwords","can_view_all_clients","can_edit_clients","can_approve_clients","can_access_whatsapp_hub","can_view_automation_approvals","can_approve_whatsapp_wishes","can_approve_email_wishes"],
   proposals: ["can_view_all_leads", "can_create_quotations", "can_view_client_discussion", "can_manage_client_discussion"],
   people_matrix: ["can_view_user_page", "can_view_leave", "can_manage_leave", "can_view_payroll", "can_manage_payroll", "can_view_hr", "can_manage_hr", "can_view_recruitment", "can_manage_recruitment", "can_view_performance", "can_manage_performance"],
   aiweave: ["can_view_aiweave"],
@@ -295,6 +305,15 @@ export function canAccessPath(user, pathname) {
     )
   ) {
     return true;
+  }
+
+  if (String(user.role || "").trim().toLowerCase() === "admin" && user.company_id) {
+    const linked = Object.entries(COMMERCIAL_ADMIN_LINKED_PAGES).find(([prefix]) =>
+      normalizedPath === prefix || normalizedPath.startsWith(prefix + "/")
+    )?.[1];
+    if (linked) {
+      return hasModuleAccess(user, linked.module) && hasEffectivePermission(user, linked.flag);
+    }
   }
 
   const moduleId = moduleForPath(normalizedPath);
