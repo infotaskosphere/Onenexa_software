@@ -36,7 +36,7 @@ export default function CompanyUserManager(){
  useEffect(()=>{setUserPage(1);setSelectedUserIds([])},[search,status,tab]);
  useEffect(()=>{const max=Math.max(1,Math.ceil(visible.length/USER_PAGE_SIZE));if(userPage>max)setUserPage(max)},[visible.length,userPage]);
  const bulkDeleteUsers=async()=>{if(tab==='deleted'||!selectedUserIds.length||userBulkBusy)return;if(!window.confirm(`Delete ${selectedUserIds.length} selected user${selectedUserIds.length===1?'':'s'}? They will be moved to Deleted Users.`))return;setUserBulkBusy(true);try{const results=await Promise.allSettled(selectedUserIds.map(id=>api.delete(`/commercial-master-data/users/${encodeURIComponent(id)}`)));const failed=results.filter(r=>r.status==='rejected').length;const deleted=results.length-failed;if(deleted)toast.success(`${deleted} user${deleted===1?'':'s'} moved to Deleted Users`);if(failed)toast.error(`${failed} user${failed===1?'':'s'} could not be deleted`);setSelectedUserIds([]);await load()}finally{setUserBulkBusy(false)}};
- const set=(k,v)=>setForm(p=>({...p,...{[k]:v}}));
+ const set=(k,v)=>setForm(p=>({...p,[k]:v}));
  const newUser=()=>{setEditing(null);setForm({...EMPTY,departments:[]});setOpen(true)};
  const edit=u=>{const f={...EMPTY};Object.keys(f).forEach(k=>f[k]=u[k]??f[k]);f.password='';f.departments=Array.isArray(u.departments)?u.departments:[];setEditing(u);setForm(f);setOpen(true)};
  const toggleDept=d=>set('departments',(form.departments||[]).includes(d)?form.departments.filter(x=>x!==d):[...(form.departments||[]),d]);
