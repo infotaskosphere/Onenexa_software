@@ -20,6 +20,7 @@ from backend.dependencies import create_access_token, db, get_current_user, requ
 from backend.models import DEFAULT_ROLE_PERMISSIONS, User
 from backend.modules.people_matrix.permissions.catalog import MODULE_HIERARCHY
 from backend.licensing_api import create_license_record, _expiry_reason, _find_license, _now, _public_license
+from backend.identity_hierarchy import ensure_licensee_uid, ensure_license_uid, ensure_user_uid
 
 # ---------------------------------------------------------------------------
 # Core primitives.
@@ -132,6 +133,8 @@ async def _ensure_company_master(customer: Dict[str, Any], license_doc: Dict[str
             "email": customer.get("email") or existing.get("email"),
             "phone": customer.get("phone") or existing.get("phone"),
             "commercial_customer_id": customer_id,
+            "licensee_uid": customer.get("licensee_uid") or license_doc.get("licensee_uid"),
+            "identity_type": "licensee_company",
             "licensed_modules": list(license_doc.get("modules") or license_doc.get("licensed_modules") or []),
             "selected_features": license_doc.get("selected_features") or {},
             "license_id": license_doc.get("id"),
@@ -156,6 +159,8 @@ async def _ensure_company_master(customer: Dict[str, Any], license_doc: Dict[str
         "email": customer.get("email"),
         "phone": customer.get("phone"),
         "commercial_customer_id": customer_id,
+        "licensee_uid": customer.get("licensee_uid") or license_doc.get("licensee_uid"),
+        "identity_type": "licensee_company",
         "licensed_modules": list(license_doc.get("modules") or []),
         "selected_features": license_doc.get("selected_features") or {},
         "license_id": license_doc.get("id"),
@@ -583,6 +588,10 @@ async def create_custom_admin(payload: Dict[str, Any]):
         if email != existing_admin_email:
             conflicting_email = await db.users.find_one(
                 {
+                    "identity_org_uid": (
+                        str(existing_admin.get("licensee_uid") or "")
+                        or str(customer.get("licensee_uid") or "")
+                    ),
                     "email": email,
                     "id": {"$ne": existing_admin_id},
                     "status": {"$ne": "deleted"},
@@ -608,6 +617,11 @@ async def create_custom_admin(payload: Dict[str, Any]):
             "approved_at": now,
             "license_id": license_doc.get("id"),
             "license_key": license_doc.get("license_key"),
+            "licensee_uid": customer.get("licensee_uid") or license_doc.get("licensee_uid"),
+            "identity_org_uid": customer.get("licensee_uid") or license_doc.get("licensee_uid"),
+            "identity_type": "licensee_admin",
+            "email_normalized": email,
+            "license_uid": license_doc.get("license_uid"),
             "licensed_modules": list(license_doc.get("modules") or []),
             "selected_features": license_doc.get("selected_features") or {},
         }
@@ -623,8 +637,23 @@ async def create_custom_admin(payload: Dict[str, Any]):
         user_id = str(user_doc.get("id") or "")
         return {"access_token": create_access_token({"sub": user_id}), "token_type": "bearer", "user": user_doc, "company": company, "license": _public_license(license_doc)}
 
-    if await db.users.find_one({"email": email, "status": {"$ne": "deleted"}}):
-        raise HTTPException(status_code=409, detail="An account already exists for this email address.")
+    licensee_uid = str(getattr(current_user, "licensee_uid", "") or license_doc.get("licensee_uid") or "").strip()
+    if not licensee_uid:
+        licensee_uid = await ensure_licensee_uid(db, str(customer.get("id") or license_doc.get("customer_id") or ""), customer)
+    existing_staff = await db.users.find_one(
+        {
+            "$or": [
+                {"identity_org_uid": licensee_uid, "email_normalized": email},
+                {"identity_org_uid": licensee_uid, "email": email},
+                {"licensee_uid": licensee_uid, "email_normalized": email},
+                {"licensee_uid": licensee_uid, "email": email},
+                {"commercial_customer_id": str(customer.get("id") or ""), "email": email},
+            ],
+            "status": {"$ne": "deleted"},
+        }
+    )
+    if existing_staff:
+        raise HTTPException(status_code=409, detail="An account already exists for this email address in this licensee workspace.")
 
     now = _now().isoformat()
     user_id = str(uuid.uuid4())
@@ -674,13 +703,23 @@ async def create_custom_staff(payload: Dict[str, Any], current_user: User = Depe
         role = "staff"
     now = _now().isoformat()
     permissions = _apply_feature_entitlements(role, list(license_doc.get("modules") or []), license_doc.get("selected_features"))
+    user_id = str(uuid.uuid4())
+    user_uid = await ensure_user_uid(
+        db,
+        {"id": user_id, "email": email},
+        organization_uid=licensee_uid,
+        identity_type="licensee_user",
+    )
     user_doc = {
-        "id": str(uuid.uuid4()), "email": email, "full_name": full_name, "role": role,
+        "id": user_id, "user_uid": user_uid, "email": email, "full_name": full_name, "role": role,
         "password": pwd_context.hash(password), "permissions": permissions,
         "departments": list(payload.get("departments") or []), "phone": str(payload.get("phone") or "").strip() or None,
         "is_active": True, "status": "active", "approved_by": current_user.id, "approved_at": now, "created_at": now,
         "company_id": customer.get("id"), "company_name": customer.get("company_name"),
         "license_id": license_doc.get("id"), "license_key": license_doc.get("license_key"),
+        "licensee_uid": licensee_uid, "identity_org_uid": licensee_uid,
+        "identity_type": "licensee_user", "email_normalized": email,
+        "license_uid": license_doc.get("license_uid"),
         "licensed_modules": list(license_doc.get("modules") or []), "selected_features": license_doc.get("selected_features") or {},
     }
     await db.users.insert_one(user_doc)
