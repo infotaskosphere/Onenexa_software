@@ -33,6 +33,19 @@ async def run_startup_orchestration(*, server_module, db, configure_holiday_even
         logger.warning(f"Index creation warning (non-fatal): {e}")
 
     try:
+        from backend.identity_hierarchy import migrate_hierarchical_identities
+        identity_result = await migrate_hierarchical_identities(db)
+        logger.info(
+            "Hierarchical identity bootstrap: %s",
+            identity_result.get("status") if isinstance(identity_result, dict) else identity_result,
+        )
+    except Exception as identity_err:
+        # Identity migration is additive and must never stop unrelated startup
+        # services. Authentication will still fail safely for unresolved legacy
+        # identities until the migration can complete.
+        logger.exception("Hierarchical identity bootstrap warning: %s", identity_err)
+
+    try:
         register_scheduler_jobs(
             scheduler,
             **startup_dependencies["scheduler_jobs"],
