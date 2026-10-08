@@ -122,18 +122,28 @@ async def _ensure_company_master(customer: Dict[str, Any], license_doc: Dict[str
     customer_id = str(customer.get("id") or "")
     existing = await db.companies.find_one({"commercial_customer_id": customer_id, "source": "commercial-license"}, {"_id": 0})
     if existing:
-        # Defensive self-heal: some historical company records (created before
-        # "id" was always stamped on write, or left partially written by a
-        # prior failed request) can be missing the "id" field even though
-        # they were matched by commercial_customer_id above. Every caller of
-        # this function relies on company["id"] being present, so backfill it
-        # here rather than letting every call site crash with a KeyError.
-        if not existing.get("id"):
-            existing["id"] = customer_id
-            await db.companies.update_one(
-                {"commercial_customer_id": customer_id, "source": "commercial-license"},
-                {"$set": {"id": customer_id}},
-            )
+        patch = {
+            "id": existing.get("id") or customer_id,
+            "name": customer.get("company_name") or existing.get("name"),
+            "gstin": customer.get("gstin") if customer.get("gstin") is not None else existing.get("gstin"),
+            "address": customer.get("address") or customer.get("gst_address") or existing.get("address"),
+            "state": customer.get("state") or existing.get("state"),
+            "pincode": customer.get("pincode") or existing.get("pincode"),
+            "email": customer.get("email") or existing.get("email"),
+            "phone": customer.get("phone") or existing.get("phone"),
+            "commercial_customer_id": customer_id,
+            "licensed_modules": list(license_doc.get("modules") or license_doc.get("licensed_modules") or []),
+            "selected_features": license_doc.get("selected_features") or {},
+            "license_id": license_doc.get("id"),
+            "license_key": license_doc.get("license_key"),
+            "source": "commercial-license",
+            "status": "active",
+        }
+        await db.companies.update_one(
+            {"commercial_customer_id": customer_id, "source": "commercial-license"},
+            {"$set": patch},
+        )
+        existing.update(patch)
         return existing
     now = _now().isoformat()
     company_doc = {
@@ -178,24 +188,20 @@ def _apply_license_entitlements(role: str, modules: List[str], selected_features
 
     for module_id, module_flag in MODULE_FLAG_BY_ID.items():
         allowed = module_id in selected_modules
-        permissions[module_flag] = bool(allowed and selected_flags)
         module_def = MODULE_HIERARCHY.get(module_id, {})
 
         if not allowed:
             selected_flags = set()
-        elif feature_map is None:
-            # Compatibility for callers that predate page-selective licensing.
-            selected_flags = {
-                str(page.get("flag")).strip()
-                for page in module_def.get("pages", [])
-                if page.get("flag")
-            }
-        else:
+        elif isinstance(feature_map, dict):
             selected_flags = {
                 str(flag).strip()
                 for flag in (feature_map.get(module_id) or [])
                 if str(flag).strip()
             }
+        else:
+            selected_flags = set()
+
+        permissions[module_flag] = bool(allowed and selected_flags)
 
         for page in module_def.get("pages", []):
             flag = page.get("flag")
