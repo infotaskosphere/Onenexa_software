@@ -689,6 +689,14 @@ class User(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str
     email: str
+    # Stable hierarchical identity fields. Existing id/_id references remain unchanged.
+    user_uid: Optional[str] = None
+    identity_type: Optional[str] = None
+    identity_org_uid: Optional[str] = None
+    platform_owner_uid: Optional[str] = None
+    licensee_uid: Optional[str] = None
+    email_normalized: Optional[str] = None
+    is_platform_owner: Optional[bool] = None
     full_name: Optional[str] = None
     role: UserRole = UserRole.staff
     # Optional custom-role key (see backend/roles_admin.py). `role` always
@@ -841,6 +849,9 @@ class UserUpdate(BaseModel):
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
+    # Required only when the same email is used in more than one workspace.
+    # Accepts PO-###### or L-######.
+    organization_id: Optional[str] = None
 
 
 class Token(BaseModel):
