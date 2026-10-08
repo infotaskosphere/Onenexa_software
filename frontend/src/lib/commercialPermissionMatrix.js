@@ -95,6 +95,10 @@ export function isPlatformOwner(user) {
   const userUid = String(user.user_uid || "").trim().toUpperCase();
   if (platformOwnerUid.startsWith("PO-") || userUid.startsWith("PO-")) return true;
 
+  const email = String(user.email || "").trim().toLowerCase();
+  const ownerEmails = getPlatformOwnerEmails();
+  if (email && ownerEmails.has(email)) return true;
+
   if (
     identityType.startsWith("licensee") ||
     identityType === "commercial" ||
@@ -103,7 +107,6 @@ export function isPlatformOwner(user) {
     user.license_id
   ) return false;
 
-  const email = String(user.email || "").trim().toLowerCase();
   const id = String(user.id || "").trim();
   const companyId = String(user.company_id || user.company?.id || "").trim().toLowerCase();
   const ownerEmails = getPlatformOwnerEmails();
