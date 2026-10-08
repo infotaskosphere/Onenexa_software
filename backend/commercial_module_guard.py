@@ -756,14 +756,13 @@ def _selected_license_features(
                 values = candidate
                 break
 
-    # A module added to an existing license may not yet have a
-    # selected_features entry. In that legacy/module-only case, the licensed
-    # module remains available while explicit feature selections stay restrictive.
+    # Fail closed when the Platform Owner did not explicitly select pages for
+    # this module. A purchased module alone is never a page grant.
     if values is None or (
         isinstance(values, (list, tuple, set))
         and len(values) == 0
     ):
-        return all_module_flags
+        return set()
 
     if not isinstance(values, (list, tuple, set)):
         return set()
@@ -771,24 +770,11 @@ def _selected_license_features(
     selected = {
         str(flag).strip()
         for flag in values
+        if str(flag).strip() in all_module_flags
     }
 
-    # Dashboard/report entry points are derived from an active module's
-    # selected pages. Older licenses may not have persisted the derived flag.
-    dashboard_flags = {
-        "taskosphere": "can_view_dashboard",
-        "finix": "can_view_accounting_reports",
-        "compliance": "can_view_compliance",
-        "records": "can_view_documents",
-        "proposals": "can_view_all_leads",
-        "people_matrix": "can_view_user_page",
-    }
-
-    dashboard_flag = dashboard_flags.get(module)
-
-    if selected and dashboard_flag:
-        selected.add(dashboard_flag)
-
+    # Do not derive dashboard/report access from another selected page.
+    # Each catalog page must be explicitly selected by the Platform Owner.
     return selected
 
 
