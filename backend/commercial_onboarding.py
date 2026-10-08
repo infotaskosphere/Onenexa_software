@@ -249,9 +249,10 @@ def _normalize_feature_selection(payload: Dict[str, Any], selected_modules: List
         allowed = set(_all_feature_flags(module_id))
         value = raw.get(module_id) if isinstance(raw, dict) else None
         if value is None:
-            # Backward compatibility: module-only licenses mean all pages in
-            # that module are licensed.
-            result[module_id] = sorted(allowed)
+            # Commercial licensing is explicitly page-selective. A selected
+            # module with no page list grants no pages until the Platform Owner
+            # explicitly selects them.
+            result[module_id] = []
             continue
         if not isinstance(value, list):
             raise HTTPException(status_code=400, detail=f"Features for {module_id} must be a list.")
