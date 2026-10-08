@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from backend.dependencies import db, get_current_user, require_admin
 from backend.identity_hierarchy import ensure_identity_email_link, ensure_licensee_uid, ensure_license_uid
+from backend.platform_owner import platform_owner_emails
 
 
 logger = logging.getLogger(__name__)
@@ -240,12 +241,7 @@ async def create_license_record(input_data: Dict[str, Any], created_by: str) -> 
                         "One email cannot be linked to two unique IDs."
                     ),
                 )
-            if email.lower() in {
-                value.lower() for value in os.getenv(
-                    "PLATFORM_OWNER_EMAILS",
-                    "info.taskosphere@gmail.com,infotaskosphere@gmail.com,admin@taskosphere.com,csmanthandesai@gmail.com",
-                ).split(",") if value.strip()
-            }:
+            if email.lower() in platform_owner_emails():
                 raise HTTPException(
                     status_code=409,
                     detail="This email is reserved for the Platform Owner and cannot be linked to a licensee.",
