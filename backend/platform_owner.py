@@ -74,12 +74,24 @@ def is_platform_owner(user) -> bool:
     if is_owner_flag or role in {"platform_owner", "superadmin", "saas_admin"}:
         return True
 
-    owner_emails = platform_owner_emails()
     company_id = str(
         user.get("company_id") or user.get("company", {}).get("id") or ""
         if isinstance(user, dict)
         else getattr(user, "company_id", None) or ""
     ).strip().lower()
+
+    # Commercial identities are always customer tenants. This prevents an
+    # environment-configured owner email from accidentally bypassing the
+    # commercial license ceiling for a real licensee account.
+    commercial_identity = bool(
+        (user.get("license_id") if isinstance(user, dict) else getattr(user, "license_id", None))
+        or (user.get("commercial_customer_id") if isinstance(user, dict) else getattr(user, "commercial_customer_id", None))
+        or (user.get("company", {}).get("commercial_customer_id") if isinstance(user, dict) else False)
+    )
+    if commercial_identity:
+        return False
+
+    owner_emails = platform_owner_emails()
     return bool(
         (email and email in owner_emails)
         or (user_id and user_id in {"saas-bootstrap-admin", "usr-admin-01"})
