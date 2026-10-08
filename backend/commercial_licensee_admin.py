@@ -167,15 +167,12 @@ def normalize_license_selected_features(
 
 
 def get_all_admin_permissions(license_doc: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """Return admin rights capped by the commercial license's MODULE list only.
+    """Return tenant-admin permissions capped by the active license's module/page selections.
 
-    The email on the license is the tenant's administrator, so once a module
-    is on the license the admin gets every page belonging to that module —
-    the same behaviour as an internal admin account. Unlicensed modules stay
-    fully closed. (`selected_features` — the granular per-page selection made
-    when the license was issued — is still enforced for any additional,
-    non-admin users the licensee admin invites into the tenant; see
-    `_permission_flag` in `commercial_module_guard.py`.)
+    Both module and page access come from the Platform Owner's explicit
+    `modules` and `selected_features` selections. A purchased module alone
+    never grants every page in that module. The same ceiling is applied to
+    Manager/Staff accounts.
 
     The reset of legacy aliases below is intentional. Several existing UI/API
     paths predate MODULE_HIERARCHY and still inspect flags such as
@@ -220,14 +217,8 @@ def get_all_admin_permissions(license_doc: Optional[Dict[str, Any]] = None) -> D
             # page through Permission Matrix / Access Governance.
             permissions[module_flag] = False if module_id == "aiweave" else module_allowed
 
-        # The licensee admin is the identity the license was actually issued
-        # to. Once a module is on the license, the admin gets every page of
-        # that module — the same way an internal admin account works — rather
-        # than being capped to whichever individual pages happened to be
-        # ticked when the license was created. The narrower selected_features
-        # list still applies to any additional (non-admin) users the admin
-        # invites under this tenant; see _permission_flag in
-        # commercial_module_guard.py for that enforcement point.
+        # The licensee admin is also capped by the Platform Owner page
+        # selections. Manager/Staff permissions can only further reduce access.
         if module_allowed:
             # A purchased module is only the ceiling. The Platform Owner's
             # selected_features is the source of truth for which pages the
@@ -280,10 +271,8 @@ def get_tenant_user_permissions(
         raw = getattr(admin_user, "permissions", {}) or {}
         admin_perms = raw.model_dump() if hasattr(raw, "model_dump") else dict(raw)
     else:
-        # When repairing a legacy user during authentication, the canonical
-        # tenant-admin entitlement is the license itself: the licensee admin
-        # receives every page in each purchased module (AIWeave remains its
-        # separately governed exception).
+        # During authentication, derive the tenant-admin ceiling from the
+        # active license's explicit module/page selections.
         admin_perms = get_all_admin_permissions(license_doc)
 
     licensed = resolve_license_modules(license_doc)
