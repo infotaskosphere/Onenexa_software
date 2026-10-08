@@ -18,7 +18,7 @@ from fastapi import HTTPException
 
 from backend import dependencies as _dependencies
 from backend.platform_owner import is_platform_owner
-from backend.identity_hierarchy import ensure_licensee_uid, ensure_license_uid, ensure_user_uid
+from backend.identity_hierarchy import ensure_licensee_uid, ensure_license_uid, ensure_user_uid, ensure_identity_email_link
 from backend.models import DEFAULT_ROLE_PERMISSIONS, User
 from backend.modules.people_matrix.permissions.catalog import MODULE_HIERARCHY
 
@@ -422,6 +422,12 @@ async def ensure_licensee_admin(
     licensee_uid = str(customer.get("licensee_uid") or license_doc.get("licensee_uid") or company.get("licensee_uid") or "").strip()
     if not licensee_uid:
         licensee_uid = await ensure_licensee_uid(raw_db, customer_id, customer)
+    await ensure_identity_email_link(
+        raw_db,
+        email,
+        licensee_uid,
+        identity_type="licensee",
+    )
     await raw_db.commercial_license_customers.update_one(
         {"id": customer_id},
         {"$set": {"licensee_uid": licensee_uid, "identity_type": "licensee"}},
