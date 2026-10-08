@@ -119,52 +119,105 @@ async def _create_saas_session(user: dict) -> tuple[str, str, User]:
             )
 
         company_query_id = _saas_object_id(company_id)
+        # Commercial license companies are keyed by the application-level
+        # company/customer id; MongoDB _id is a separate implementation id.
         company = await db.companies.find_one(
-            {"_id": company_query_id, "status": "active"}
+            {"id": company_id, "status": "active"}
         )
+        if not company:
+            company = await db.companies.find_one(
+                {"_id": company_query_id, "status": "active"}
+            )
         if not company and company_query_id != company_id:
             company = await db.companies.find_one(
                 {"_id": company_id, "status": "active"}
             )
+        if not company:
+            user_license_id = str(user.get("license_id") or "").strip()
+            user_customer_id = str(user.get("commercial_customer_id") or "").strip()
+            refs = []
+            if user_license_id:
+                refs.append({"license_id": user_license_id})
+            if user_customer_id:
+                refs.append({"commercial_customer_id": user_customer_id})
+            if refs:
+                company = await db.companies.find_one(
+                    {"$or": refs, "status": "active"}
+                )
+                if company:
+                    company_id = str(company.get("id") or company_id)
         if not company:
             raise HTTPException(
                 status_code=403,
                 detail="Commercial company is inactive or unavailable",
             )
 
-        subscription = await db.subscriptions.find_one({"company_id": company_id})
-        if not subscription:
-            subscription = await db.subscriptions.find_one(
-                {"company_id": company_query_id}
-            )
-        if not subscription:
-            raise HTTPException(
-                status_code=403,
-                detail="Commercial subscription is unavailable",
-            )
+        # The commercial license itself is authoritative for a commercial
+        # tenant. A separate legacy subscriptions row is not required.
+        commercial_license = None
+        license_id = str(user.get("license_id") or company.get("license_id") or "").strip()
+        customer_id = str(
+            user.get("commercial_customer_id")
+            or company.get("commercial_customer_id")
+            or ""
+        ).strip()
+        commercial_refs = []
+        if license_id:
+            commercial_refs.append({"id": license_id})
+        if customer_id:
+            commercial_refs.append({"customer_id": customer_id})
+        commercial_refs.append({"company_id": str(company.get("id") or company_id)})
 
-        subscription_status = subscription.get("status")
-        if subscription_status not in ("trial", "active"):
-            raise HTTPException(
-                status_code=403,
-                detail="Commercial subscription is not active",
-            )
-
-        expires_at = subscription.get("expires_at")
-        if expires_at:
-            if isinstance(expires_at, str):
-                try:
-                    expires_at = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
-                except Exception:
-                    expires_at = None
+        commercial_license = await db.commercial_licenses.find_one(
+            {"$or": commercial_refs, "status": {"$in": ["active", "trial"]}},
+            {"_id": 0},
+            sort=[("issued_at", -1)],
+        )
+        if commercial_license:
+            expires_at = commercial_license.get("expires_at")
             if expires_at:
-                if expires_at.tzinfo is None:
-                    expires_at = expires_at.replace(tzinfo=timezone.utc)
-                if expires_at <= datetime.now(timezone.utc):
-                    raise HTTPException(
-                        status_code=403,
-                        detail="Commercial subscription has expired",
-                    )
+                if isinstance(expires_at, str):
+                    try:
+                        expires_at = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+                    except Exception:
+                        expires_at = None
+                if expires_at:
+                    if expires_at.tzinfo is None:
+                        expires_at = expires_at.replace(tzinfo=timezone.utc)
+                    if expires_at <= datetime.now(timezone.utc):
+                        raise HTTPException(status_code=403, detail="Commercial license has expired")
+        else:
+            subscription = await db.subscriptions.find_one({"company_id": company_id})
+            if not subscription:
+                subscription = await db.subscriptions.find_one(
+                    {"company_id": company_query_id}
+                )
+            if not subscription:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Commercial subscription is unavailable",
+                )
+            subscription_status = subscription.get("status")
+            if subscription_status not in ("trial", "active"):
+                raise HTTPException(
+                    status_code=403,
+                    detail="Commercial subscription is not active",
+                )
+            expires_at = subscription.get("expires_at")
+            if expires_at:
+                if isinstance(expires_at, str):
+                    try:
+                        expires_at = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+                    except Exception:
+                        expires_at = None
+                if expires_at:
+                    if expires_at.tzinfo is None:
+                        expires_at = expires_at.replace(tzinfo=timezone.utc)
+                    if expires_at <= datetime.now(timezone.utc):
+                        raise HTTPException(
+                            status_code=403,
+                            detail="Commercial subscription has expired",
+                        )
 
     session_token = secrets.token_urlsafe(32)
     token_hash = hashlib.sha256(session_token.encode("utf-8")).hexdigest()
