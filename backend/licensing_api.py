@@ -71,6 +71,10 @@ def _random_part(length: int = 4) -> str:
 
 async def create_licensing_indexes() -> None:
     """Create indexes and seed the three commercial packages."""
+    try:
+        await ensure_identity_indexes(db)
+    except Exception as identity_idx_err:
+        logger.warning("Hierarchical identity index creation warning: %s", identity_idx_err)
     await db.commercial_license_packages.create_index("id", unique=True, background=True)
     await db.commercial_license_customers.create_index("id", unique=True, background=True)
     await db.commercial_licenses.create_index("id", unique=True, background=True)
@@ -222,6 +226,13 @@ async def create_license_record(input_data: Dict[str, Any], created_by: str) -> 
         }
         await db.commercial_license_customers.insert_one(dict(customer))
 
+    licensee_uid = await ensure_licensee_uid(db, customer["id"], customer)
+    customer["licensee_uid"] = licensee_uid
+    await db.commercial_license_customers.update_one(
+        {"id": customer["id"]},
+        {"$set": {"licensee_uid": licensee_uid, "identity_type": "licensee"}},
+    )
+
     issued_at = _now()
     validity_days = int(input_data.get("validity_days") if input_data.get("validity_days") is not None else package.get("validity_days", 365))
     max_users = max(1, int(input_data.get("max_users") or package.get("max_users", 1)))
@@ -260,8 +271,11 @@ async def create_license_record(input_data: Dict[str, Any], created_by: str) -> 
                 "is_internal_commercial_admin": True,
             })
 
+    license_uid = await ensure_license_uid(db, licensee_uid)
     license_doc = {
         "id": f"lic-{uuid.uuid4().hex}",
+        "license_uid": license_uid,
+        "licensee_uid": licensee_uid,
         "license_key": await _generate_unique_key(),
         "customer_id": customer["id"],
         "customer_name": customer.get("admin_name") or customer["company_name"],
