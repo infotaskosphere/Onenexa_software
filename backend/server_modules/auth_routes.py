@@ -87,7 +87,6 @@ async def _sync_saas_bootstrap_password() -> None:
             existing = await resolve_user_for_login(
                 db,
                 bootstrap_email,
-                os.getenv("PLATFORM_OWNER_UID") or "PO-000001",
             )
         except Exception:
             existing = await db.users.find_one({"email": bootstrap_email})
@@ -721,15 +720,9 @@ async def self_register(user_data: UserCreate, request: Request):
 
 @api_router.post("/auth/login", response_model=Token)
 async def login(credentials: UserLogin, request: Request):
-    organization_id = str(getattr(credentials, "organization_id", "") or "").strip().upper()
-    login_identifier = (
-        f"{organization_id}:{str(credentials.email or '').strip().lower()}"
-        if organization_id
-        else str(credentials.email or "").strip().lower()
-    )
-    await _enforce_auth_rate_limit(request, login_identifier, limit_per_minute=10)
-    client_ip = request.client.host if request and request.client else "unknown"
     normalized_email = str(credentials.email or "").strip().lower()
+    await _enforce_auth_rate_limit(request, normalized_email, limit_per_minute=10)
+    client_ip = request.client.host if request and request.client else "unknown"
 
     # Commercial SaaS bootstrap credentials are stored as scrypt
     # password_hash/password_salt records, not as the legacy bcrypt
@@ -741,11 +734,7 @@ async def login(credentials: UserLogin, request: Request):
         logger.exception("SaaS bootstrap password synchronization failed.")
 
     from backend.identity_hierarchy import resolve_user_for_login, enrich_user_identity
-    user = await resolve_user_for_login(
-        db,
-        normalized_email,
-        organization_id or None,
-    )
+    user = await resolve_user_for_login(db, normalized_email)
 
     # ── Commercial SaaS account path ────────────────────────────────────────
     if user and user.get("password_hash") and user.get("password_salt"):
@@ -815,7 +804,8 @@ async def login(credentials: UserLogin, request: Request):
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     user_status = user.get("status")
-    if user_status is not None and user_status != "active":
+    from backend.platform_owner import is_platform_owner
+    if not is_platform_owner(user) and user_status is not None and user_status != "active":
         raise HTTPException(
             status_code=403,
             detail=f"Your account is {user_status}. Awaiting admin approval.",
