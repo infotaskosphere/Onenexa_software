@@ -476,11 +476,12 @@ export default function MasterConsole() {
               {/* License / Customer Registry Table */}
               <div className="rounded-3xl border border-slate-200 bg-white overflow-hidden shadow-sm">
                 <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs min-w-[1000px]">
+                  <table className="w-full text-left text-xs min-w-[1100px]">
                     <thead className="bg-slate-50 text-[10px] uppercase font-bold text-slate-400">
                       <tr>
                         <th className="p-3.5">Admin & Primary Contact</th>
                         <th className="p-3.5">Organization / Company</th>
+                        <th className="p-3.5">Identity IDs</th>
                         <th className="p-3.5">License Key</th>
                         <th className="p-3.5">Licensed Modules</th>
                         <th className="p-3.5">Monthly</th>
@@ -524,6 +525,12 @@ export default function MasterConsole() {
                                   GST: {customer.gstin || "Not provided"}
                                 </div>
                               </button>
+                            </td>
+                            <td className="p-3.5">
+                              <div className="space-y-1 font-mono text-[10px]">
+                                <div className="font-semibold text-[#0D3B66]">{license.licensee_uid || customer.licensee_uid || "—"}</div>
+                                <div className="text-slate-400">{license.license_uid || "—"}</div>
+                              </div>
                             </td>
                             <td className="p-3.5">
                               <button
