@@ -121,7 +121,7 @@ def _resolve_jwt_secret():
     if secret and secret.strip():return secret.strip()
     if os.getenv("ENV_MODE")=="production":raise RuntimeError("JWT_SECRET environment variable is not set. Refusing to start in production without an explicit secret.")
     generated=_secrets.token_hex(32);logger.warning("JWT_SECRET is not set. Generated a development-only secret.");return generated
-JWT_SECRET=_resolve_jwt_secret();ALGORITHM="HS256";ACCESS_TOKEN_EXPIRE_MINUTES=60*24*7;security=HTTPBearer()
+JWT_SECRET=_resolve_jwt_secret();ALGORITHM="HS256";ACCESS_TOKEN_EXPIRE_MINUTES=60*24*7;security=HTTPBearer(auto_error=False)
 def create_access_token(data):
     payload=data.copy();payload["exp"]=datetime.now(timezone.utc)+timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES);return jwt.encode(payload,JWT_SECRET,algorithm=ALGORITHM)
 def safe_dt(value):
@@ -325,6 +325,8 @@ async def _resolve_licensed_company_id(user):
 
 async def get_current_user(credentials=Depends(security)):
     unauthorized=HTTPException(status_code=401,detail="Could not validate credentials",headers={"WWW-Authenticate":"Bearer"})
+    if credentials is None or not getattr(credentials, "credentials", None):
+        raise unauthorized
     token=credentials.credentials
     saas_user=await _get_saas_session_user(token)
     if saas_user is not None:
