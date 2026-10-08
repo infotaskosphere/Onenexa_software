@@ -25,6 +25,7 @@ from backend.commercial_onboarding import (
     router,
 )
 from backend.licensing_api import _expiry_reason, _now
+from backend.identity_hierarchy import ensure_licensee_uid, ensure_user_uid
 
 
 def _raw_db():
@@ -59,6 +60,9 @@ async def create_public_licensed_user_hardened(payload: Dict[str, Any]):
     company_name = str(payload.get("company_name") or "").strip()
     customer, license_doc = await _find_active_license_for_company_name(company_name)
     customer_id = str(customer.get("id") or license_doc.get("customer_id") or "").strip()
+    licensee_uid = str(customer.get("licensee_uid") or license_doc.get("licensee_uid") or "").strip()
+    if not licensee_uid:
+        licensee_uid = await ensure_licensee_uid(_raw_db(), customer_id, customer)
     if not customer_id or customer_id != str(license_doc.get("customer_id") or ""):
         raise HTTPException(status_code=403, detail="The license/customer relationship is invalid.")
 
@@ -80,14 +84,21 @@ async def create_public_licensed_user_hardened(payload: Dict[str, Any]):
 
     db = _raw_db()
     existing = await db.users.find_one(
-        {"email": email},
+        {
+            "$or": [
+                {"identity_org_uid": licensee_uid, "email_normalized": email},
+                {"identity_org_uid": licensee_uid, "email": email},
+                {"licensee_uid": licensee_uid, "email_normalized": email},
+                {"licensee_uid": licensee_uid, "email": email},
+                {"commercial_customer_id": customer_id, "email": email},
+                {"commercial_customer_id": customer_id, "email_normalized": email},
+            ],
+            "status": {"$ne": "deleted"},
+        },
         {"_id": 0, "id": 1, "company_id": 1, "commercial_customer_id": 1},
     )
     if existing:
-        existing_customer = str(existing.get("commercial_customer_id") or "")
-        if existing_customer == customer_id or str(existing.get("company_id") or "") == company_id:
-            raise HTTPException(status_code=409, detail="An account already exists for this email address in this licensed customer account.")
-        raise HTTPException(status_code=409, detail="An account already exists for this email address. Use a different email address.")
+        raise HTTPException(status_code=409, detail="An account already exists for this email address in this licensed customer account.")
 
     max_users = max(1, int(license_doc.get("max_users") or 1))
     current_users = await _customer_user_count(customer_id)
@@ -102,12 +113,23 @@ async def create_public_licensed_user_hardened(payload: Dict[str, Any]):
     role_label = {"admin": "Admin", "manager": "Manager", "staff": "Staff"}.get(role, "Staff")
     now = _now().isoformat()
     user_id = __import__("uuid").uuid4().hex
+    user_uid = await ensure_user_uid(
+        db,
+        {"id": user_id, "email": email},
+        organization_uid=licensee_uid,
+        identity_type="licensee_admin" if role == "admin" else "licensee_user",
+    )
     password_hash = pwd_context.hash(password)
     permissions = _apply_license_entitlements(role, list(license_doc.get("modules") or []), license_doc.get("selected_features") or {})
 
     user_doc = {
         "id": user_id,
+        "user_uid": user_uid,
         "email": email,
+        "email_normalized": email,
+        "identity_org_uid": licensee_uid,
+        "licensee_uid": licensee_uid,
+        "identity_type": "licensee_admin" if role == "admin" else "licensee_user",
         "full_name": full_name,
         "role": role,
         "requested_role": requested_role,
@@ -126,7 +148,9 @@ async def create_public_licensed_user_hardened(payload: Dict[str, Any]):
         "commercial_customer_id": customer_id,
         "license_id": license_doc.get("id"),
         "license_key": license_doc.get("license_key"),
+        "license_uid": license_doc.get("license_uid"),
         "licensed_modules": list(license_doc.get("modules") or []),
+        "selected_features": license_doc.get("selected_features") or {},
     }
 
     # Validate against the application model before touching Mongo. This makes
