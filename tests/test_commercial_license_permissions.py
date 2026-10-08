@@ -1,15 +1,12 @@
 """Regression tests for commercial licensee-admin permission ceilings."""
 
-def test_licensee_admin_gets_all_pages_in_purchased_finix_module():
+def test_licensee_admin_gets_only_selected_finix_pages():
     from backend.commercial_licensee_admin import get_all_admin_permissions
 
     license_doc = {
         "id": "license-finix-only",
         "customer_id": "customer-1",
         "modules": ["finix"],
-        # Deliberately incomplete granular selection. A licensee admin's access
-        # is capped by purchased modules; this list must not remove purchased
-        # Finix pages from the tenant admin.
         "selected_features": {
             "finix": ["can_view_sale"],
         },
@@ -18,21 +15,21 @@ def test_licensee_admin_gets_all_pages_in_purchased_finix_module():
     permissions = get_all_admin_permissions(license_doc)
 
     assert permissions["can_access_finix"] is True
-    assert permissions["can_view_accounting_reports"] is True
     assert permissions["can_view_sale"] is True
-    assert permissions["can_view_purchase"] is True
-    assert permissions["can_view_bank"] is True
-    assert permissions["can_view_chart_of_accounts"] is True
-    assert permissions["can_view_journal_entries"] is True
-    assert permissions["can_post_journal_entries"] is True
-    assert permissions["can_match_bank"] is True
+    assert permissions["can_view_purchase"] is False
+    assert permissions["can_view_accounting_reports"] is False
+    assert permissions["can_view_bank"] is False
+    assert permissions["can_view_chart_of_accounts"] is False
+    assert permissions["can_view_journal_entries"] is False
+    assert permissions["can_post_journal_entries"] is False
+    assert permissions["can_match_bank"] is False
 
     # Unpurchased modules remain closed.
     assert permissions["can_access_taskosphere"] is False
     assert permissions["can_access_compliance"] is False
 
 
-def test_aiweave_remains_explicitly_governed_for_licensee_admin():
+def test_aiweave_is_available_when_explicitly_selected_for_licensee_admin():
     from backend.commercial_licensee_admin import get_all_admin_permissions
 
     license_doc = {
@@ -40,7 +37,7 @@ def test_aiweave_remains_explicitly_governed_for_licensee_admin():
         "customer_id": "customer-1",
         "modules": ["finix", "aiweave"],
         "selected_features": {
-            "finix": [],
+            "finix": ["can_view_sale"],
             "aiweave": ["can_view_aiweave"],
         },
     }
@@ -48,8 +45,8 @@ def test_aiweave_remains_explicitly_governed_for_licensee_admin():
     permissions = get_all_admin_permissions(license_doc)
 
     assert permissions["can_access_finix"] is True
-    assert permissions["can_access_aiweave"] is False
-    assert permissions["can_view_aiweave"] is False
+    assert permissions["can_access_aiweave"] is True
+    assert permissions["can_view_aiweave"] is True
 
 
 def test_request_guard_allows_licensee_admin_purchased_finix_pages():
