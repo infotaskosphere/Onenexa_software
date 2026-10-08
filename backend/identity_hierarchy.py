@@ -326,6 +326,45 @@ async def ensure_platform_owner_identity(db, user: Optional[dict] = None) -> str
 
 async def enrich_user_identity(db, user: dict) -> dict:
     data = dict(user or {})
+
+    # The organization identity is authoritative for login. Once an email is
+    # linked to PO-######, stale commercial fields must not turn the owner into
+    # a commercial tenant and trigger a 403.
+    data_identity_type = _clean(data.get("identity_type")).lower()
+    data_org_uid = _clean(data.get("identity_org_uid")).upper()
+    data_owner_uid = _clean(data.get("platform_owner_uid")).upper()
+    data_user_uid = _clean(data.get("user_uid")).upper()
+    explicit_owner_identity = (
+        bool(data.get("is_platform_owner"))
+        or data_identity_type.startswith("platform_owner")
+        or data_org_uid.startswith("PO-")
+        or data_owner_uid.startswith("PO-")
+        or data_user_uid.startswith("PO-")
+    )
+
+    if explicit_owner_identity:
+        try:
+            owner_uid = await ensure_platform_owner_identity(db, data)
+            data["platform_owner_uid"] = owner_uid
+            data["identity_org_uid"] = owner_uid
+            data["identity_type"] = data.get("identity_type") or (
+                "platform_owner_admin"
+                if str(data.get("role", "")).lower() == "admin"
+                else "platform_owner_user"
+            )
+            data["email_normalized"] = _normalized_email(data.get("email"))
+            data["is_platform_owner"] = True
+            if not _USER_UID_RE.match(_clean(data.get("user_uid"))):
+                data["user_uid"] = await ensure_user_uid(
+                    db,
+                    data,
+                    organization_uid=owner_uid,
+                    identity_type=data["identity_type"],
+                )
+            return data
+        except Exception:
+            logger.exception("Platform Owner identity enrichment failed.")
+
     if is_commercial_identity_record(data):
         customer_id = _clean(data.get("commercial_customer_id"))
         licensee_uid = _clean(data.get("licensee_uid"))
@@ -389,21 +428,13 @@ async def _migrate_platform_owner_users(db, owner_uid: str) -> int:
             {"role": {"$in": ["platform_owner", "superadmin", "saas_admin"]}},
             {"id": {"$in": ["saas-bootstrap-admin", "usr-admin-01"]}},
             {"company_id": {"$regex": r"^platform-owner-", "$options": "i"}},
-            {
-                "email": {"$in": emails},
-                "commercial_customer_id": {"$in": [None, ""]},
-                "license_id": {"$in": [None, ""]},
-                "licensee_uid": {"$in": [None, ""]},
-            },
+            {"email": {"$in": emails}},
         ]
     }
     users = await db.users.find(query, {"_id": 0}).to_list(5000)
     migrated = 0
 
     for user in users:
-        if is_commercial_identity_record(user):
-            continue
-
         user["platform_owner_uid"] = _clean(user.get("platform_owner_uid")) or owner_uid
         user["identity_org_uid"] = user["platform_owner_uid"]
         user["identity_type"] = (
@@ -429,7 +460,15 @@ async def _migrate_platform_owner_users(db, owner_uid: str) -> int:
                     "user_uid": uid,
                     "email_normalized": user["email_normalized"],
                     "is_platform_owner": True,
-                }
+                },
+                "$unset": {
+                    "licensee_uid": "",
+                    "commercial_customer_id": "",
+                    "license_id": "",
+                    "license_key": "",
+                    "licensed_modules": "",
+                    "selected_features": "",
+                },
             },
         )
         migrated += 1
@@ -664,13 +703,6 @@ async def migrate_identity_email_links(db) -> dict:
 
 
 async def migrate_hierarchical_identities(db) -> dict:
-    # The email -> organization UID map is a separate compatibility layer and
-    # must be available even when the original hierarchy migration already ran.
-    try:
-        await migrate_identity_email_links(db)
-    except Exception:
-        logger.exception("Email identity link bootstrap warning.")
-
     marker = await db.identity_migrations.find_one({"_id": IDENTITY_MIGRATION_KEY})
     if marker and marker.get("completed") is True:
         return {
@@ -685,6 +717,13 @@ async def migrate_hierarchical_identities(db) -> dict:
     owner_uid = await ensure_platform_owner_identity(db)
     owner_users = await _migrate_platform_owner_users(db, owner_uid)
     licensees, commercial_users = await _migrate_licensees(db)
+
+    # Link the already-assigned organization UIDs to their emails only after
+    # the hierarchy migration has established the L-* and PO-* identities.
+    try:
+        await migrate_identity_email_links(db)
+    except Exception:
+        logger.exception("Email identity link bootstrap warning.")
 
     await db.identity_migrations.update_one(
         {"_id": IDENTITY_MIGRATION_KEY},
