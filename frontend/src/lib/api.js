@@ -309,7 +309,7 @@ const api = axios.create({
 try {
   const initialToken = getToken();
   if (initialToken) {
-    api.defaults.headers.common.Authorization = \`Bearer \${initialToken}\`;
+    api.defaults.headers.common.Authorization = `Bearer ${initialToken}`;
   }
 } catch {}
 
