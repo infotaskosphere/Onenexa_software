@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from datetime import datetime, date
 from typing import Optional
 from bson import ObjectId
-from backend.dependencies import get_current_user, get_db, admin_required
+from backend.dependencies import require_commercial_admin_module, get_current_user, get_db, admin_required
 
 router = APIRouter(prefix="/activity", tags=["activity"])
 
@@ -102,7 +102,7 @@ async def get_activity_report(
 @router.get("/reports/daily")
 async def get_all_daily_reports(
     date: Optional[str] = Query(default=None),
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_commercial_admin_module("taskosphere")),
     db=Depends(get_db),
 ):
     """Returns all staff activity reports for a given date. Admin only."""
