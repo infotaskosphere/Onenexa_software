@@ -170,18 +170,38 @@ async def _active_company_license(current_user: User) -> Dict[str, Any]:
     return license_doc
 
 
-def _apply_license_entitlements(role: str, modules: List[str]) -> Dict[str, Any]:
-    """Legacy, module-only entitlement application: a legacy license with only
-    ``modules`` (no per-page ``selected_features``) grants every page inside
-    each licensed module."""
+def _apply_license_entitlements(role: str, modules: List[str], selected_features: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Apply commercial page entitlements from the Platform Owner selection."""
     permissions = copy.deepcopy(DEFAULT_ROLE_PERMISSIONS.get(role, DEFAULT_ROLE_PERMISSIONS["staff"]))
-    selected = set(modules or [])
+    selected_modules = set(modules or [])
+    feature_map = selected_features if isinstance(selected_features, dict) else None
+
     for module_id, module_flag in MODULE_FLAG_BY_ID.items():
-        allowed = module_id in selected
+        allowed = module_id in selected_modules
         permissions[module_flag] = False if module_id == "aiweave" else allowed
         module_def = MODULE_HIERARCHY.get(module_id, {})
+
+        if not allowed:
+            selected_flags = set()
+        elif feature_map is None:
+            # Compatibility for callers that predate page-selective licensing.
+            selected_flags = {
+                str(page.get("flag")).strip()
+                for page in module_def.get("pages", [])
+                if page.get("flag")
+            }
+        else:
+            selected_flags = {
+                str(flag).strip()
+                for flag in (feature_map.get(module_id) or [])
+                if str(flag).strip()
+            }
+
         for page in module_def.get("pages", []):
-            permissions[page["flag"]] = bool(allowed and permissions.get(page["flag"], False))
+            flag = page.get("flag")
+            if flag:
+                permissions[flag] = bool(allowed and flag in selected_flags)
+
     return permissions
 
 
