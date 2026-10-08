@@ -495,6 +495,16 @@ def _commercial_permission_allows(user, permission):
     if not user or is_platform_owner(user):
         return True
 
+    linked_permission_modules = {
+        "can_view_staff_activity": "taskosphere",
+        "can_view_reports": "taskosphere",
+        "can_download_reports": "taskosphere",
+        "can_view_audit_logs": "taskosphere",
+    }
+    linked_module = linked_permission_modules.get(permission)
+    if linked_module:
+        return linked_module in _commercial_license_modules_for_user(user)
+
     commercial = bool(
         getattr(user, "license_id", None)
         or getattr(user, "commercial_customer_id", None)
@@ -569,6 +579,53 @@ def _commercial_permission_allows(user, permission):
 
     return flag in selected
 
+
+COMMERCIAL_ADMIN_LINKED_MODULES = {
+    # These are Admin-area pages, but their availability is owned by the
+    # corresponding commercial product module.
+    "staff_activity": "taskosphere",
+    "reports": "taskosphere",
+    "task_audit": "taskosphere",
+    "whatsapp_hub": "records",
+    "automation_approvals": "records",
+}
+
+def _commercial_license_modules_for_user(user):
+    values = getattr(user, "licensed_modules", None) or getattr(user, "modules", None) or []
+    aliases = {
+        "taskosphere": {"taskosphere", "tasks"},
+        "finix": {"finix", "invoicing", "accounting"},
+        "compliance": {"compliance"},
+        "records": {"records"},
+        "proposals": {"proposals", "client_proposals", "client-proposals", "leadsense"},
+        "people_matrix": {"people_matrix", "people-matrix", "hrms", "peoplematrix"},
+        "aiweave": {"aiweave", "ai-weave"},
+    }
+    result = set()
+    for raw in values:
+        key = str(raw or "").strip().lower().replace("-", "_")
+        for canonical, accepted in aliases.items():
+            if key == canonical or key in {str(a).replace("-", "_") for a in accepted}:
+                result.add(canonical)
+                break
+    return result
+
+def require_commercial_admin_module(module_id):
+    """Admin-only gate for an Admin page linked to a commercial module."""
+    async def checker(current_user=Depends(get_current_user)):
+        if current_user.role != "admin":
+            raise HTTPException(status_code=403, detail="Admin access required")
+        if is_platform_owner(current_user):
+            return current_user
+        if not getattr(current_user, "company_id", None):
+            return current_user
+        if str(module_id).strip().lower() not in _commercial_license_modules_for_user(current_user):
+            raise HTTPException(
+                status_code=403,
+                detail=f"This Admin page requires the licensed {module_id} module.",
+            )
+        return current_user
+    return checker
 
 def check_permission(required_permission):
     async def checker(current_user=Depends(get_current_user)):
