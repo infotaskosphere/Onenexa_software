@@ -501,14 +501,33 @@ async def get_current_user(credentials=Depends(security)):
     if not is_platform_owner(user) and company_id:
         try:
             cust_id = getattr(user, "commercial_customer_id", None) or company_id
-            lic = await db.commercial_licenses.find_one(
-                {"$or": [{"customer_id": cust_id}, {"company_id": company_id}, {"id": str(getattr(user, "license_id", "") or "")}], "status": {"$in": ["active", "trial"]}},
-                {"_id": 0},
-                sort=[("issued_at", -1)],
-            )
+            explicit_license_id = str(getattr(user, "license_id", "") or "").strip()
+            lic = None
+            if explicit_license_id:
+                lic = await db.commercial_licenses.find_one(
+                    {"id": explicit_license_id, "status": {"$in": ["active", "trial"]}},
+                    {"_id": 0},
+                )
             if not lic:
                 lic = await db.commercial_licenses.find_one(
-                    {"$or": [{"customer_id": cust_id}, {"company_id": company_id}, {"id": str(getattr(user, "license_id", "") or "")}]},
+                    {
+                        "$or": [
+                            {"customer_id": cust_id},
+                            {"company_id": company_id},
+                        ],
+                        "status": {"$in": ["active", "trial"]},
+                    },
+                    {"_id": 0},
+                    sort=[("issued_at", -1)],
+                )
+            if not lic and not explicit_license_id:
+                lic = await db.commercial_licenses.find_one(
+                    {
+                        "$or": [
+                            {"customer_id": cust_id},
+                            {"company_id": company_id},
+                        ]
+                    },
                     {"_id": 0},
                     sort=[("issued_at", -1)],
                 )
