@@ -673,6 +673,30 @@ def require_commercial_admin_module(module_id):
         return current_user
     return checker
 
+def require_commercial_admin_page(module_id, page_flag):
+    """Admin-page gate that enforces both the licensed module and exact page flag."""
+    async def checker(current_user=Depends(get_current_user)):
+        if current_user.role != "admin":
+            raise HTTPException(status_code=403, detail="Admin access required")
+        if is_platform_owner(current_user):
+            return current_user
+        if not getattr(current_user, "company_id", None):
+            return current_user
+        if str(module_id).strip().lower() not in _commercial_license_modules_for_user(current_user):
+            raise HTTPException(
+                status_code=403,
+                detail=f"This Admin page requires the licensed {module_id} module.",
+            )
+        perms = get_user_permissions(current_user)
+        if not bool(perms.get(page_flag)):
+            raise HTTPException(
+                status_code=403,
+                detail=f"This Admin page is not enabled for the current license: {page_flag}.",
+            )
+        return current_user
+
+    return checker
+
 def check_permission(required_permission):
     async def checker(current_user=Depends(get_current_user)):
         if not _commercial_permission_allows(current_user, required_permission):
