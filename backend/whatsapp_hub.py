@@ -19,7 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from backend.dependencies import get_current_user, require_admin
+from backend.dependencies import require_commercial_admin_module, get_current_user, require_admin
 from backend.models import User
 from backend.commercial_user_company_scope import _scope_user_query
 from backend.platform_owner import is_platform_owner as _is_platform_owner
@@ -701,7 +701,7 @@ async def hub_inbox(
     archived: bool = False,
     limit: int = 200,
     skip: int = 0,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_commercial_admin_module("records")),
 ):
     if not await _has_hub_access(current_user):
         raise HTTPException(403, "You do not have WhatsApp Hub access.")
@@ -756,7 +756,7 @@ async def hub_inbox(
 @router.get("/groups")
 async def hub_groups_list(
     session_id: Optional[str] = None,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_commercial_admin_module("records")),
 ):
     if not await _has_hub_access(current_user):
         raise HTTPException(403, "No access")
@@ -770,7 +770,7 @@ async def hub_groups_list(
 @router.get("/groups/{group_jid:path}/participants")
 async def hub_group_participants(
     group_jid: str,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_commercial_admin_module("records")),
 ):
     if not await _has_hub_access(current_user):
         raise HTTPException(403, "No access")
@@ -792,7 +792,7 @@ async def hub_group_participants(
 async def hub_contact_profile_pic(
     contact_jid: str,
     session_id: Optional[str] = None,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_commercial_admin_module("records")),
 ):
     if not await _has_hub_access(current_user):
         raise HTTPException(403, "No access")
@@ -820,7 +820,7 @@ async def hub_conversation(
     contact_jid: str,
     limit: int = 200,
     before: Optional[str] = None,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_commercial_admin_module("records")),
 ):
     if not await _has_hub_access(current_user):
         raise HTTPException(403, "No access")
@@ -881,7 +881,7 @@ async def hub_conversation(
 # ── Reply — text ─────────────────────────────────────────────────────────────
 
 @router.post("/reply")
-async def hub_reply(body: HubReply, current_user: User = Depends(get_current_user)):
+async def hub_reply(body: HubReply, current_user: User = Depends(require_commercial_admin_module("records"))):
     if not await _has_hub_access(current_user):
         raise HTTPException(403, "No access")
     from backend.whatsapp_integration import _get_cached_sessions, _bridge_post
@@ -938,7 +938,7 @@ async def hub_reply(body: HubReply, current_user: User = Depends(get_current_use
 # ── Reply — media ────────────────────────────────────────────────────────────
 
 @router.post("/reply-media")
-async def hub_reply_media(body: HubReplyMedia, current_user: User = Depends(get_current_user)):
+async def hub_reply_media(body: HubReplyMedia, current_user: User = Depends(require_commercial_admin_module("records"))):
     if not await _has_hub_access(current_user):
         raise HTTPException(403, "No access")
     from backend.whatsapp_integration import _get_cached_sessions, _bridge_post
@@ -990,7 +990,7 @@ async def hub_reply_media(body: HubReplyMedia, current_user: User = Depends(get_
 # ── Mark read ────────────────────────────────────────────────────────────────
 
 @router.patch("/conversations/{contact_jid:path}/read")
-async def hub_mark_read(contact_jid: str, current_user: User = Depends(get_current_user)):
+async def hub_mark_read(contact_jid: str, current_user: User = Depends(require_commercial_admin_module("records"))):
     if not await _has_hub_access(current_user):
         raise HTTPException(403, "No access")
     db = _db()
@@ -1002,7 +1002,7 @@ async def hub_mark_read(contact_jid: str, current_user: User = Depends(get_curre
 # ── Unread count ─────────────────────────────────────────────────────────────
 
 @router.get("/unread-count")
-async def hub_unread_count(current_user: User = Depends(get_current_user)):
+async def hub_unread_count(current_user: User = Depends(require_commercial_admin_module("records"))):
     if not await _has_hub_access(current_user):
         raise HTTPException(403, "No access")
     db    = _db()
@@ -1016,7 +1016,7 @@ async def hub_unread_count(current_user: User = Depends(get_current_user)):
 # ── Delete conversation ──────────────────────────────────────────────────────
 
 @router.delete("/conversations/{contact_jid:path}")
-async def hub_delete_conversation(contact_jid: str, current_user: User = Depends(get_current_user)):
+async def hub_delete_conversation(contact_jid: str, current_user: User = Depends(require_commercial_admin_module("records"))):
     if not await _has_hub_access(current_user):
         raise HTTPException(403, "No access")
     db = _db()
@@ -1028,7 +1028,7 @@ async def hub_delete_conversation(contact_jid: str, current_user: User = Depends
 # ── Assign ───────────────────────────────────────────────────────────────────
 
 @router.patch("/conversations/{contact_jid:path}/assign")
-async def hub_assign(contact_jid: str, body: ConversationAssign, current_user: User = Depends(get_current_user)):
+async def hub_assign(contact_jid: str, body: ConversationAssign, current_user: User = Depends(require_commercial_admin_module("records"))):
     if not await _has_hub_access(current_user):
         raise HTTPException(403, "No access")
     db = _db()
@@ -1042,7 +1042,7 @@ async def hub_assign(contact_jid: str, body: ConversationAssign, current_user: U
 async def hub_archive_conversation(
     contact_jid: str,
     request: Request,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_commercial_admin_module("records")),
 ):
     if not await _has_hub_access(current_user):
         raise HTTPException(403, "No access")
@@ -1062,7 +1062,7 @@ async def hub_archive_conversation(
 async def hub_star_message(
     message_id: str,
     request: Request,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_commercial_admin_module("records")),
 ):
     if not await _has_hub_access(current_user):
         raise HTTPException(403, "No access")
@@ -1083,7 +1083,7 @@ async def hub_star_message(
 async def hub_starred_messages(
     session_id: Optional[str] = None,
     limit: int = 100,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_commercial_admin_module("records")),
 ):
     if not await _has_hub_access(current_user):
         raise HTTPException(403, "No access")
@@ -1107,7 +1107,7 @@ async def hub_conversation_search(
     contact_jid: str,
     q: str = "",
     limit: int = 50,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_commercial_admin_module("records")),
 ):
     if not await _has_hub_access(current_user):
         raise HTTPException(403, "No access")
@@ -1206,7 +1206,7 @@ async def hub_events(
 async def hub_global_search(
     q: str = "",
     limit: int = 30,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_commercial_admin_module("records")),
 ):
     if not await _has_hub_access(current_user):
         raise HTTPException(403, "No access")
@@ -1232,14 +1232,14 @@ async def hub_global_search(
 # ── Access management ─────────────────────────────────────────────────────────
 
 @router.get("/access")
-async def hub_list_access(current_user: User = Depends(require_admin())):
+async def hub_list_access(current_user: User = Depends(require_commercial_admin_module("records"))):
     db    = _db()
     users = await db["users"].find({}, {"_id": 0, "id": 1, "name": 1, "email": 1, "role": 1, "wa_hub_access": 1}).to_list(200)
     return {"users": [{"id": u.get("id"), "name": u.get("name"), "email": u.get("email"), "role": u.get("role"), "wa_hub_access": u.get("wa_hub_access", False)} for u in users]}
 
 
 @router.patch("/access/{user_id}")
-async def hub_update_access(user_id: str, body: HubAccessUpdate, current_user: User = Depends(require_admin())):
+async def hub_update_access(user_id: str, body: HubAccessUpdate, current_user: User = Depends(require_commercial_admin_module("records"))):
     # Users are keyed by UUID string in the "id" field, not by MongoDB ObjectId "_id".
     db = _db()
     user_query = {"id": user_id}
@@ -1272,7 +1272,7 @@ async def hub_request_access(body: HubAccessRequest, current_user: User = Depend
 
 
 @router.get("/access/requests")
-async def hub_list_requests(current_user: User = Depends(require_admin())):
+async def hub_list_requests(current_user: User = Depends(require_commercial_admin_module("records"))):
     db   = _db()
     query = {"status": "pending"}
     if not _is_platform_owner(current_user):
@@ -1287,7 +1287,7 @@ class HubAccessDecision(BaseModel):
 
 
 @router.post("/access/decide")
-async def hub_decide_access(body: HubAccessDecision, current_user: User = Depends(require_admin())):
+async def hub_decide_access(body: HubAccessDecision, current_user: User = Depends(require_commercial_admin_module("records"))):
     from bson import ObjectId
     db  = _db()
     req_query = {"_id": ObjectId(body.request_id)}
