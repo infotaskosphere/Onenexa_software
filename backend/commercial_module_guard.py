@@ -60,18 +60,12 @@ def _deny(request: Request, user: User, detail: str, license_doc: Optional[dict]
 
 CORE_PREFIXES = (
     "/users",
-    "/activity",
-    "/staff-activity",
     "/master",
     "/companies",
     "/settings",
 )
 
-CORE_REPORT_PREFIXES = (
-    "/reports/efficiency",
-    "/reports/performance-rankings",
-    "/reports/export",
-)
+CORE_REPORT_PREFIXES = ()
 
 COMMERCIAL_BLOCKED_PREFIXES = (
     "/v2/search",
@@ -90,6 +84,11 @@ MODULE_PREFIXES = {
         "/visits",
         "/client-portal-manager",
         "/dashboard",
+        "/activity",
+        "/staff-activity",
+        "/reports",
+        "/task-audit",
+        "/audit-logs",
     ),
     "finix": (
         "/finix-dashboard",
@@ -153,6 +152,8 @@ MODULE_PREFIXES = {
         "/documents",
         "/clients",
         "/passwords",
+        "/whatsapp-hub",
+        "/automation/approvals",
     ),
     "proposals": (
         "/client-proposals-dashboard",
@@ -198,6 +199,20 @@ FEATURE_PREFIXES = {
         "can_reset_client_passwords": (
             "/client-portal-manager/password",
             "/client-portal-manager/reset",
+        ),
+        "can_view_staff_activity": (
+            "/activity",
+            "/staff-activity",
+        ),
+        "can_view_reports": (
+            "/reports/efficiency",
+            "/reports/performance-rankings",
+        ),
+        "can_download_reports": (
+            "/reports/export",
+        ),
+        "can_view_audit_logs": (
+            "/audit-logs",
         ),
     },
     "finix": {
@@ -300,6 +315,12 @@ FEATURE_PREFIXES = {
         ),
         "can_approve_email_wishes": (
             "/automation/email",
+        ),
+        "can_access_whatsapp_hub": (
+            "/whatsapp-hub",
+        ),
+        "can_view_automation_approvals": (
+            "/automation/approvals",
         ),
     },
     "proposals": {
