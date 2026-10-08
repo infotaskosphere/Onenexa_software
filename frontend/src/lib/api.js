@@ -285,7 +285,6 @@ const SLASH_COMPATIBLE_COLLECTIONS = new Set([
   "/quotations",
   "/quotations/list",
   "/companies",
-  "/companies/list",
   "/compliance",
   "/passwords",
   "/client-discussion",
