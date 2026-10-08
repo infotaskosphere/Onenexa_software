@@ -23,7 +23,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { MiniLoader } from '@/components/ui/GifLoader.jsx';
 import {
   Plus, Edit, Trash2, Building2, Landmark, Tag, Info, Mail, Phone,
-  CreditCard, Loader2,
+  CreditCard, Loader2, ChevronLeft, ChevronRight,
 } from 'lucide-react';
 
 export const COMPANY_COLORS = {
@@ -436,6 +436,10 @@ export function CompanyProfilesList({ onRefresh, dense = false, onFormOpenChange
   const [editingCompany, setEditingCompany] = useState(null);
   const [showForm,    setShowForm]    = useState(false);
   const [deletingId,  setDeletingId]  = useState(null);
+  const [selectedCompanyIds, setSelectedCompanyIds] = useState([]);
+  const [companyPage, setCompanyPage] = useState(1);
+  const [companyBulkBusy, setCompanyBulkBusy] = useState(false);
+  const COMPANY_PAGE_SIZE = 10;
 
   useEffect(() => { onFormOpenChange?.(showForm); }, [showForm]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -450,6 +454,30 @@ export function CompanyProfilesList({ onRefresh, dense = false, onFormOpenChange
   };
 
   useEffect(() => { fetchCompanies(); }, []);
+
+  useEffect(() => { setCompanyPage(1); setSelectedCompanyIds([]); }, [companies.length]);
+
+  const companyPageCount = Math.max(1, Math.ceil(companies.length / COMPANY_PAGE_SIZE));
+  const paginatedCompanies = companies.slice((companyPage - 1) * COMPANY_PAGE_SIZE, companyPage * COMPANY_PAGE_SIZE);
+  const pageCompanyIds = paginatedCompanies.map(c => c.id);
+  const allPageCompaniesSelected = pageCompanyIds.length > 0 && pageCompanyIds.every(id => selectedCompanyIds.includes(id));
+  const toggleCompanySelection = (id) => setSelectedCompanyIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  const toggleAllPageCompanies = () => setSelectedCompanyIds(prev => allPageCompaniesSelected ? prev.filter(id => !pageCompanyIds.includes(id)) : [...new Set([...prev, ...pageCompanyIds])]);
+  const bulkDeleteCompanies = async () => {
+    if (!selectedCompanyIds.length || companyBulkBusy) return;
+    if (!window.confirm(`Delete ${selectedCompanyIds.length} selected company profile${selectedCompanyIds.length === 1 ? '' : 's'}? This cannot be undone.`)) return;
+    setCompanyBulkBusy(true);
+    try {
+      const results = await Promise.allSettled(selectedCompanyIds.map(id => api.delete(`/companies/${encodeURIComponent(id)}`)));
+      const failed = results.filter(r => r.status === 'rejected').length;
+      const deleted = results.length - failed;
+      if (deleted) toast.success(`${deleted} compan${deleted === 1 ? 'y' : 'ies'} deleted successfully`);
+      if (failed) toast.error(`${failed} compan${failed === 1 ? 'y' : 'ies'} could not be deleted`);
+      setSelectedCompanyIds([]);
+      await fetchCompanies();
+      onRefresh?.();
+    } finally { setCompanyBulkBusy(false); }
+  };
 
   const handleDelete = async (id, name) => {
     if (!window.confirm(`Delete company "${name}"? This cannot be undone.`)) return;
@@ -496,7 +524,7 @@ export function CompanyProfilesList({ onRefresh, dense = false, onFormOpenChange
               </p>
             </div>
           </div>
-          <Button onClick={() => { setEditingCompany(null); setShowForm(true); }} className="h-9 rounded-none master-data-blue-header-btn-solid flex-shrink-0">
+          <div className="flex items-center gap-2 flex-shrink-0"><Button variant="outline" onClick={toggleAllPageCompanies} disabled={!paginatedCompanies.length} className="h-9 rounded-none master-data-blue-header-btn-outline">{allPageCompaniesSelected ? "Clear Page" : "Select Page"}</Button>{selectedCompanyIds.length > 0 && <Button variant="outline" onClick={bulkDeleteCompanies} disabled={companyBulkBusy} className="h-9 rounded-none text-red-600 border-red-200 hover:bg-red-50">{companyBulkBusy ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin"/> : <Trash2 className="h-4 w-4 mr-1.5"/>}Delete Selected ({selectedCompanyIds.length})</Button>}<Button onClick={() => { setEditingCompany(null); setShowForm(true); }} className="h-9 rounded-none master-data-blue-header-btn-solid flex-shrink-0">
             <Plus className="h-4 w-4 mr-1.5" />Add Company
           </Button>
         </div>
@@ -513,9 +541,9 @@ export function CompanyProfilesList({ onRefresh, dense = false, onFormOpenChange
           )
           : (
             <div className="space-y-3">
-              {companies.map(company => (
+              {paginatedCompanies.map(company => (
                 <div key={company.id} className={`flex items-start gap-4 p-4 border border-slate-200 hover:border-blue-200 hover:bg-blue-50/30 transition-colors ${dense ? 'rounded-xl' : 'rounded-none'}`}>
-                  <div className={`w-12 h-12 bg-slate-100 flex-shrink-0 flex items-center justify-center overflow-hidden ${dense ? 'rounded-xl' : 'rounded-none'}`}>
+                  <div className="flex items-start gap-3 flex-1 min-w-0"><input type="checkbox" aria-label={`Select ${company.name || "company"}`} checked={selectedCompanyIds.includes(company.id)} onChange={() => toggleCompanySelection(company.id)} className="mt-1.5 h-4 w-4 accent-[#0D3B66]" /><div className={`w-12 h-12 bg-slate-100 flex-shrink-0 flex items-center justify-center overflow-hidden ${dense ? 'rounded-xl' : 'rounded-none'}`}>
                     {company.logo_base64 ? <img src={company.logo_base64} alt="logo" className="w-full h-full object-contain" /> : <Building2 className="h-5 w-5 text-slate-400" />}
                   </div>
                   <div className="flex-1 min-w-0">
@@ -544,7 +572,7 @@ export function CompanyProfilesList({ onRefresh, dense = false, onFormOpenChange
                       {company.tm_logo_base64 && <Badge className="text-[10px] px-2 py-0 bg-violet-50 text-violet-700 border-violet-200">Has TM Logo</Badge>}
                       {(company.bank_name || company.bank_account_no) && <Badge className="text-[10px] px-2 py-0 bg-teal-50 text-teal-700 border-teal-200">Bank Linked</Badge>}
                     </div>
-                  </div>
+                  </div></div>
                   <div className="flex gap-2 flex-shrink-0">
                     <Button variant="outline" size="sm" onClick={() => { setEditingCompany(company); setShowForm(true); }} className={`gap-1 text-blue-600 border-blue-200 hover:bg-blue-50 ${dense ? 'rounded-lg' : 'rounded-none'}`}><Edit className="h-3.5 w-3.5" />Edit</Button>
                     <Button variant="outline" size="sm" onClick={() => handleDelete(company.id, company.name)} disabled={deletingId === company.id} className={`gap-1 text-red-600 border-red-200 hover:bg-red-50 ${dense ? 'rounded-lg' : 'rounded-none'}`}>
@@ -553,6 +581,10 @@ export function CompanyProfilesList({ onRefresh, dense = false, onFormOpenChange
                   </div>
                 </div>
               ))}
+              {companyPageCount > 1 && <div className="flex items-center justify-between border-t border-slate-100 pt-3 mt-1 text-xs text-slate-500">
+                <span>Showing {(companyPage - 1) * COMPANY_PAGE_SIZE + 1}–{Math.min(companyPage * COMPANY_PAGE_SIZE, companies.length)} of {companies.length}</span>
+                <div className="flex items-center gap-1"><Button variant="outline" size="icon" className="h-8 w-8 rounded-none" disabled={companyPage === 1} onClick={() => { setCompanyPage(p => p - 1); setSelectedCompanyIds([]); }}><ChevronLeft className="h-4 w-4"/></Button><span className="px-2 font-semibold">Page {companyPage} of {companyPageCount}</span><Button variant="outline" size="icon" className="h-8 w-8 rounded-none" disabled={companyPage === companyPageCount} onClick={() => { setCompanyPage(p => p + 1); setSelectedCompanyIds([]); }}><ChevronRight className="h-4 w-4"/></Button></div>
+              </div>}
             </div>
           )
       }
