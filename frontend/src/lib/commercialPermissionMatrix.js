@@ -28,6 +28,27 @@ export const MODULES = Object.freeze({
   aiweave: { flag: "can_access_aiweave", aliases: ["aiweave", "ai-weave"], landing: "/aiweave" },
 });
 
+export const COMMERCIAL_ADMIN_GLOBAL_PATHS = Object.freeze([
+  "/admin-dashboard",
+  "/settings/backup",
+  "/permission-matrix",
+  "/master-data",
+  "/roles",
+  "/contact-details",
+  "/settings",
+  "/settings/general",
+  "/settings/email",
+  "/settings/whatsapp",
+]);
+
+export const COMMERCIAL_ADMIN_LINKED_MODULES = Object.freeze({
+  "/staff-activity": "taskosphere",
+  "/reports": "taskosphere",
+  "/task-audit": "taskosphere",
+  "/whatsapp-hub": "records",
+  "/automation/approvals": "records",
+});
+
 export const PAGE_MATRIX = Object.freeze([
   ["core", "can_view_user_page", "/users"],
   ["core", "can_view_staff_activity", "/staff-activity"],
@@ -96,7 +117,7 @@ export function isPlatformOwner(user) {
     user.company?.commercial_customer_id ||
     user.company?.license_id
   );
-  return !commercialIdentity && false;
+  return false;
 }
 
 export function normalizeModules(user) {
@@ -306,18 +327,28 @@ export function canAccessPath(user, pathname) {
   if (!user) return false;
   if (isPlatformOwner(user)) return true;
 
-  // Licensee Admin control-plane/shared-master-data pages are tenant-wide
-  // administration surfaces, not separately purchased operational modules.
-  // Keep them reachable even when the tenant buys only one module.
   const normalizedPath = String(pathname || "").split("?", 1)[0];
+
+  // Commercial tenant Admin control-plane pages are globally available within
+  // the tenant. Other Admin pages are explicitly linked to the operational
+  // module stated in COMMERCIAL_ADMIN_LINKED_MODULES.
   if (
     String(user.role || "").trim().toLowerCase() === "admin" &&
-    user.company_id &&
-    ["/users", "/reports"].some(
-      (prefix) => normalizedPath === prefix || normalizedPath.startsWith(prefix + "/")
-    )
+    user.company_id
   ) {
-    return true;
+    if (COMMERCIAL_ADMIN_GLOBAL_PATHS.some(
+      (prefix) => normalizedPath === prefix || normalizedPath.startsWith(prefix + "/")
+    )) {
+      return true;
+    }
+
+    const linkedModule = Object.entries(COMMERCIAL_ADMIN_LINKED_MODULES).find(
+      ([prefix]) => normalizedPath === prefix || normalizedPath.startsWith(prefix + "/")
+    )?.[1];
+
+    if (linkedModule) {
+      return hasModuleAccess(user, linkedModule);
+    }
   }
 
   const moduleId = moduleForPath(normalizedPath);
