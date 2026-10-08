@@ -358,14 +358,28 @@ async def _get_saas_session_user(token: str):
             user_data["license_id"] = commercial_license.get("id")
             user_data["license_key"] = commercial_license.get("license_key")
             user_data["commercial_customer_id"] = commercial_license.get("customer_id") or user_data.get("commercial_customer_id") or company.get("commercial_customer_id")
-        user_data=_normalize_permissions(user_data)
-        return User(**user_data)
-        await _touch_saas_session_if_due(raw_db, session)
-        user_data={k:v for k,v in user.items() if k != "_id"}
-        user_data["id"]=str(user.get("_id") or user.get("id"))
-        user_data["company_id"]=str(company_id)
-        user_data["company_name"]=company.get("name")
-        user_data=_normalize_permissions(user_data)
+
+            # Rebuild the effective permission map from the CURRENT license.
+            # This prevents stale stored permissions from surviving /auth/me
+            # after the Platform Owner changes page selections in the Console.
+            try:
+                from backend.commercial_licensee_admin import (
+                    get_all_admin_permissions,
+                    get_tenant_user_permissions,
+                )
+                if str(user_data.get("role") or "").strip().lower() == "admin":
+                    user_data["permissions"] = get_all_admin_permissions(commercial_license)
+                else:
+                    user_data["permissions"] = get_tenant_user_permissions(
+                        None,
+                        commercial_license,
+                        str(user_data.get("role") or "staff"),
+                        user_data.get("permissions") or {},
+                    )
+            except Exception:
+                user_data=_normalize_permissions(user_data)
+        else:
+            user_data=_normalize_permissions(user_data)
         return User(**user_data)
     except Exception as error:
         logger.exception("SaaS session resolution failed: %s", error)
