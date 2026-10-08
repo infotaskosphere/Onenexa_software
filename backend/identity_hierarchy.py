@@ -242,6 +242,7 @@ async def enrich_user_identity(db, user: dict) -> dict:
                 else "licensee_user"
             )
             data["email_normalized"] = _normalized_email(data.get("email"))
+            data["is_platform_owner"] = False
             if not _USER_UID_RE.match(_clean(data.get("user_uid"))):
                 data["user_uid"] = await ensure_user_uid(
                     db,
@@ -264,6 +265,7 @@ async def enrich_user_identity(db, user: dict) -> dict:
                 else "platform_owner_user"
             )
             data["email_normalized"] = _normalized_email(data.get("email"))
+            data["is_platform_owner"] = True
             if not _USER_UID_RE.match(_clean(data.get("user_uid"))):
                 data["user_uid"] = await ensure_user_uid(
                     db,
@@ -340,6 +342,14 @@ async def _migrate_licensees(db) -> tuple[int, int]:
     customers = await db.commercial_license_customers.find(
         {}, {"_id": 0}
     ).sort([("created_at", 1), ("id", 1)]).to_list(10000)
+
+    max_licensee_seq = 0
+    for existing_customer in customers:
+        max_licensee_seq = max(
+            max_licensee_seq,
+            _extract_seq(existing_customer.get("licensee_uid"), _UID_RE, 2),
+        )
+    await _set_counter_max(db, "licensee", max_licensee_seq)
 
     migrated_customers = 0
     migrated_users = 0
