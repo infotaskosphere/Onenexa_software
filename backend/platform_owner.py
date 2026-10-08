@@ -95,16 +95,14 @@ def is_platform_owner(user) -> bool:
         if isinstance(user, dict)
         else getattr(user, "license_id", "") or ""
     ).strip()
+    # An explicit Platform Owner identity is authoritative. A stale legacy
+    # commercial/license field must not turn the real owner account into a
+    # commercial tenant and cause a 403 during login.
     if (
-        identity_type.startswith("licensee")
-        or identity_type == "commercial"
-        or licensee_uid
-        or commercial_customer_id
-        or license_id
+        is_owner_flag
+        or role in {"platform_owner", "superadmin", "saas_admin"}
+        or identity_type.startswith("platform_owner")
     ):
-        return False
-
-    if is_owner_flag or role in {"platform_owner", "superadmin", "saas_admin"}:
         return True
 
     # New stable Platform Owner hierarchy. The UID is authoritative once present.
@@ -120,6 +118,18 @@ def is_platform_owner(user) -> bool:
     ).strip().upper()
     if platform_owner_uid.startswith("PO-") or user_uid.startswith("PO-"):
         return True
+
+    # Commercial tenant identity wins over the legacy owner-email fallback only
+    # when it is an explicit commercial organization identity. The email-link
+    # layer prevents one email from being attached to both PO-* and L-* identities.
+    if (
+        identity_type.startswith("licensee")
+        or identity_type == "commercial"
+        or licensee_uid
+        or commercial_customer_id
+        or license_id
+    ):
+        return False
 
     owner_emails = platform_owner_emails()
     company_id = str(
