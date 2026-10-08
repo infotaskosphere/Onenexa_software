@@ -80,9 +80,18 @@ def is_platform_owner(user) -> bool:
         else getattr(user, "company_id", None) or ""
     ).strip().lower()
 
-    # Commercial identities are always customer tenants. This prevents an
-    # environment-configured owner email from accidentally bypassing the
-    # commercial license ceiling for a real licensee account.
+    owner_emails = platform_owner_emails()
+    # Canonical Platform Owner identities win over stale tenant markers left by
+    # historical migrations. This preserves the real Platform Owner account.
+    if (
+        (email and email in owner_emails)
+        or (user_id and user_id in {"saas-bootstrap-admin", "usr-admin-01"})
+        or company_id == "platform-owner-48fe785fdd75127f"
+        or company_id.startswith("platform-owner-")
+    ):
+        return True
+
+    # Any remaining account carrying commercial ownership markers is a tenant.
     commercial_identity = bool(
         (user.get("license_id") if isinstance(user, dict) else getattr(user, "license_id", None))
         or (user.get("commercial_customer_id") if isinstance(user, dict) else getattr(user, "commercial_customer_id", None))
@@ -91,10 +100,4 @@ def is_platform_owner(user) -> bool:
     if commercial_identity:
         return False
 
-    owner_emails = platform_owner_emails()
-    return bool(
-        (email and email in owner_emails)
-        or (user_id and user_id in {"saas-bootstrap-admin", "usr-admin-01"})
-        or company_id == "platform-owner-48fe785fdd75127f"
-        or company_id.startswith("platform-owner-")
-    )
+    return False
