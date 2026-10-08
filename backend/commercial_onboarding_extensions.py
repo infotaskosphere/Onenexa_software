@@ -105,7 +105,7 @@ def _monthly_total(catalog: List[Dict[str, Any]], selected_features: Dict[str, L
 def _apply_feature_entitlements(role: str, selected_modules: List[str], selected_features: Dict[str, List[str]] | None = None) -> Dict[str, Any]:
     permissions = copy.deepcopy(DEFAULT_ROLE_PERMISSIONS.get(role, DEFAULT_ROLE_PERMISSIONS["staff"]))
     selected = set(selected_modules)
-    selected_features = selected_features or {module_id: _all_feature_flags(module_id) for module_id in selected_modules}
+    selected_features = selected_features if isinstance(selected_features, dict) else {}
     for module_id, module_flag in MODULE_FLAG_BY_ID.items():
         # A purchased module is only the ceiling. The Platform Owner's explicit
         # page selection is the complete commercial entitlement.
