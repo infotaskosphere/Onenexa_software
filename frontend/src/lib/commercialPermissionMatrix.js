@@ -106,8 +106,8 @@ export function normalizedSelectedFeatures(user) {
   //    compatibility and allow all pages of each licensed module.
   const licensed = normalizeModules(user);
   const raw = user?.selected_features || user?.company?.selected_features || user?.license?.selected_features;
-  const hasExplicitSelections = raw && typeof raw === "object" && !Array.isArray(raw) && Object.keys(raw).length > 0;
-  const source = hasExplicitSelections ? raw : {};
+  const source = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  const hasExplicitSelections = Object.keys(source).length > 0;
   const result = {};
 
   for (const [moduleKey, flags] of Object.entries(source)) {
@@ -128,7 +128,8 @@ export function normalizedSelectedFeatures(user) {
   }
 
   // Licensed modules without an explicit Platform Owner page selection
-  // receive no page access. A module purchase alone never reopens stale/full access.
+  // receive NO page access. A module purchase or legacy missing field can never
+  // silently reopen the complete module.
   for (const moduleId of licensed) {
     if (result[moduleId]) continue;
     result[moduleId] = new Set();
