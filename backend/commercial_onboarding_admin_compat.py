@@ -280,7 +280,7 @@ async def create_public_licensed_user_fixed(payload: Dict[str, Any]):
     role_label = {"admin": "Admin", "manager": "Manager", "staff": "Staff", "not_known": "Not Know"}.get(requested_role, "Not Know")
     now = _now().isoformat()
     user_id = __import__("uuid").uuid4().hex
-    permissions = _apply_license_entitlements(role, list(license_doc.get("modules") or []))
+    permissions = _apply_license_entitlements(role, list(license_doc.get("modules") or []), license_doc.get("selected_features") or {})
     user_doc = {
         "id": user_id,
         "email": email,
@@ -348,7 +348,7 @@ async def create_staff_fixed(payload: Dict[str, Any], current_user: User = Depen
         "full_name": full_name,
         "role": role,
         "password": pwd_context.hash(password),
-        "permissions": _apply_license_entitlements(role, list(license_doc.get("modules") or [])),
+        "permissions": _apply_license_entitlements(role, list(license_doc.get("modules") or []), license_doc.get("selected_features") or {}),
         "departments": list(payload.get("departments") or []),
         "phone": str(payload.get("phone") or "").strip() or None,
         "is_active": True,
