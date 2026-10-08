@@ -797,13 +797,10 @@ def _permission_flag(
         # the module available to the tenant, but never auto-grants it — not
         # even to the licensee administrator.
         if module == "aiweave":
-            permissions = getattr(user, "permissions", None)
-            if hasattr(permissions, "model_dump"):
-                permissions = permissions.model_dump()
+            selected_pages = _selected_license_features(license_doc, module)
             return (
-                isinstance(permissions, dict)
-                and permissions.get("can_access_aiweave", False) is True
-                and permissions.get("can_view_aiweave", False) is True
+                "can_access_aiweave" in selected_pages
+                and "can_view_aiweave" in selected_pages
             )
 
         # Every commercial role, including the licensee administrator, is
@@ -952,15 +949,16 @@ async def get_current_user_with_commercial_guard(
     if _is_admin_role(user) and "aiweave" in resolve_license_modules(commercial):
         permissions = getattr(user, "permissions", None)
         if permissions is not None:
+            selected_ai = _selected_license_features(commercial, "aiweave")
             object.__setattr__(
                 permissions,
                 "can_access_aiweave",
-                pre_hydration_ai_access,
+                "can_access_aiweave" in selected_ai,
             )
             object.__setattr__(
                 permissions,
                 "can_view_aiweave",
-                pre_hydration_ai_view,
+                "can_view_aiweave" in selected_ai,
             )
 
     # Commercial tenant users inherit the licensed tenant administrator's
@@ -1052,12 +1050,6 @@ async def get_current_user_with_commercial_guard(
             )
 
         explicit_ai_feature_grant = None
-        if feature_module == "aiweave":
-            explicit_ai_feature_grant = (
-                pre_hydration_ai_view
-                if feature_flag == "can_view_aiweave"
-                else pre_hydration_ai_access
-            )
 
         if not core_admin_shared and not (
             explicit_ai_feature_grant
