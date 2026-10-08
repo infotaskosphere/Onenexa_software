@@ -18,6 +18,7 @@ from fastapi import HTTPException
 
 from backend import dependencies as _dependencies
 from backend.platform_owner import is_platform_owner
+from backend.identity_hierarchy import ensure_licensee_uid, ensure_license_uid, ensure_user_uid
 from backend.models import DEFAULT_ROLE_PERMISSIONS, User
 from backend.modules.people_matrix.permissions.catalog import MODULE_HIERARCHY
 
@@ -418,6 +419,14 @@ async def ensure_licensee_admin(
     customer_id = str(customer.get("id") or license_doc.get("customer_id") or "").strip()
     license_id = str(license_doc.get("id") or "").strip()
     license_key = str(license_doc.get("license_key") or "").strip()
+    licensee_uid = str(customer.get("licensee_uid") or license_doc.get("licensee_uid") or company.get("licensee_uid") or "").strip()
+    if not licensee_uid:
+        licensee_uid = await ensure_licensee_uid(raw_db, customer_id, customer)
+    await raw_db.commercial_license_customers.update_one(
+        {"id": customer_id},
+        {"$set": {"licensee_uid": licensee_uid, "identity_type": "licensee"}},
+    )
+    license_uid = await ensure_license_uid(raw_db, licensee_uid, license_doc)
     licensed_modules = list(license_doc.get("modules") or license_doc.get("licensed_modules") or [])
     selected_features = normalize_license_selected_features(
         license_doc
@@ -425,7 +434,19 @@ async def ensure_licensee_admin(
     admin_permissions = get_all_admin_permissions(license_doc)
     now_iso = datetime.now(timezone.utc).isoformat()
 
-    existing_user = await raw_db.users.find_one({"email": email})
+    existing_user = await raw_db.users.find_one(
+        {
+            "$or": [
+                {"identity_org_uid": licensee_uid, "email_normalized": email},
+                {"identity_org_uid": licensee_uid, "email": email},
+                {"licensee_uid": licensee_uid, "email_normalized": email},
+                {"licensee_uid": licensee_uid, "email": email},
+                {"commercial_customer_id": customer_id, "email_normalized": email},
+                {"commercial_customer_id": customer_id, "email": email},
+            ],
+            "status": {"$ne": "deleted"},
+        }
+    )
 
     # Never re-purpose an existing account merely because a commercial license
     # carries the same email address. This was a serious tenant-isolation edge
@@ -464,6 +485,11 @@ async def ensure_licensee_admin(
         "commercial_customer_id": customer_id,
         "license_id": license_id,
         "license_key": license_key,
+        "licensee_uid": licensee_uid,
+        "identity_org_uid": licensee_uid,
+        "identity_type": "licensee_admin",
+        "email_normalized": email,
+        "license_uid": license_uid,
         "licensed_modules": licensed_modules,
         "selected_features": selected_features,
         "permissions": admin_permissions,
@@ -494,8 +520,15 @@ async def ensure_licensee_admin(
     # The licensee will complete the credentials from the public license setup
     # screen through /create-admin.
     credentials_pending = not (password and len(password) >= 6)
+    user_uid = await ensure_user_uid(
+        raw_db,
+        {"id": str(uuid.uuid4()), "email": email},
+        organization_uid=licensee_uid,
+        identity_type="licensee_admin",
+    )
     user_doc = {
         "id": str(uuid.uuid4()),
+        "user_uid": user_uid,
         "email": email,
         "full_name": customer.get("contact_name") or f"{company_name} Admin",
         "role": "admin",
@@ -514,6 +547,11 @@ async def ensure_licensee_admin(
         "commercial_customer_id": customer_id,
         "license_id": license_id,
         "license_key": license_key,
+        "licensee_uid": licensee_uid,
+        "identity_org_uid": licensee_uid,
+        "identity_type": "licensee_admin",
+        "email_normalized": email,
+        "license_uid": license_uid,
         "licensed_modules": licensed_modules,
         "selected_features": selected_features,
         "permissions_inherited_from_licensee_admin": True,
