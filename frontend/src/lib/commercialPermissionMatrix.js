@@ -41,12 +41,12 @@ export const COMMERCIAL_ADMIN_GLOBAL_PATHS = Object.freeze([
   "/settings/whatsapp",
 ]);
 
-export const COMMERCIAL_ADMIN_LINKED_MODULES = Object.freeze({
-  "/staff-activity": "taskosphere",
-  "/reports": "taskosphere",
-  "/task-audit": "taskosphere",
-  "/whatsapp-hub": "records",
-  "/automation/approvals": "records",
+export const COMMERCIAL_ADMIN_LINKED_PAGES = Object.freeze({
+  "/staff-activity": { module: "taskosphere", flag: "can_view_staff_activity" },
+  "/reports": { module: "taskosphere", flag: "can_view_reports" },
+  "/task-audit": { module: "taskosphere", flag: "can_view_audit_logs" },
+  "/whatsapp-hub": { module: "records", flag: "can_access_whatsapp_hub" },
+  "/automation/approvals": { module: "records", flag: "can_view_automation_approvals" },
 });
 
 export const PAGE_MATRIX = Object.freeze([
@@ -351,12 +351,15 @@ export function canAccessPath(user, pathname) {
       return true;
     }
 
-    const linkedModule = Object.entries(COMMERCIAL_ADMIN_LINKED_MODULES).find(
+    const linkedPage = Object.entries(COMMERCIAL_ADMIN_LINKED_PAGES).find(
       ([prefix]) => normalizedPath === prefix || normalizedPath.startsWith(prefix + "/")
     )?.[1];
 
-    if (linkedModule) {
-      return hasModuleAccess(user, linkedModule);
+    if (linkedPage) {
+      return (
+        hasModuleAccess(user, linkedPage.module) &&
+        hasEffectivePermission(user, linkedPage.flag)
+      );
     }
   }
 
