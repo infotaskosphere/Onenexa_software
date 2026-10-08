@@ -303,6 +303,17 @@ const api = axios.create({
   },
 });
 
+// Restore the bearer header immediately when the bundle starts. This covers
+// the first protected request during session restoration as well as requests
+// made by components before AuthContext has finished mounting.
+try {
+  const initialToken = getToken();
+  if (initialToken) {
+    api.defaults.headers.common.Authorization = \`Bearer \${initialToken}\`;
+  }
+} catch {}
+
+
 // ─────────────────────────────────────────────────────────────
 // REQUEST INTERCEPTOR
 // ─────────────────────────────────────────────────────────────
