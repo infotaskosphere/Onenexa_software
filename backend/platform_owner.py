@@ -128,6 +128,13 @@ def is_platform_owner(user) -> bool:
     ):
         return True
 
+    # Platform Owner email addresses are reserved identities. A legacy record
+    # may still carry stale commercial fields; the reserved email must therefore
+    # be evaluated before commercial markers during the repair period.
+    owner_emails = platform_owner_emails()
+    if email and email in owner_emails:
+        return True
+
     # Commercial tenant identity wins over the legacy owner-email fallback only
     # when it is an explicit commercial organization identity. The email-link
     # layer prevents one email from being attached to both PO-* and L-* identities.
