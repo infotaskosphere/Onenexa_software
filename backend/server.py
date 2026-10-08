@@ -288,6 +288,13 @@ for _register_phase2_routes in _PHASE2_ROUTE_MODULES:
 
 register_application_runtime(globals())
 
+# Mount the main /api router after all extracted Phase 2 and runtime routes
+# have been registered on it. Without this mount, routes such as /api/users,
+# /api/auth/me, /api/companies/list/ and /api/role-admin/roles exist in the
+# router definitions but are never attached to the live FastAPI application,
+# causing 404 responses in the Admin / Portal Owner dashboard.
+app.include_router(api_router)
+
 from backend.website_config import router as website_config_router
 from backend.hr_core import ALL_HR_CORE_ROUTERS
 
