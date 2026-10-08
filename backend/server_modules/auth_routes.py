@@ -75,7 +75,22 @@ async def _sync_saas_bootstrap_password() -> None:
     if not bootstrap_email or not bootstrap_password:
         return
 
-    existing = await db.users.find_one({"email": bootstrap_email})
+    existing = await db.users.find_one(
+        {
+            "email": bootstrap_email,
+            "bootstrap_managed": True,
+        }
+    )
+    if not existing:
+        try:
+            from backend.identity_hierarchy import resolve_user_for_login
+            existing = await resolve_user_for_login(
+                db,
+                bootstrap_email,
+                os.getenv("PLATFORM_OWNER_UID") or "PO-000001",
+            )
+        except Exception:
+            existing = await db.users.find_one({"email": bootstrap_email})
     if not existing:
         return
 
@@ -706,7 +721,13 @@ async def self_register(user_data: UserCreate, request: Request):
 
 @api_router.post("/auth/login", response_model=Token)
 async def login(credentials: UserLogin, request: Request):
-    await _enforce_auth_rate_limit(request, credentials.email, limit_per_minute=10)
+    organization_id = str(getattr(credentials, "organization_id", "") or "").strip().upper()
+    login_identifier = (
+        f"{organization_id}:{str(credentials.email or '').strip().lower()}"
+        if organization_id
+        else str(credentials.email or "").strip().lower()
+    )
+    await _enforce_auth_rate_limit(request, login_identifier, limit_per_minute=10)
     client_ip = request.client.host if request and request.client else "unknown"
     normalized_email = str(credentials.email or "").strip().lower()
 
@@ -719,7 +740,12 @@ async def login(credentials: UserLogin, request: Request):
     except Exception:
         logger.exception("SaaS bootstrap password synchronization failed.")
 
-    user = await db.users.find_one({"email": normalized_email})
+    from backend.identity_hierarchy import resolve_user_for_login, enrich_user_identity
+    user = await resolve_user_for_login(
+        db,
+        normalized_email,
+        organization_id or None,
+    )
 
     # ── Commercial SaaS account path ────────────────────────────────────────
     if user and user.get("password_hash") and user.get("password_salt"):
@@ -735,6 +761,21 @@ async def login(credentials: UserLogin, request: Request):
             except Exception:
                 pass
             raise HTTPException(status_code=401, detail="Invalid email or password")
+
+        user = await enrich_user_identity(db, user)
+        if user.get("user_uid") or user.get("identity_type"):
+            await db.users.update_one(
+                {"_id": user.get("_id")} if user.get("_id") is not None else {"id": user.get("id")},
+                {"$set": {
+                    "user_uid": user.get("user_uid"),
+                    "identity_type": user.get("identity_type"),
+                    "identity_org_uid": user.get("identity_org_uid"),
+                    "platform_owner_uid": user.get("platform_owner_uid"),
+                    "licensee_uid": user.get("licensee_uid"),
+                    "email_normalized": user.get("email_normalized"),
+                    "is_platform_owner": bool(user.get("is_platform_owner")),
+                }},
+            )
 
         session_token, _, user_obj = await _create_saas_session(user)
 
@@ -778,6 +819,21 @@ async def login(credentials: UserLogin, request: Request):
         raise HTTPException(
             status_code=403,
             detail=f"Your account is {user_status}. Awaiting admin approval.",
+        )
+
+    user = await enrich_user_identity(db, user)
+    if user.get("user_uid") or user.get("identity_type"):
+        await db.users.update_one(
+            {"_id": user.get("_id")} if user.get("_id") is not None else {"id": user.get("id")},
+            {"$set": {
+                "user_uid": user.get("user_uid"),
+                "identity_type": user.get("identity_type"),
+                "identity_org_uid": user.get("identity_org_uid"),
+                "platform_owner_uid": user.get("platform_owner_uid"),
+                "licensee_uid": user.get("licensee_uid"),
+                "email_normalized": user.get("email_normalized"),
+                "is_platform_owner": bool(user.get("is_platform_owner")),
+            }},
         )
 
     # Ensure licensee admin role & permissions derived from their active license
