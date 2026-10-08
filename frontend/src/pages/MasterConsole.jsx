@@ -95,32 +95,6 @@ const FEATURE_FALLBACKS = Object.freeze({
   proposals: [["can_view_all_leads","Lead Management"],["can_create_quotations","Quotations"],["can_view_client_discussion","Client Discussion (view)"],["can_manage_client_discussion","Client Discussion (manage)"]],
   people_matrix: [["can_view_leave","Leave (view)"],["can_manage_leave","Leave (manage)"],["can_view_payroll","Payroll (view)"],["can_manage_payroll","Payroll (manage)"],["can_view_hr","HR (view)"],["can_manage_hr","HR (manage)"],["can_view_recruitment","Recruitment (view)"],["can_manage_recruitment","Recruitment (manage)"],["can_view_performance","Performance (view)"],["can_manage_performance","Performance (manage)"]],
 });
-
-const dashboardReady = (module, selected) => {
-  const dashboardFlag = DASHBOARD_FLAG_BY_MODULE[module?.id];
-  if (!dashboardFlag) return false;
-  const required = (module?.features || []).map((feature) => feature.id).filter((id) => id !== dashboardFlag);
-  return required.length > 0 && required.every((id) => (selected || []).includes(id));
-};
-
-const normalizeDashboardSelection = (catalog, selections) => {
-  const next = { ...(selections || {}) };
-  (catalog || []).forEach((module) => {
-    const dashboardFlag = DASHBOARD_FLAG_BY_MODULE[module.id];
-    if (!dashboardFlag) return;
-    const current = Array.from(new Set(next[module.id] || []));
-    next[module.id] = dashboardReady(module, current)
-      ? Array.from(new Set([...current, dashboardFlag]))
-      : current.filter((id) => id !== dashboardFlag);
-  });
-  return next;
-};
-
-const isFeatureChecked = (module, feature, selected) => {
-  const dashboardFlag = DASHBOARD_FLAG_BY_MODULE[module?.id];
-  return feature.id === dashboardFlag ? dashboardReady(module, selected) : (selected || []).includes(feature.id);
-};
-
 function Field({ label, children }) {
   return (
     <label className="text-sm font-medium text-slate-700">
@@ -262,7 +236,7 @@ export default function MasterConsole() {
     const defaultFeatures = { ...defaultSelectedFeatures };
     const initialModules = activeModules.map((m) => m.id);
     setSelectedModules(initialModules);
-    setSelectedFeatures(normalizeDashboardSelection(activeModules, defaultFeatures));
+    setSelectedFeatures(defaultFeatures);
     setExpandedModules({});
     setForm({ ...emptyForm, invoice_company_id: invoiceCompanies[0]?.id || "" });
     setShowCreate(true);
@@ -280,7 +254,7 @@ export default function MasterConsole() {
       delete nextFeatures[moduleId];
     }
     setSelectedModules(nextModules);
-    setSelectedFeatures(normalizeDashboardSelection(activeModules, nextFeatures));
+    setSelectedFeatures(nextFeatures);
   };
 
   const toggleFeature = (moduleId, featureId) => {
@@ -320,7 +294,7 @@ export default function MasterConsole() {
       const response = await generateCommercialLicense({
         ...form,
         selected_modules: selectedModules,
-        selected_features: normalizeDashboardSelection(activeModules, selectedFeatures),
+        selected_features: selectedFeatures,
         validity_months: Number(form.validity_months || 0),
         amount_charged: form.amount_charged === "" ? calculatedAmount : Number(form.amount_charged),
         max_users: Number(form.max_users),
@@ -931,8 +905,8 @@ export default function MasterConsole() {
                           <label key={feature.id} className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
                             <input
                               type="checkbox"
-                              disabled={generating || feature.id === DASHBOARD_FLAG_BY_MODULE[module.id]}
-                              checked={isFeatureChecked(module, feature, selectedFeatures[module.id] || [])}
+                              disabled={generating}
+                              checked={(selectedFeatures[module.id] || []).includes(feature.id)}
                               onChange={() => toggleFeature(module.id, feature.id)}
                               className="rounded border-slate-300 text-[#0D3B66]"
                             />
