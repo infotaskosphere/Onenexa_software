@@ -3,6 +3,8 @@ import { useQuery } from '@tanstack/react-query';
 import { Users, ShieldCheck, Activity, Settings, Database, Fingerprint, ScrollText, Phone, Building2, PackageCheck, UserCheck, FileClock, BarChart3 } from 'lucide-react';
 import useDark from '@/hooks/useDark';
 import api from '@/lib/api';
+import { canAccessPath, isCommercialTenant } from '@/lib/commercialPermissionMatrix';
+import { useAuth } from '@/contexts/AuthContext.jsx';
 import { HubBanner, LinkCard, HUB_COLORS } from '@/components/SectionHub.jsx';
 
 const list = (data) => {
@@ -57,8 +59,9 @@ function FactCard({ icon: Icon, label, value, detail, color, isDark }) {
 
 export default function AdminDashboard() {
   const isDark = useDark();
+  const { user: authUser } = useAuth();
   const { data, isLoading, isError, refetch } = useAdminFacts();
-  const user = data?.user;
+  const user = authUser || data?.user;
   const companyName = user?.company_name || 'Current tenant';
   const scopeLabel = user?.company_id ? `${companyName} · license admin` : 'Platform administration';
   const links = [
@@ -74,6 +77,10 @@ export default function AdminDashboard() {
     { path: '/reports', icon: BarChart3, label: 'Reports', description: 'Performance rankings, attendance and workforce reports.', color: '#F59E0B' },
     { path: '/contact-details', icon: Phone, label: 'Contact Details', description: 'Manage company and department contact information.', color: '#0EA5E9' },
   ];
+  const visibleLinks = links.filter((link) => {
+    if (!user || !isCommercialTenant(user)) return true;
+    return canAccessPath(user, link.path);
+  });
   return <div className="w-full min-w-0 p-3 sm:p-4 lg:p-6 space-y-4 sm:space-y-6">
     <HubBanner icon={ShieldCheck} eyebrow="Admin Control Plane" title="Administration" subtitle={`${scopeLabel}. Live figures below are read from the current tenant APIs; unavailable endpoints are not fabricated.`} isDark={isDark} />
     <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
@@ -94,6 +101,6 @@ export default function AdminDashboard() {
         <button onClick={() => refetch()} className="mt-3 text-xs font-bold text-blue-600 hover:underline">Refresh facts</button>
       </div>
     </div>
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">{links.map(link => <LinkCard key={link.path} {...link} isDark={isDark} />)}</div>
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">{visibleLinks.map(link => <LinkCard key={link.path} {...link} isDark={isDark} />)}</div>
   </div>;
 }
