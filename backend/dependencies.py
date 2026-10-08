@@ -435,6 +435,11 @@ async def get_current_user(credentials=Depends(security)):
                 u_data["selected_features"] = lic.get("selected_features") or {}
                 u_data["license_id"] = lic.get("id")
                 u_data["commercial_customer_id"] = lic.get("customer_id") or cust_id
+                # Re-run the centralized commercial entitlement normalization
+                # AFTER the active license has been hydrated. The first
+                # normalization happens before license lookup and therefore
+                # cannot know the current Platform Owner page selections.
+                u_data = _normalize_permissions(u_data)
                 user = User.model_validate(u_data)
         except Exception as e:
             logger.warning(f"Could not hydrate license modules in get_current_user: {e}")
