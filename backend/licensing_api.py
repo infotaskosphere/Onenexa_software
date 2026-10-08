@@ -9,6 +9,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from backend.dependencies import db, get_current_user, require_admin
+from backend.identity_hierarchy import ensure_identity_email_link, ensure_licensee_uid, ensure_license_uid
 
 
 logger = logging.getLogger(__name__)
@@ -224,14 +225,67 @@ async def create_license_record(input_data: Dict[str, Any], created_by: str) -> 
             "phone": str(input_data.get("phone") or "").strip(),
             "created_at": _now().isoformat(),
         }
+        email = str(customer.get("email") or "").strip()
+        if email:
+            existing_link = await db.identity_email_links.find_one(
+                {"email_normalized": email.lower()},
+                {"_id": 0, "identity_uid": 1},
+            )
+            if existing_link:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "This email is already linked to "
+                        f"{existing_link.get('identity_uid') or 'another organization identity'}. "
+                        "One email cannot be linked to two unique IDs."
+                    ),
+                )
+            if email.lower() in {
+                value.lower() for value in os.getenv(
+                    "PLATFORM_OWNER_EMAILS",
+                    "info.taskosphere@gmail.com,infotaskosphere@gmail.com,admin@taskosphere.com,csmanthandesai@gmail.com",
+                ).split(",") if value.strip()
+            }:
+                raise HTTPException(
+                    status_code=409,
+                    detail="This email is reserved for the Platform Owner and cannot be linked to a licensee.",
+                )
+            existing_email_customer = await db.commercial_license_customers.find_one(
+                {
+                    "$or": [
+                        {"email_normalized": email.lower()},
+                        {"email": email},
+                    ]
+                },
+                {"_id": 0, "id": 1, "licensee_uid": 1},
+            )
+            if existing_email_customer and str(existing_email_customer.get("id") or "") != customer_id:
+                raise HTTPException(
+                    status_code=409,
+                    detail="This email is already linked to another licensee unique ID.",
+                )
         await db.commercial_license_customers.insert_one(dict(customer))
 
+    email_normalized = str(customer.get("email") or "").strip().lower()
     licensee_uid = await ensure_licensee_uid(db, customer["id"], customer)
     customer["licensee_uid"] = licensee_uid
     await db.commercial_license_customers.update_one(
         {"id": customer["id"]},
-        {"$set": {"licensee_uid": licensee_uid, "identity_type": "licensee"}},
+        {
+            "$set": {
+                "licensee_uid": licensee_uid,
+                "identity_type": "licensee",
+                "email_normalized": email_normalized,
+            }
+        },
     )
+    if email_normalized:
+        await ensure_identity_email_link(
+            db,
+            customer.get("email"),
+            licensee_uid,
+            identity_type="licensee",
+        )
 
     issued_at = _now()
     validity_days = int(input_data.get("validity_days") if input_data.get("validity_days") is not None else package.get("validity_days", 365))
