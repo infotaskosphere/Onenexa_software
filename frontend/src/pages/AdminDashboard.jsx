@@ -17,14 +17,21 @@ const list = (data) => {
 const count = (data) => typeof data?.total === 'number' ? data.total : typeof data?.count === 'number' ? data.count : list(data).length;
 
 function useAdminFacts() {
+  const { user } = useAuth();
   return useQuery({
-    queryKey: ['adminDashboardFacts'],
+    queryKey: ['adminDashboardFacts', user?.id || 'anonymous'],
     queryFn: async () => {
+      const canSeeTaskosphereAdminPages =
+        !user ||
+        !isCommercialTenant(user) ||
+        canAccessPath(user, '/reports');
       const results = await Promise.allSettled([
         api.get('/users', { _silent: true }),
-        api.get('/companies/list', { _silent: true }),
+        api.get('/companies', { _silent: true }),
         api.get('/role-admin/roles', { _silent: true }),
-        api.get('/audit-logs', { _silent: true }),
+        canSeeTaskosphereAdminPages
+          ? api.get('/audit-logs', { _silent: true })
+          : Promise.resolve({ data: { count: null } }),
         api.get('/auth/me', { _silent: true }),
       ]);
       const [u, c, r, a, me] = results;
