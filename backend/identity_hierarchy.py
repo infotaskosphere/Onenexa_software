@@ -327,6 +327,35 @@ async def ensure_platform_owner_identity(db, user: Optional[dict] = None) -> str
 async def enrich_user_identity(db, user: dict) -> dict:
     data = dict(user or {})
 
+    # Reserved Platform Owner email identities take precedence over stale
+    # commercial fields from older records. New licensees are prevented from
+    # using these emails, so this is a deterministic legacy repair.
+    try:
+        from backend.platform_owner import platform_owner_emails
+
+        owner_email = _normalized_email(data.get("email"))
+        if owner_email and owner_email in platform_owner_emails():
+            owner_uid = await ensure_platform_owner_identity(db, data)
+            data["platform_owner_uid"] = owner_uid
+            data["identity_org_uid"] = owner_uid
+            data["identity_type"] = (
+                "platform_owner_admin"
+                if str(data.get("role", "")).lower() == "admin"
+                else "platform_owner_user"
+            )
+            data["email_normalized"] = owner_email
+            data["is_platform_owner"] = True
+            if not _USER_UID_RE.match(_clean(data.get("user_uid"))):
+                data["user_uid"] = await ensure_user_uid(
+                    db,
+                    data,
+                    organization_uid=owner_uid,
+                    identity_type=data["identity_type"],
+                )
+            return data
+    except Exception:
+        logger.exception("Reserved Platform Owner email enrichment failed.")
+
     # The organization identity is authoritative for login. Once an email is
     # linked to PO-######, stale commercial fields must not turn the owner into
     # a commercial tenant and trigger a 403.
