@@ -37,7 +37,7 @@ import asyncio
 import logging
 import uuid
 
-from backend.dependencies import require_commercial_admin_module, db, get_current_user, personal_birthday_candidates, get_user_permissions
+from backend.dependencies import require_commercial_admin_module, _commercial_license_modules_for_user, db, get_current_user, personal_birthday_candidates, get_user_permissions
 from backend.notifications import create_notification
 from backend.client_activity import log_client_activity
 
@@ -76,6 +76,18 @@ def _allowed_channels(current_user) -> set:
 
 
 def require_approval_access(current_user=Depends(get_current_user)):
+    # The Approval page is part of Records for commercial tenants. Keep the
+    # existing delegated approval permissions, but never allow them to bypass
+    # the Records module license itself.
+    if (
+        getattr(current_user, "company_id", None)
+        and not _commercial_license_modules_for_user(current_user)
+        .intersection({"records"})
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Automation Approvals requires the licensed Records module.",
+        )
     if not _allowed_channels(current_user):
         raise HTTPException(
             status_code=403,
