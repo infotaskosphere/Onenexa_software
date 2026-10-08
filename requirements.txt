@@ -54,7 +54,8 @@ python-multipart==0.0.31
 # =========================
 # Authentication / Security
 # =========================
-python-jose==3.3.0
+# Authentication uses PyJWT directly in the backend. python-jose was unused
+# and pulled in ecdsa, which currently carries an active high-severity advisory.
 passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
 PyJWT==2.15.0
