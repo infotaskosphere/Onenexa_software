@@ -195,19 +195,16 @@ def _apply_license_entitlements(role: str, modules: List[str], selected_features
 
         if not allowed:
             selected_flags = set()
-        elif feature_map is None:
-            # Compatibility for callers that predate page-selective licensing.
-            selected_flags = {
-                str(page.get("flag")).strip()
-                for page in module_def.get("pages", [])
-                if page.get("flag")
-            }
-        else:
+        elif isinstance(feature_map, dict):
             selected_flags = {
                 str(flag).strip()
                 for flag in (feature_map.get(module_id) or [])
                 if str(flag).strip()
             }
+        else:
+            # Commercial licenses are page-selective. Missing page selections
+            # must never expand a module into full access.
+            selected_flags = set()
 
         for page in module_def.get("pages", []):
             flag = page.get("flag")
