@@ -275,14 +275,17 @@ async def _get_saas_session_user(token: str):
         if not company:
             company=await raw_db.companies.find_one({"_id": company_id, "status": "active"})
         if not company:
-            try: company=await raw_db.companies.find_one({"_id": ObjectId(str(company_id)), "status": "active"})
-            except Exception: pass
+            try:
+                company=await raw_db.companies.find_one({"_id": ObjectId(str(company_id)), "status": "active"})
+            except Exception:
+                pass
         if not company:
             return None
-        # Commercial licenses are authoritative for commercial SaaS tenants.
-        # Legacy subscription records remain supported for non-commercial users,
-        # but a valid issued license must not fail because the old subscription
-        # collection was never populated.
+
+        # Always hydrate the CURRENT commercial license before building the
+        # authenticated User. License changes made in Master Console must take
+        # effect on the very next /auth/me, even when the browser's opaque SaaS
+        # session token was created before the license was edited.
         commercial_license = None
         user_license_id = str(user.get("license_id") or "").strip()
         user_customer_id = str(
@@ -290,44 +293,73 @@ async def _get_saas_session_user(token: str):
             or company.get("commercial_customer_id")
             or ""
         ).strip()
-        commercial_query = []
+        commercial_queries = []
         if user_license_id:
-            commercial_query.append({"id": user_license_id})
+            commercial_queries.append({"id": user_license_id})
         if user_customer_id:
-            commercial_query.append({"customer_id": user_customer_id})
-        commercial_query.append({"company_id": str(company.get("id") or company_id)})
+            commercial_queries.append({"customer_id": user_customer_id})
+        commercial_queries.append({"company_id": str(company.get("id") or company_id)})
+
         commercial_license = await raw_db.commercial_licenses.find_one(
-            {"$or": commercial_query, "status": {"$in": ["active", "trial"]}},
+            {
+                "$or": commercial_queries,
+                "status": {"$in": ["active", "trial"]},
+            },
             {"_id": 0},
             sort=[("issued_at", -1)],
         )
+
         if commercial_license:
             expires_at = commercial_license.get("expires_at")
-            if expires_at and isinstance(expires_at, str):
-                try:
-                    expires_at = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
-                except Exception:
-                    expires_at = None
             if expires_at:
-                if expires_at.tzinfo is None:
-                    expires_at = expires_at.replace(tzinfo=timezone.utc)
-                if expires_at <= datetime.now(timezone.utc):
-                    return None
-        else:
+                if isinstance(expires_at, str):
+                    try:
+                        expires_at = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+                    except Exception:
+                        expires_at = None
+                if expires_at:
+                    if expires_at.tzinfo is None:
+                        expires_at = expires_at.replace(tzinfo=timezone.utc)
+                    if expires_at <= datetime.now(timezone.utc):
+                        return None
+
+        # Legacy subscription remains a fallback only when this is NOT a
+        # commercial-license tenant.
+        if not commercial_license:
             subscription=await raw_db.subscriptions.find_one({"company_id": company_id})
             if not subscription:
-                try: subscription=await raw_db.subscriptions.find_one({"company_id": ObjectId(str(company_id))})
-                except Exception: pass
+                try:
+                    subscription=await raw_db.subscriptions.find_one({"company_id": ObjectId(str(company_id))})
+                except Exception:
+                    pass
             if not subscription or subscription.get("status") not in ("trial", "active"):
                 return None
             expires_at=subscription.get("expires_at")
             if expires_at:
                 if isinstance(expires_at, str):
-                    try: expires_at=datetime.fromisoformat(expires_at.replace("Z","+00:00"))
-                    except Exception: expires_at=None
+                    try:
+                        expires_at=datetime.fromisoformat(expires_at.replace("Z","+00:00"))
+                    except Exception:
+                        expires_at=None
                 if expires_at:
-                    if expires_at.tzinfo is None: expires_at=expires_at.replace(tzinfo=timezone.utc)
-                    if expires_at <= datetime.now(timezone.utc): return None
+                    if expires_at.tzinfo is None:
+                        expires_at=expires_at.replace(tzinfo=timezone.utc)
+                    if expires_at <= datetime.now(timezone.utc):
+                        return None
+
+        await _touch_saas_session_if_due(raw_db, session)
+        user_data={k:v for k,v in user.items() if k != "_id"}
+        user_data["id"]=str(user.get("_id") or user.get("id"))
+        user_data["company_id"]=str(company_id)
+        user_data["company_name"]=company.get("name")
+        if commercial_license:
+            user_data["licensed_modules"] = list(commercial_license.get("modules") or commercial_license.get("licensed_modules") or [])
+            user_data["selected_features"] = commercial_license.get("selected_features") or {}
+            user_data["license_id"] = commercial_license.get("id")
+            user_data["license_key"] = commercial_license.get("license_key")
+            user_data["commercial_customer_id"] = commercial_license.get("customer_id") or user_data.get("commercial_customer_id") or company.get("commercial_customer_id")
+        user_data=_normalize_permissions(user_data)
+        return User(**user_data)
         await _touch_saas_session_if_due(raw_db, session)
         user_data={k:v for k,v in user.items() if k != "_id"}
         user_data["id"]=str(user.get("_id") or user.get("id"))
