@@ -40,7 +40,6 @@ export default function Login() {
   const [config, setConfig] = useState(null);
   const [mode, setMode] = useState("signin");
   const [email, setEmail] = useState("");
-  const [organizationId, setOrganizationId] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [keepSignedIn, setKeepSignedIn] = useState(false);
@@ -72,7 +71,6 @@ export default function Login() {
         return await api.post("/auth/login", {
           email,
           password,
-          ...(organizationId.trim() ? { organization_id: organizationId.trim().toUpperCase() } : {}),
         });
       }
       catch (error) { lastError = error; if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 1200)); }
@@ -187,8 +185,6 @@ export default function Login() {
               </div>
               {mode === "signin" ? <>
                 <form onSubmit={handleSubmit} className="space-y-5">
-                  <label className="block"><span className="mb-2 block text-xs font-bold uppercase tracking-[.08em] text-slate-500">Organization ID <span className="font-normal normal-case tracking-normal text-slate-400">(optional)</span></span><Input value={organizationId} onChange={(e) => setOrganizationId(e.target.value.toUpperCase())} placeholder="L-000001 or PO-000001" className="h-12 rounded-none border-slate-200 bg-slate-50 px-4 text-sm font-mono uppercase" /></label>
-                  <p className="-mt-2 text-[11px] leading-4 text-slate-400">Required when the same email is used in more than one workspace.</p>
                   <label className="block"><span className="mb-2 block text-xs font-bold uppercase tracking-[.08em] text-slate-500">Email address</span><Input autoComplete="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com" className="h-12 rounded-none border-slate-200 bg-slate-50 px-4 text-sm" /></label>
                   <label className="block"><span className="mb-2 block text-xs font-bold uppercase tracking-[.08em] text-slate-500">Password</span><div className="relative"><Input autoComplete="current-password" type={showPassword ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Enter your password" className="h-12 rounded-none border-slate-200 bg-slate-50 px-4 pr-11 text-sm" /><button type="button" onClick={() => setShowPassword((value) => !value)} className="absolute right-3 top-3 text-slate-400 hover:text-slate-700">{showPassword ? <EyeOff size={19} /> : <Eye size={19} />}</button></div></label>
                   <div className="flex flex-wrap items-center justify-between gap-2">
