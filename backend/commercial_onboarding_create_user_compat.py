@@ -103,7 +103,7 @@ async def create_public_licensed_user_hardened(payload: Dict[str, Any]):
     now = _now().isoformat()
     user_id = __import__("uuid").uuid4().hex
     password_hash = pwd_context.hash(password)
-    permissions = _apply_license_entitlements(role, list(license_doc.get("modules") or []))
+    permissions = _apply_license_entitlements(role, list(license_doc.get("modules") or []), license_doc.get("selected_features") or {})
 
     user_doc = {
         "id": user_id,
