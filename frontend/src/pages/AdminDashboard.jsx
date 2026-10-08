@@ -20,7 +20,7 @@ function useAdminFacts() {
     queryFn: async () => {
       const results = await Promise.allSettled([
         api.get('/users', { _silent: true }),
-        api.get('/companies/list/', { _silent: true }),
+        api.get('/companies/list', { _silent: true }),
         api.get('/role-admin/roles', { _silent: true }),
         api.get('/audit-logs', { _silent: true }),
         api.get('/auth/me', { _silent: true }),
