@@ -478,6 +478,13 @@ async def ensure_licensee_admin(
                 ),
             )
 
+    existing_user_uid = await ensure_user_uid(
+        raw_db,
+        existing_user,
+        organization_uid=licensee_uid,
+        identity_type="licensee_admin",
+    ) if existing_user else None
+
     update_fields = {
         "role": "admin",
         "company_id": company_id,
@@ -489,6 +496,7 @@ async def ensure_licensee_admin(
         "identity_org_uid": licensee_uid,
         "identity_type": "licensee_admin",
         "email_normalized": email,
+        "user_uid": existing_user_uid or None,
         "license_uid": license_uid,
         "licensed_modules": licensed_modules,
         "selected_features": selected_features,
