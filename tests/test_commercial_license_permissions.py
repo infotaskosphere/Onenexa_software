@@ -94,3 +94,40 @@ def test_request_guard_allows_licensee_admin_purchased_finix_pages():
         license_doc,
         "finix",
     ) is False
+
+
+def test_finix_catalog_contains_every_operational_finix_page():
+    from backend.modules.people_matrix.permissions.catalog import MODULE_HIERARCHY
+
+    flags = {
+        page["flag"]
+        for page in MODULE_HIERARCHY["finix"]["pages"]
+    }
+
+    expected = {
+        "can_view_accounting_reports",
+        "can_view_sale",
+        "can_view_purchase",
+        "can_view_bank",
+        "can_view_chart_of_accounts",
+        "can_manage_chart_of_accounts",
+        "can_view_journal_entries",
+        "can_post_journal_entries",
+        "can_match_bank",
+        "can_view_zero_touch_entries",
+        "can_view_extended_accounts_reports",
+        "can_view_gst_portal_sync",
+        "can_view_accounting_integrity",
+        "can_view_depreciation",
+        "can_view_tds_tcs",
+        "can_view_financial_ratios",
+        "can_view_comparative_report",
+        "can_view_yearly_report",
+        "can_view_opening_balances",
+        "can_view_accounting_audit_trail",
+        "can_view_bulk_import",
+        "can_view_due_dates",
+        "can_view_import_invoices",
+    }
+
+    assert expected.issubset(flags)
