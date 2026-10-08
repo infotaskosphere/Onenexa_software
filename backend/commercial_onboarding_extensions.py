@@ -69,7 +69,7 @@ def _normalize_feature_selection(payload: Dict[str, Any], selected_modules: List
         allowed = set(_all_feature_flags(module_id))
         value = raw.get(module_id) if isinstance(raw, dict) else None
         if value is None:
-            result[module_id] = sorted(allowed)
+            result[module_id] = []
             continue
         if not isinstance(value, list):
             raise HTTPException(status_code=400, detail=f"Features for {module_id} must be a list.")
@@ -107,15 +107,16 @@ def _apply_feature_entitlements(role: str, selected_modules: List[str], selected
     selected = set(selected_modules)
     selected_features = selected_features or {module_id: _all_feature_flags(module_id) for module_id in selected_modules}
     for module_id, module_flag in MODULE_FLAG_BY_ID.items():
-        # Licensed module => access to THAT module. An empty/missing page list means
-        # "all pages of this module"; unlicensed modules stay closed regardless of
-        # stale selected_features keys.
+        # A purchased module is only the ceiling. The Platform Owner's explicit
+        # page selection is the complete commercial entitlement.
         allowed = module_id in selected
-        permissions[module_flag] = False if module_id == "aiweave" else allowed
         module_def = MODULE_HIERARCHY.get(module_id, {})
-        allowed_features = set(selected_features.get(module_id) or []) or {p["flag"] for p in module_def.get("pages", []) if p.get("flag")}
+        allowed_features = set(selected_features.get(module_id) or []) if module_id in selected else set()
+        permissions[module_flag] = bool(allowed and allowed_features)
         for page in module_def.get("pages", []):
-            permissions[page["flag"]] = bool(allowed and page["flag"] in allowed_features and permissions.get(page["flag"], False))
+            flag = page.get("flag")
+            if flag:
+                permissions[flag] = bool(allowed and flag in allowed_features)
     return permissions
 
 
