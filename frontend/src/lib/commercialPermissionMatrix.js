@@ -146,7 +146,9 @@ export function hasModuleAccess(user, moduleId) {
   if (!user) return false;
   if (isPlatformOwner(user)) return true;
   if (moduleId === "core") return isCommercialTenant(user);
-  if (moduleId === "aiweave") return user.permissions?.can_access_aiweave === true && user.permissions?.can_view_aiweave === true;
+  if (moduleId === "aiweave") {
+    return (normalizedSelectedFeatures(user).aiweave || new Set()).size > 0;
+  }
   if (!MODULES[moduleId]) return false;
   const modules = normalizeModules(user);
   // Commercial license is the hard ceiling: unlicensed modules cannot be accessed by anyone in the company
@@ -227,8 +229,12 @@ export function hasEffectivePermission(user, permission) {
   }
   if (!user || !permission) return false;
   if (isPlatformOwner(user)) return true;
-  if (permission === "can_access_aiweave") return user.permissions?.can_access_aiweave === true && user.permissions?.can_view_aiweave === true;
-  if (permission === "can_view_aiweave") return user.permissions?.can_access_aiweave === true && user.permissions?.can_view_aiweave === true;
+  if (permission === "can_access_aiweave") {
+    return (normalizedSelectedFeatures(user).aiweave || new Set()).size > 0;
+  }
+  if (permission === "can_view_aiweave") {
+    return (normalizedSelectedFeatures(user).aiweave || new Set()).has("can_view_aiweave");
+  }
   if (!isCommercialTenant(user)) return typeof user.permissions?.[permission] === "boolean" ? user.permissions[permission] : String(user.role || "").toLowerCase() === "admin";
   const moduleEntry = Object.entries(MODULES).find(([, def]) => def.flag === permission);
   if (moduleEntry) return hasModuleAccess(user, moduleEntry[0]);
