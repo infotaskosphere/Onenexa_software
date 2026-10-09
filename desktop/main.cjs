@@ -5,28 +5,13 @@ const { spawn } = require("node:child_process");
 const net = require("node:net");
 
 const APP_NAME = "OneNexa";
-
-// Set the branded name before Electron resolves the per-user data directory.
-app.setName(APP_NAME);
-
-// A second launch must never start another backend on the same local API port.
-const hasSingleInstanceLock = app.requestSingleInstanceLock();
-if (!hasSingleInstanceLock) {
-  app.quit();
-} else {
-  app.on("second-instance", () => {
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.focus();
-    }
-  });
-}
 const API_ORIGIN = process.env.ONENEXA_API_ORIGIN || "http://127.0.0.1:7432";
 const API_HEALTH_URL = new URL("/health", API_ORIGIN).toString();
 const isDev = !app.isPackaged;
 let mainWindow = null;
 let backendProcess = null;
 let backendLogStream = null;
+let backendExited = false;
 
 function openBackendLog() {
   try {
@@ -50,6 +35,7 @@ function attachBackendDiagnostics(child) {
     );
   });
   child.once("exit", (code, signal) => {
+    backendExited = true;
     backendLogStream?.write("\nBACKEND EXIT: code=" + code + ", signal=" + signal + "\n");
   });
 }
@@ -70,7 +56,7 @@ function waitForPort(url, timeoutMs = 12000) {
         settled = true;
         socket.destroy();
         if (ready) return resolve(true);
-        if (Date.now() >= deadline) return resolve(false);
+        if (Date.now() >= deadline || backendExited) return resolve(false);
         setTimeout(attempt, 350);
       };
 
@@ -104,9 +90,14 @@ function launchDevelopmentBackend() {
 
 // Packaged builds use the bundled backend executable instead of requiring Python
 // to be installed separately on the user's PC.
-function launchPackagedBackend() {
+async function launchPackagedBackend() {
   if (isDev || process.env.ONENEXA_SKIP_BACKEND === "1") return;
   openBackendLog();
+  // Do not start a second backend if one is already listening (avoids WinError 10048).
+  if (await waitForPort(API_HEALTH_URL, 1000)) {
+    backendLogStream?.write("Backend already listening on " + API_ORIGIN + "; not starting another.\n");
+    return;
+  }
   const executable = path.join(process.resourcesPath, "backend", "onenexa-backend.exe");
   backendLogStream?.write("Executable: " + executable + "\n");
   backendLogStream?.write("User data: " + app.getPath("userData") + "\n");
@@ -169,13 +160,25 @@ async function createWindow() {
   });
 }
 
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
+}
+
 app.whenReady().then(async () => {
-  if (!hasSingleInstanceLock) return;
   app.setName(APP_NAME);
   launchDevelopmentBackend();
-  launchPackagedBackend();
+  await launchPackagedBackend();
 
-  const ready = await waitForPort(API_HEALTH_URL, isDev ? 12000 : 15000);
+  // The packaged backend is a PyInstaller --onefile exe that unpacks itself on every
+  // launch (slow on first run / with antivirus scanning), so allow a generous window.
+  const ready = await waitForPort(API_HEALTH_URL, isDev ? 12000 : 90000);
   if (!ready) {
     const logPath = path.join(app.getPath("userData"), "logs", "backend.log");
     await dialog.showMessageBox({
