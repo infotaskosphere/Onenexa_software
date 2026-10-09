@@ -30,6 +30,11 @@ def _ensure_local_first_enabled() -> None:
         raise HTTPException(status_code=404, detail="Local-first desktop API is not enabled on this server")
 
 
+def _ensure_pilot_entity(entity_type: str) -> None:
+    if str(entity_type or "").strip().lower() != "client":
+        raise HTTPException(status_code=400, detail="The current offline pilot supports client records only")
+
+
 def _require_local_permission(principal: LocalFirstPrincipal, action: str) -> None:
     role = str(principal.role or "").lower()
     permissions = principal.permissions or {}
@@ -74,6 +79,7 @@ async def get_local_first_records(
     current_user=Depends(get_local_first_principal),
 ):
     _ensure_local_first_enabled()
+    _ensure_pilot_entity(entity_type)
     company_id = _authenticated_company_id(current_user)
     _require_local_permission(current_user, "view")
     try:
@@ -96,6 +102,7 @@ async def save_local_first_record(
     current_user=Depends(get_local_first_principal),
 ):
     _ensure_local_first_enabled()
+    _ensure_pilot_entity(entity_type)
     company_id = _authenticated_company_id(current_user)
     _require_local_permission(current_user, "edit")
     try:
@@ -130,6 +137,7 @@ async def delete_local_first_record(
     current_user=Depends(get_local_first_principal),
 ):
     _ensure_local_first_enabled()
+    _ensure_pilot_entity(entity_type)
     company_id = _authenticated_company_id(current_user)
     _require_local_permission(current_user, "delete")
     try:
