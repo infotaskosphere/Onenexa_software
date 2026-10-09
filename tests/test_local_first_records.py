@@ -91,6 +91,25 @@ class LocalFirstRecordTests(unittest.TestCase):
             company_id="company-a", entity_type="client", entity_id="client-1"
         ))
 
+    def test_client_records_can_be_filtered_to_their_creator(self):
+        records.save_local_record(
+            company_id="company-a",
+            entity_type="client",
+            entity_id="client-a",
+            record={"company_name": "A", "created_by": "user-a"},
+        )
+        records.save_local_record(
+            company_id="company-a",
+            entity_type="client",
+            entity_id="client-b",
+            record={"company_name": "B", "created_by": "user-b"},
+        )
+        visible = records.list_local_records(
+            company_id="company-a", entity_type="client", created_by="user-a"
+        )
+        self.assertEqual(len(visible), 1)
+        self.assertEqual(visible[0]["record"]["company_name"], "A")
+
     def test_rejects_unapproved_entity_types(self):
         with self.assertRaises(ValueError):
             records.save_local_record(
