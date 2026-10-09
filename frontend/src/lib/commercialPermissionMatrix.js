@@ -68,7 +68,7 @@ export const PAGE_MATRIX = Object.freeze([
   ["finix", "can_view_accounting_reports", "/reports/ledger-by-code"],
   ["finix", "can_view_accounting_reports", "/reports/finix-dashboard"], ["finix", "can_view_accounting_reports", "/accounting-reports"], ["finix", "can_view_zero_touch_entries", "/zero-touch-entry"], ["finix", "can_view_gst_portal_sync", "/gst-portal-sync"], ["finix", "can_view_accounting_integrity", "/accounting-integrity"], ["finix", "can_view_extended_accounts_reports", "/day-book"], ["finix", "can_view_extended_accounts_reports", "/cash-bank-book"], ["finix", "can_view_extended_accounts_reports", "/cash-flow"], ["finix", "can_view_extended_accounts_reports", "/outstanding-report"],  ["finix", "can_view_extended_accounts_reports", "/depreciation"], ["finix", "can_view_extended_accounts_reports", "/tds-tcs"], ["finix", "can_view_extended_accounts_reports", "/financial-ratios"], ["finix", "can_view_extended_accounts_reports", "/comparative-report"], ["finix", "can_view_extended_accounts_reports", "/yearly-report"], ["finix", "can_view_extended_accounts_reports", "/opening-balances"], ["finix", "can_view_extended_accounts_reports", "/accounting-audit-trail"], ["finix", "can_view_sale", "/bulk-import"], ["finix", "can_view_extended_accounts_reports", "/due-dates"], ["finix", "can_view_sale", "/import-invoices"], ["finix", "can_view_sale", "/invoicing"], ["finix", "can_view_purchase", "/purchase"], ["finix", "can_view_bank", "/bank-accounts"], ["finix", "can_view_chart_of_accounts", "/chart-of-accounts"], ["finix", "can_manage_chart_of_accounts", "/chart-of-accounts/manage"], ["finix", "can_view_journal_entries", "/journal-entries"], ["finix", "can_post_journal_entries", "/journal-entries/post"], ["finix", "can_view_bank", "/bank-reconciliation"],
   ["compliance", "can_view_compliance_dashboard", "/compliance-dashboard"], ["compliance", "can_view_compliance", "/compliance"], ["compliance", "can_manage_compliance", "/compliance/manage"], ["compliance", "can_view_gst_reconciliation", "/gst-reconciliation"], ["compliance", "can_view_gst_reconciliation", "/gst-sphere"], ["compliance", "can_view_trademark_sphere", "/trademark-sphere"], ["compliance", "can_view_mis_report", "/mis-report"], ["compliance", "can_manage_mis_report", "/mis-report/manage"], ["compliance", "can_view_salary_slips", "/salary-slips"], ["compliance", "can_manage_salary_slips", "/salary-slips/manage"], ["compliance", "can_view_roc_sphere", "/roc-sphere"], ["compliance", "can_manage_roc_sphere", "/roc-sphere/manage"],
-  ["records", "can_view_records_dashboard", "/records-dashboard"], ["records", "can_view_all_dsc", "/dsc"], ["records", "can_view_documents", "/documents"], ["records", "can_view_passwords", "/passwords"], ["records", "can_edit_passwords", "/passwords/manage"], ["records", "can_view_all_clients", "/clients"], ["records", "can_view_client_approvals", "/client-approvals"], ["records", "can_edit_clients", "/clients/manage"], ["records", "can_approve_clients", "/clients/approve"], ["records", "can_approve_whatsapp_wishes", "/automation/whatsapp"], ["records", "can_approve_email_wishes", "/automation/email"], ["records", "can_access_whatsapp_hub", "/whatsapp-hub"], ["records", "can_view_automation_approvals", "/automation/approvals"],
+  ["records", "can_view_records_dashboard", "/records-dashboard"], ["records", "can_view_all_dsc", "/dsc"], ["records", "can_view_documents", "/documents"], ["records", "can_view_passwords", "/passwords"], ["records", "can_edit_passwords", "/passwords/manage"], ["records", "can_view_clients_page", "/clients"], ["records", "can_view_client_approvals", "/client-approvals"], ["records", "can_edit_clients", "/clients/manage"], ["records", "can_approve_clients", "/clients/approve"], ["records", "can_approve_whatsapp_wishes", "/automation/whatsapp"], ["records", "can_approve_email_wishes", "/automation/email"], ["records", "can_access_whatsapp_hub", "/whatsapp-hub"], ["records", "can_view_automation_approvals", "/automation/approvals"],
   ["proposals", "can_view_proposals_dashboard", "/client-proposals-dashboard"], ["proposals", "can_view_all_leads", "/leads"], ["proposals", "can_view_quotations", "/quotations"], ["proposals", "can_view_client_discussion", "/client-discussion"], ["proposals", "can_manage_client_discussion", "/client-discussion/manage"],
   ["aiweave", "can_view_aiweave", "/aiweave"],
   ["people_matrix", "can_view_people_matrix_dashboard", "/people-matrix"], ["people_matrix", "can_view_user_page", "/users"], ["people_matrix", "can_view_leave", "/leave"], ["people_matrix", "can_manage_leave", "/leave/manage"], ["people_matrix", "can_view_payroll", "/payroll"], ["people_matrix", "can_manage_payroll", "/payroll/manage"], ["people_matrix", "can_view_hr", "/hr"], ["people_matrix", "can_manage_hr", "/hr/manage"], ["people_matrix", "can_view_recruitment", "/recruitment"], ["people_matrix", "can_manage_recruitment", "/recruitment/manage"], ["people_matrix", "can_view_performance", "/performance"], ["people_matrix", "can_manage_performance", "/performance/manage"],
@@ -125,7 +125,7 @@ const ALL_PAGE_FLAGS_BY_MODULE = Object.freeze({
   taskosphere: ["can_view_dashboard","can_view_tasks","can_view_todo_dashboard","can_view_attendance","can_view_reminders","can_view_action_center","can_view_client_visits","can_view_client_portal"],
   finix: ["can_view_finix_dashboard","can_view_sale","can_view_purchase","can_view_bank","can_view_journal_entries","can_view_zero_touch_entries","can_view_accounting_reports","can_view_extended_accounts_reports","can_view_gst_portal_sync","can_view_accounting_integrity","can_view_chart_of_accounts"],
   compliance: ["can_view_compliance_dashboard","can_view_compliance","can_view_gst_reconciliation","can_view_trademark_sphere","can_view_roc_sphere","can_view_mis_report","can_view_salary_slips"],
-  records: ["can_view_records_dashboard","can_view_all_dsc","can_view_documents","can_view_all_clients","can_view_passwords","can_view_client_approvals"],
+  records: ["can_view_records_dashboard","can_view_all_dsc","can_view_documents","can_view_clients_page","can_view_passwords","can_view_client_approvals"],
   proposals: ["can_view_proposals_dashboard","can_view_all_leads","can_view_quotations","can_view_client_discussion"],
   people_matrix: ["can_view_people_matrix_dashboard","can_view_leave","can_view_payroll","can_view_hr","can_view_recruitment"],
   aiweave: ["can_view_aiweave"],
@@ -178,15 +178,14 @@ export function normalizedSelectedFeatures(user) {
 
     const list = Array.isArray(flags) ? flags.map((flag) => normalize(flag)) : [];
     const hasAll = list.some((flag) => ["all", "*", "all_features", "full", "complete"].includes(flag));
-    const moduleAliases = LEGACY_PAGE_SELECTION_ALIASES[moduleId] || {};
-    const expandedList = list.flatMap((flag) => [
-      String(flag).trim(),
-      ...(moduleAliases[String(flag).trim()] || []),
-    ]);
+    // The backend normalizes historical selected_features according to the
+    // saved page_catalog_version. Do not re-expand legacy aliases here: doing
+    // so would make a new, independently selected page implicitly grant its
+    // dashboard or another page sharing the old flag.
     const effectiveFlags = new Set(
       hasAll
         ? (ALL_PAGE_FLAGS_BY_MODULE[moduleId] || [])
-        : expandedList.map((flag) => String(flag).trim())
+        : list.map((flag) => String(flag).trim())
     );
     // Do NOT derive a dashboard/report entitlement from another selected page.
     // The Platform Owner must explicitly select the dashboard/report page too.
