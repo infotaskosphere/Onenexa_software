@@ -69,8 +69,11 @@ jobs:
       - name: Install frontend and Electron dependencies
         run: npm install --no-audit --no-fund
 
-      - name: Build React frontend
-        run: npm run build:frontend
+      - name: Build React frontend for Electron file:// loading
+        shell: pwsh
+        run: |
+          $env:ONENEXA_DESKTOP_BUILD = "1"
+          npm run build:frontend
 
       - name: Create Windows icon from the existing OneNexa logo
         run: |
