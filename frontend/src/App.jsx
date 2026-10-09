@@ -42,6 +42,7 @@ const ROUTE_PREFETCHERS = {
   "/roc-sphere": () => import("./pages/ROCSpherePage.jsx"),
   "/records-dashboard": () => import("./pages/RecordsDashboard.jsx"),
   "/clients": () => import("./pages/Clients.jsx"),
+  "/clients-local": () => import("./pages/LocalFirstClients.jsx"),
   "/client-proposals-dashboard": () => import("./pages/ClientProposalsDashboard.jsx"),
   "/leads": () => import("./pages/Leads.jsx"),
   "/quotations": () => import("./pages/Quotations.jsx"),
