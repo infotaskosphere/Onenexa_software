@@ -466,10 +466,21 @@ async def _commercial_license(
 
         return doc
 
-    # The tenant/company license is the canonical source of truth. A user can
-    # retain a historical license_id after the platform owner edits/reissues a
-    # license; trusting that stale user field first causes exactly the false
-    # 403 seen when a newly-enabled Finix/Compliance module is checked.
+    # The user's explicit license link is authoritative. Never select a
+    # different active license just because it happens to contain the module
+    # requested by the current route; that can cross entitlement boundaries.
+    user_license_id = str(getattr(user, "license_id", "") or "").strip()
+    if user_license_id:
+        linked_doc = await db.commercial_licenses.find_one(
+            {"id": user_license_id},
+            {"_id": 0},
+        )
+        valid_linked_doc = await _valid(linked_doc)
+        if valid_linked_doc:
+            return valid_linked_doc
+        # An explicitly linked but inactive/missing license must fail closed.
+        return None
+
     company_id = str(getattr(user, "company_id", "") or "").strip()
     company = None
 
@@ -497,71 +508,7 @@ async def _commercial_license(
             valid = await _valid(doc)
 
             if valid:
-                # A commercial customer is intended to have one active license,
-                # but older Console updates can leave the legal company's
-                # license_id pointing at a previous active record while the
-                # customer has already been moved to a newer active license.
-                # When the current request targets a licensed module that the
-                # linked record does not contain, prefer the matching active
-                # customer license below instead of returning a false 403.
-                requested_module = module_for_path(
-                    request_path or "",
-                    request_method,
-                )
-                if (
-                    not requested_module
-                    or requested_module in resolve_license_modules(valid)
-                ):
-                    return valid
-
-                linked_customer_id = str(
-                    valid.get("customer_id")
-                    or (company or {}).get("commercial_customer_id")
-                    or ""
-                ).strip()
-
-                if linked_customer_id:
-                    docs = await db.commercial_licenses.find(
-                        {
-                            "customer_id": linked_customer_id,
-                            "status": {"$in": ["active", "trial"]},
-                        },
-                        {"_id": 0},
-                    ).sort("issued_at", -1).limit(20).to_list(20)
-
-                    for candidate in docs:
-                        candidate_valid = await _valid(candidate)
-                        if not candidate_valid:
-                            continue
-                        if requested_module in resolve_license_modules(candidate_valid):
-                            logger.info(
-                                "Commercial license compatibility fallback: "
-                                "company=%s linked_license=%s selected_license=%s "
-                                "module=%s path=%s",
-                                company_id,
-                                valid.get("id"),
-                                candidate_valid.get("id"),
-                                requested_module,
-                                request_path,
-                            )
-                            return candidate_valid
-
                 return valid
-
-    user_license_id = str(
-        getattr(user, "license_id", "") or ""
-    ).strip()
-
-    if user_license_id:
-        doc = await db.commercial_licenses.find_one(
-            {"id": user_license_id},
-            {"_id": 0},
-        )
-
-        valid = await _valid(doc)
-
-        if valid:
-            return valid
 
     customer_id = str(
         getattr(user, "commercial_customer_id", "") or ""
