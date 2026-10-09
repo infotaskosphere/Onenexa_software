@@ -12,6 +12,7 @@ import json
 import os
 import sqlite3
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -62,10 +63,21 @@ def _connect() -> sqlite3.Connection:
     return connection
 
 
+@contextmanager
+def _connection():
+    """Ensure SQLite connections are closed after every operation."""
+    connection = _connect()
+    try:
+        with connection:
+            yield connection
+    finally:
+        connection.close()
+
+
 def initialize_local_store() -> Path:
     """Create the local metadata and durable outbound-change tables idempotently."""
     database_path = get_database_path()
-    with _connect() as connection:
+    with _connection() as connection:
         connection.executescript(
             """
             CREATE TABLE IF NOT EXISTS local_store_metadata (
@@ -125,7 +137,7 @@ def initialize_local_store() -> Path:
 
 def get_device_id() -> str:
     initialize_local_store()
-    with _connect() as connection:
+    with _connection() as connection:
         row = connection.execute(
             "SELECT value FROM local_store_metadata WHERE key = 'device_id'"
         ).fetchone()
@@ -168,7 +180,7 @@ def enqueue_change(
         raise ValueError("operation_id cannot be empty")
 
     initialize_local_store()
-    with _connect() as connection:
+    with _connection() as connection:
         connection.execute(
             """
             INSERT INTO sync_outbox (
@@ -211,7 +223,7 @@ def get_pending_changes(limit: int = 100, company_id: str | None = None) -> list
     query += " ORDER BY id ASC LIMIT ?"
     parameters.append(limit)
 
-    with _connect() as connection:
+    with _connection() as connection:
         rows = connection.execute(query, parameters).fetchall()
 
     result: list[dict[str, Any]] = []
@@ -232,7 +244,7 @@ def mark_changes_synced(change_ids: Iterable[int]) -> int:
 
     initialize_local_store()
     placeholders = ",".join("?" for _ in ids)
-    with _connect() as connection:
+    with _connection() as connection:
         cursor = connection.execute(
             f"UPDATE sync_outbox SET synced_at_utc = ?, last_error = NULL "
             f"WHERE id IN ({placeholders}) AND synced_at_utc IS NULL",
@@ -251,7 +263,7 @@ def record_sync_error(change_ids: Iterable[int], error: str) -> int:
     safe_error = str(error or "Unknown synchronization error").strip()[:1000]
     placeholders = ",".join("?" for _ in ids)
     initialize_local_store()
-    with _connect() as connection:
+    with _connection() as connection:
         cursor = connection.execute(
             f"UPDATE sync_outbox SET attempts = attempts + 1, last_error = ? "
             f"WHERE id IN ({placeholders}) AND synced_at_utc IS NULL",
@@ -265,7 +277,7 @@ def save_sync_cursor(scope: str, cursor_value: str) -> None:
     if not normalized_scope:
         raise ValueError("scope is required")
     initialize_local_store()
-    with _connect() as connection:
+    with _connection() as connection:
         connection.execute(
             """
             INSERT INTO sync_cursors (scope, cursor_value, updated_at_utc)
@@ -283,7 +295,7 @@ def get_sync_cursor(scope: str) -> str | None:
     if not normalized_scope:
         raise ValueError("scope is required")
     initialize_local_store()
-    with _connect() as connection:
+    with _connection() as connection:
         row = connection.execute(
             "SELECT cursor_value FROM sync_cursors WHERE scope = ?",
             (normalized_scope,),
@@ -304,7 +316,7 @@ def get_sync_status(company_id: str | None = None) -> dict[str, Any]:
             raise ValueError("company_id cannot be empty when provided")
         query += " AND company_id = ?"
         parameters.append(normalized_company)
-    with _connect() as connection:
+    with _connection() as connection:
         row = connection.execute(query, parameters).fetchone()
     return {
         "device_id": get_device_id(),
