@@ -20,7 +20,11 @@ from backend import dependencies as _dependencies
 from backend.platform_owner import is_platform_owner
 from backend.identity_hierarchy import ensure_licensee_uid, ensure_license_uid, ensure_user_uid, ensure_identity_email_link
 from backend.models import DEFAULT_ROLE_PERMISSIONS, User
-from backend.modules.people_matrix.permissions.catalog import MODULE_HIERARCHY
+from backend.modules.people_matrix.permissions.catalog import (
+    LEGACY_HIDDEN_LICENSE_FLAGS,
+    LEGACY_PAGE_SELECTION_ALIASES,
+    MODULE_HIERARCHY,
+)
 
 logger = logging.getLogger("commercial_licensee_admin")
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -61,6 +65,37 @@ COMMERCIAL_LEGACY_PAGE_FLAGS = {
     "can_edit_passwords",
     "can_approve_whatsapp_wishes",
     "can_approve_email_wishes",
+    "can_reset_client_passwords",
+    "can_view_staff_activity",
+    "can_view_reports",
+    "can_download_reports",
+    "can_view_audit_logs",
+    "can_manage_chart_of_accounts",
+    "can_post_journal_entries",
+    "can_match_bank",
+    "can_view_depreciation",
+    "can_view_tds_tcs",
+    "can_view_financial_ratios",
+    "can_view_comparative_report",
+    "can_view_yearly_report",
+    "can_view_opening_balances",
+    "can_view_accounting_audit_trail",
+    "can_view_bulk_import",
+    "can_view_due_dates",
+    "can_view_import_invoices",
+    "can_view_finix_ai",
+    "can_manage_compliance",
+    "can_manage_mis_report",
+    "can_manage_salary_slips",
+    "can_manage_roc_sphere",
+    "can_view_automation_approvals",
+    "can_manage_client_discussion",
+    "can_manage_leave",
+    "can_manage_payroll",
+    "can_manage_hr",
+    "can_manage_recruitment",
+    "can_view_performance",
+    "can_manage_performance",
 }
 
 
@@ -116,6 +151,8 @@ def normalize_license_selected_features(
             for page in module_def.get("pages", []) or []
             if page.get("flag")
         ]
+        hidden_legacy_flags = LEGACY_HIDDEN_LICENSE_FLAGS.get(module_id, set())
+        accepted_flags = set(all_flags) | set(hidden_legacy_flags)
 
         values = raw.get(module_id)
         if values is None:
@@ -143,12 +180,17 @@ def normalize_license_selected_features(
         # which pages were selected, so fail closed for that module.
         if isinstance(values, (int, float)) and not isinstance(values, bool):
             count = int(values)
-            normalized[module_id] = list(all_flags) if count >= len(all_flags) else []
+            # Historical numeric counts are not enough to reconstruct a partial
+            # selection. Preserve legacy full-module records only when the saved
+            # count covers the previous catalog; never guess selected pages.
+            legacy_catalog_size = max(len(all_flags), count if count >= len(all_flags) else len(all_flags))
+            normalized[module_id] = list(all_flags) if count >= legacy_catalog_size else []
             continue
 
         if isinstance(values, str) and values.strip().isdigit():
             count = int(values.strip())
-            normalized[module_id] = list(all_flags) if count >= len(all_flags) else []
+            legacy_catalog_size = max(len(all_flags), count if count >= len(all_flags) else len(all_flags))
+            normalized[module_id] = list(all_flags) if count >= legacy_catalog_size else []
             continue
 
         if not isinstance(values, (list, tuple, set)):
@@ -156,11 +198,14 @@ def normalize_license_selected_features(
             continue
 
         selected = []
-        allowed = set(all_flags)
-        for flag in values:
-            flag = str(flag).strip()
-            if flag in allowed and flag not in selected:
+        aliases_for_module = LEGACY_PAGE_SELECTION_ALIASES.get(module_id, {})
+        for raw_flag in values:
+            flag = str(raw_flag).strip()
+            if flag in accepted_flags and flag not in selected:
                 selected.append(flag)
+            for canonical_flag in aliases_for_module.get(flag, []):
+                if canonical_flag in all_flags and canonical_flag not in selected:
+                    selected.append(canonical_flag)
 
         normalized[module_id] = selected
 
@@ -234,21 +279,47 @@ def get_all_admin_permissions(license_doc: Optional[Dict[str, Any]] = None) -> D
             if flag:
                 permissions[flag] = bool(module_allowed and flag in selected)
 
-        # Compatibility mappings for legacy screens. These are derived from
-        # the same selected page flags; they are not independent entitlements.
-        if module_id == "finix":
+        # Legacy/action flags are derived from their visible parent page. They
+        # are not separately selectable license pages, but existing API handlers
+        # still consume them and user-level permissions may further restrict them.
+        if module_id == "taskosphere":
+            permissions["can_reset_client_passwords"] = bool(module_allowed and "can_view_client_portal" in selected)
+            for flag in ("can_view_staff_activity", "can_view_reports", "can_download_reports", "can_view_audit_logs"):
+                permissions[flag] = bool(module_allowed and flag in selected)
+        elif module_id == "finix":
             permissions["can_manage_invoices"] = bool(module_allowed and "can_view_sale" in selected)
+            permissions["can_manage_chart_of_accounts"] = bool(module_allowed and "can_view_chart_of_accounts" in selected)
+            permissions["can_post_journal_entries"] = bool(module_allowed and ("can_view_journal_entries" in selected or "can_view_zero_touch_entries" in selected))
+            permissions["can_match_bank"] = bool(module_allowed and "can_view_bank" in selected)
+            for flag in ("can_view_depreciation", "can_view_tds_tcs", "can_view_financial_ratios", "can_view_comparative_report", "can_view_yearly_report", "can_view_opening_balances", "can_view_accounting_audit_trail", "can_view_bulk_import", "can_view_due_dates"):
+                permissions[flag] = bool(module_allowed and "can_view_extended_accounts_reports" in selected)
+            permissions["can_view_import_invoices"] = bool(module_allowed and "can_view_sale" in selected)
+            permissions["can_view_finix_ai"] = bool(module_allowed and ("can_view_finix_dashboard" in selected or "can_view_extended_accounts_reports" in selected))
+        elif module_id == "compliance":
+            permissions["can_manage_compliance"] = bool(module_allowed and "can_view_compliance" in selected)
+            permissions["can_manage_mis_report"] = bool(module_allowed and "can_view_mis_report" in selected)
+            permissions["can_manage_salary_slips"] = bool(module_allowed and "can_view_salary_slips" in selected)
+            permissions["can_manage_roc_sphere"] = bool(module_allowed and "can_view_roc_sphere" in selected)
         elif module_id == "records":
-            permissions["can_view_clients"] = bool(module_allowed and "can_view_all_clients" in selected)
-            permissions["can_edit_clients"] = bool(module_allowed and "can_edit_clients" in selected)
-            permissions["can_approve_clients"] = bool(module_allowed and "can_approve_clients" in selected)
-            permissions["can_view_passwords"] = bool(module_allowed and "can_view_passwords" in selected)
-            permissions["can_edit_passwords"] = bool(module_allowed and "can_edit_passwords" in selected)
-            permissions["can_approve_whatsapp_wishes"] = bool(module_allowed and "can_approve_whatsapp_wishes" in selected)
-            permissions["can_approve_email_wishes"] = bool(module_allowed and "can_approve_email_wishes" in selected)
+            permissions["can_view_clients"] = bool(module_allowed and "can_view_client_approvals" in selected)
+            permissions["can_edit_clients"] = bool(module_allowed and "can_view_all_clients" in selected)
+            permissions["can_approve_clients"] = bool(module_allowed and "can_view_client_approvals" in selected)
+            permissions["can_edit_passwords"] = bool(module_allowed and "can_view_passwords" in selected)
+            permissions["can_approve_whatsapp_wishes"] = bool(module_allowed and "can_view_records_dashboard" in selected and "can_approve_whatsapp_wishes" in selected)
+            permissions["can_approve_email_wishes"] = bool(module_allowed and "can_view_records_dashboard" in selected and "can_approve_email_wishes" in selected)
+            permissions["can_access_whatsapp_hub"] = bool(module_allowed and "can_view_records_dashboard" in selected and "can_access_whatsapp_hub" in selected)
+            permissions["can_view_automation_approvals"] = bool(module_allowed and "can_view_records_dashboard" in selected and "can_view_automation_approvals" in selected)
         elif module_id == "proposals":
-            permissions["can_view_all_leads"] = bool(module_allowed and "can_view_all_leads" in selected)
-            permissions["can_create_quotations"] = bool(module_allowed and "can_create_quotations" in selected)
+            permissions["can_create_quotations"] = bool(module_allowed and "can_view_quotations" in selected)
+            permissions["can_manage_client_discussion"] = bool(module_allowed and "can_view_client_discussion" in selected)
+        elif module_id == "people_matrix":
+            permissions["can_view_people_matrix"] = bool(module_allowed and "can_view_people_matrix_dashboard" in selected)
+            permissions["can_manage_leave"] = bool(module_allowed and "can_view_leave" in selected)
+            permissions["can_manage_payroll"] = bool(module_allowed and "can_view_payroll" in selected)
+            permissions["can_manage_hr"] = bool(module_allowed and "can_view_hr" in selected)
+            permissions["can_manage_recruitment"] = bool(module_allowed and "can_view_recruitment" in selected)
+            permissions["can_view_performance"] = False
+            permissions["can_manage_performance"] = False
 
     return permissions
 
