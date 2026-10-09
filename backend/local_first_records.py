@@ -15,7 +15,19 @@ from typing import Any
 
 from backend import local_first_store as store
 
-_ALLOWED_ENTITY_TYPES = {"client", "task", "invoice", "reminder", "accounting_entry", "todo"}
+_ALLOWED_ENTITY_TYPES = {
+    "client",
+    "task",
+    "invoice",
+    "reminder",
+    "accounting_entry",
+    "todo",
+    "quotation",
+    "lead",
+    "visit",
+    "user",
+    "contact",
+}
 
 
 def _now() -> str:

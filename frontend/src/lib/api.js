@@ -2,6 +2,8 @@ import axios from "axios";
 import { useState, useEffect } from "react";
 import { handleMockRoute } from "./mockBackend";
 import { isPlatformOwner } from "./commercialPermissionMatrix";
+import { attachOfflineInterceptor } from "./offlineInterceptor";
+import * as offlineStore from "./offlineStore";
 
 // ─────────────────────────────────────────────────────────────
 // API BASE URL
@@ -881,7 +883,16 @@ export function getErrorMessage(error) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// UNIVERSAL TRANSPARENT OFFLINE INTERCEPTOR
+// ─────────────────────────────────────────────────────────────
+
+attachOfflineInterceptor(api);
+
+export { offlineStore };
+
+// ─────────────────────────────────────────────────────────────
 // DEFAULT EXPORT
 // ─────────────────────────────────────────────────────────────
 
 export default api;
+
