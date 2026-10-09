@@ -325,8 +325,13 @@ def get_all_admin_permissions(license_doc: Optional[Dict[str, Any]] = None) -> D
             permissions["can_manage_salary_slips"] = bool(module_allowed and "can_view_salary_slips" in selected)
             permissions["can_manage_roc_sphere"] = bool(module_allowed and "can_view_roc_sphere" in selected)
         elif module_id == "records":
-            permissions["can_view_clients"] = bool(module_allowed and "can_view_all_clients" in selected)
-            permissions["can_edit_clients"] = bool(module_allowed and "can_view_all_clients" in selected)
+            # The license controls whether the Clients page is available. The
+            # user's can_view_all_clients permission remains a separate data
+            # visibility scope (all tenant clients vs assigned/created clients).
+            clients_page_selected = bool(module_allowed and "can_view_clients_page" in selected)
+            permissions["can_view_clients"] = clients_page_selected
+            permissions["can_view_all_clients"] = clients_page_selected
+            permissions["can_edit_clients"] = clients_page_selected
             permissions["can_approve_clients"] = bool(module_allowed and "can_view_client_approvals" in selected)
             permissions["can_edit_passwords"] = bool(module_allowed and "can_view_passwords" in selected)
             permissions["can_approve_whatsapp_wishes"] = bool(module_allowed and "can_view_records_dashboard" in selected and "can_approve_whatsapp_wishes" in selected)
