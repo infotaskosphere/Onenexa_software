@@ -174,24 +174,38 @@ def normalize_license_selected_features(
             normalized[module_id] = []
             continue
 
-        # Legacy commercial records sometimes persisted only the selected-page
-        # count. A count equal to the module's complete page count is safely
-        # equivalent to selecting every page. A smaller count cannot identify
-        # which pages were selected, so fail closed for that module.
-        if isinstance(values, (int, float)) and not isinstance(values, bool):
+        # Some older licenses retained only the selected-page count. Prefer the
+        # immutable feature-price snapshot when it contains concrete flag names;
+        # never infer a partial selection from a count alone.
+        if (isinstance(values, (int, float)) and not isinstance(values, bool)) or (
+            isinstance(values, str) and values.strip().isdigit()
+        ):
             count = int(values)
-            # Historical numeric counts are not enough to reconstruct a partial
-            # selection. Preserve legacy full-module records only when the saved
-            # count covers the previous catalog; never guess selected pages.
-            legacy_catalog_size = max(len(all_flags), count if count >= len(all_flags) else len(all_flags))
-            normalized[module_id] = list(all_flags) if count >= legacy_catalog_size else []
-            continue
-
-        if isinstance(values, str) and values.strip().isdigit():
-            count = int(values.strip())
-            legacy_catalog_size = max(len(all_flags), count if count >= len(all_flags) else len(all_flags))
-            normalized[module_id] = list(all_flags) if count >= legacy_catalog_size else []
-            continue
+            feature_prices = license_doc.get("feature_prices") or {}
+            snapshot = feature_prices.get(module_id, {}) if isinstance(feature_prices, dict) else {}
+            snapshot_flags = [str(flag).strip() for flag in snapshot.keys()] if isinstance(snapshot, dict) else []
+            aliases_for_module = LEGACY_PAGE_SELECTION_ALIASES.get(module_id, {})
+            valid_snapshot_flags = [
+                flag for flag in snapshot_flags
+                if flag in accepted_flags or flag in aliases_for_module
+            ]
+            if valid_snapshot_flags and len(valid_snapshot_flags) >= count:
+                values = valid_snapshot_flags
+            else:
+                # Historical whole-module numeric counts are known for the old
+                # catalog versions. Do not treat a smaller arbitrary count (e.g.
+                # Finix 3) as all pages; that would bypass page-selective access.
+                legacy_full_counts = {
+                    "taskosphere": {9},
+                    "finix": {9},
+                    "compliance": {10},
+                    "records": {9},
+                    "proposals": {4},
+                    "people_matrix": {11},
+                    "aiweave": {1},
+                }
+                normalized[module_id] = list(all_flags) if count in legacy_full_counts.get(module_id, set()) else []
+                continue
 
         if not isinstance(values, (list, tuple, set)):
             normalized[module_id] = []
