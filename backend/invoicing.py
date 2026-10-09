@@ -2913,20 +2913,38 @@ class PurchaseInvoiceCreate(BaseModel):
     client_name: Optional[str] = None
     supplier_name: str
     supplier_gstin: Optional[str] = ""
-    invoice_no: str
+    buyer_gstin: Optional[str] = ""
+    invoice_no: str = ""
     invoice_date: str
     taxable_amount: float
     total_gst: float
     grand_total: float
     currency: Optional[str] = "INR"
+    notes: Optional[str] = ""
 
 
 @router.post("/purchase-invoices")
 async def create_purchase_invoice(data: PurchaseInvoiceCreate, current_user: User = Depends(get_current_user)):
     if not _perm(current_user):
         raise HTTPException(403, "Access denied")
-    
-    invoice_no = data.invoice_no.strip()
+
+    supplier_name = str(data.supplier_name or "").strip()
+    if not supplier_name:
+        raise HTTPException(422, "Enter the supplier or shop name.")
+    if not str(data.invoice_date or "").strip():
+        raise HTTPException(422, "Select the bill date.")
+    try:
+        # The simple manual-entry screen sends YYYY-MM-DD; retain ISO support
+        # for other existing clients without changing their payload contract.
+        datetime.fromisoformat(str(data.invoice_date).strip()[:10])
+    except (TypeError, ValueError):
+        raise HTTPException(422, "Enter a valid bill date.")
+    if float(data.grand_total or 0) <= 0:
+        raise HTTPException(422, "Enter a bill total greater than zero.")
+    if float(data.taxable_amount or 0) < 0 or float(data.total_gst or 0) < 0:
+        raise HTTPException(422, "Bill and GST amounts cannot be negative.")
+
+    invoice_no = str(data.invoice_no or "").strip()
     now = datetime.now(timezone.utc).isoformat()
     
     # Check duplicate
@@ -2944,10 +2962,10 @@ async def create_purchase_invoice(data: PurchaseInvoiceCreate, current_user: Use
         "company_id": data.company_id or "",
         "client_id": data.client_id or "",
         "client_name": data.client_name or "",
-        "supplier_name": data.supplier_name,
-        "supplier_gstin": data.supplier_gstin or "",
+        "supplier_name": supplier_name,
+        "supplier_gstin": str(data.supplier_gstin or "").strip().upper(),
         "buyer_name": data.client_name or "",
-        "buyer_gstin": "",
+        "buyer_gstin": str(data.buyer_gstin or "").strip().upper(),
         "invoice_no": invoice_no,
         "invoice_date": data.invoice_date,
         "taxable_amount": data.taxable_amount,
@@ -2958,7 +2976,7 @@ async def create_purchase_invoice(data: PurchaseInvoiceCreate, current_user: Use
         "file_size": 0,
         "content_type": "",
         "parse_confidence": 1.0,
-        "raw_text_excerpt": "Manually created from bank account matching",
+        "raw_text_excerpt": str(data.notes or "").strip()[:1000] or "Manually entered purchase bill",
         "created_by": current_user.id,
         "created_at": now,
         "updated_at": now,
