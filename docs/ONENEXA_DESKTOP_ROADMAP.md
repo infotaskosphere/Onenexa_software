@@ -35,6 +35,7 @@ The first local record-storage slice is now present on `feature/master-console`:
 - A record write and its outbox entry are committed in the same SQLite transaction.
 - Deletes use local tombstones and queue a delete operation rather than erasing history immediately.
 - `backend/local_first_router.py` exposes authenticated status, list, create/update, and delete endpoints under `/api/desktop/local-first`.
+- The API is disabled by default on hosted servers; the development Electron launcher enables it only for its spawned local backend with `ONENEXA_LOCAL_FIRST_ENABLED=1`.
 - GitHub Actions compiles these modules and runs local-first unit tests on pushes and pull requests to `feature/master-console`.
 
 Important limitations remain: the existing ERP Clients and Tasks screens/APIs are still MongoDB-backed and do not automatically use these pilot endpoints. The sync queue has no cloud transport yet, so pending changes stay on the device. This is a backend pilot foundation, not a complete offline release. Use a development database and non-production test data.
