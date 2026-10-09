@@ -2939,9 +2939,17 @@ async def create_purchase_invoice(data: PurchaseInvoiceCreate, current_user: Use
         datetime.fromisoformat(str(data.invoice_date).strip()[:10])
     except (TypeError, ValueError):
         raise HTTPException(422, "Enter a valid bill date.")
-    if float(data.grand_total or 0) <= 0:
+    import math
+    amount_values = (
+        float(data.taxable_amount or 0),
+        float(data.total_gst or 0),
+        float(data.grand_total or 0),
+    )
+    if not all(math.isfinite(value) for value in amount_values):
+        raise HTTPException(422, "Enter valid numeric amounts from the bill.")
+    if amount_values[2] <= 0:
         raise HTTPException(422, "Enter a bill total greater than zero.")
-    if float(data.taxable_amount or 0) < 0 or float(data.total_gst or 0) < 0:
+    if amount_values[0] < 0 or amount_values[1] < 0:
         raise HTTPException(422, "Bill and GST amounts cannot be negative.")
 
     invoice_no = str(data.invoice_no or "").strip()
@@ -2976,6 +2984,7 @@ async def create_purchase_invoice(data: PurchaseInvoiceCreate, current_user: Use
         "file_size": 0,
         "content_type": "",
         "parse_confidence": 1.0,
+        "notes": str(data.notes or "").strip()[:1000],
         "raw_text_excerpt": str(data.notes or "").strip()[:1000] or "Manually entered purchase bill",
         "created_by": current_user.id,
         "created_at": now,
