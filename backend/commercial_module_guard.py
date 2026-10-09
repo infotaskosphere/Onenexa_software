@@ -277,7 +277,7 @@ FEATURE_PREFIXES = {
         "can_view_documents": ("/documents",),
         "can_view_passwords": ("/passwords",),
         "can_edit_passwords": ("/passwords/manage",),
-        "can_view_all_clients": ("/clients",),
+        "can_view_clients_page": ("/clients",),
         "can_edit_clients": ("/clients/manage",),
         "can_view_client_approvals": ("/client-approvals",),
         "can_approve_clients": ("/clients/approve", "/client-approvals/approve"),
