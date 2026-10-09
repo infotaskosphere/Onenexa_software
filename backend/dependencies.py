@@ -534,7 +534,12 @@ async def get_current_user(credentials=Depends(security)):
             if lic:
                 u_data = user.model_dump()
                 u_data["licensed_modules"] = list(lic.get("modules") or lic.get("licensed_modules") or [])
-                u_data["selected_features"] = lic.get("selected_features") or {}
+                try:
+                    from backend.commercial_licensee_admin import normalize_license_selected_features
+                    u_data["selected_features"] = normalize_license_selected_features(lic)
+                except Exception:
+                    logger.exception("Could not normalize selected commercial page flags.")
+                    u_data["selected_features"] = lic.get("selected_features") or {}
                 u_data["license_id"] = lic.get("id")
                 u_data["commercial_customer_id"] = lic.get("customer_id") or cust_id
                 # Re-run the centralized commercial entitlement normalization
