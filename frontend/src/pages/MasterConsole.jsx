@@ -79,11 +79,11 @@ const featureLabel = (flag) => String(flag || "").replace(/^can_(view|manage)_/,
 
 const DASHBOARD_FLAG_BY_MODULE = Object.freeze({
   taskosphere: "can_view_dashboard",
-  finix: "can_view_accounting_reports",
-  compliance: "can_view_compliance",
-  records: "can_view_documents",
-  proposals: "can_view_all_leads",
-  people_matrix: "can_view_user_page",
+  finix: "can_view_finix_dashboard",
+  compliance: "can_view_compliance_dashboard",
+  records: "can_view_records_dashboard",
+  proposals: "can_view_proposals_dashboard",
+  people_matrix: "can_view_people_matrix_dashboard",
 });
 
 const FEATURE_FALLBACKS = Object.freeze({
@@ -98,28 +98,19 @@ const FEATURE_FALLBACKS = Object.freeze({
 
 const dashboardReady = (module, selected) => {
   const dashboardFlag = DASHBOARD_FLAG_BY_MODULE[module?.id];
-  if (!dashboardFlag) return false;
-  const required = (module?.features || []).map((feature) => feature.id).filter((id) => id !== dashboardFlag);
-  return required.length > 0 && required.every((id) => (selected || []).includes(id));
+  return Boolean(dashboardFlag && (selected || []).includes(dashboardFlag));
 };
 
-const normalizeDashboardSelection = (catalog, selections) => {
-  const next = { ...(selections || {}) };
-  (catalog || []).forEach((module) => {
-    const dashboardFlag = DASHBOARD_FLAG_BY_MODULE[module.id];
-    if (!dashboardFlag) return;
-    const current = Array.from(new Set(next[module.id] || []));
-    next[module.id] = dashboardReady(module, current)
-      ? Array.from(new Set([...current, dashboardFlag]))
-      : current.filter((id) => id !== dashboardFlag);
-  });
-  return next;
+const normalizeDashboardSelection = (_catalog, selections) => {
+  return Object.fromEntries(
+    Object.entries(selections || {}).map(([moduleId, flags]) => [
+      moduleId,
+      Array.from(new Set(Array.isArray(flags) ? flags : [])),
+    ])
+  );
 };
 
-const isFeatureChecked = (module, feature, selected) => {
-  const dashboardFlag = DASHBOARD_FLAG_BY_MODULE[module?.id];
-  return feature.id === dashboardFlag ? dashboardReady(module, selected) : (selected || []).includes(feature.id);
-};
+const isFeatureChecked = (_module, feature, selected) => (selected || []).includes(feature.id);
 
 function Field({ label, children }) {
   return (
@@ -938,7 +929,7 @@ export default function MasterConsole() {
                           <label key={feature.id} className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
                             <input
                               type="checkbox"
-                              disabled={generating || feature.id === DASHBOARD_FLAG_BY_MODULE[module.id]}
+                              disabled={generating}
                               checked={isFeatureChecked(module, feature, selectedFeatures[module.id] || [])}
                               onChange={() => toggleFeature(module.id, feature.id)}
                               className="rounded border-slate-300 text-[#0D3B66]"
