@@ -14,7 +14,12 @@ from fastapi import Depends, HTTPException, Request
 from backend import dependencies as _dependencies
 from backend.models import User
 from backend.platform_owner import is_platform_owner
-from backend.commercial_licensee_admin import resolve_license_modules, get_all_admin_permissions
+from backend.commercial_licensee_admin import (
+    resolve_license_modules,
+    get_all_admin_permissions,
+    normalize_license_selected_features,
+)
+from backend.modules.people_matrix.permissions.catalog import MODULE_HIERARCHY
 
 _BASE_GET_CURRENT_USER = _dependencies.get_current_user
 logger = logging.getLogger("commercial_module_guard")
@@ -188,6 +193,11 @@ FEATURE_PREFIXES = {
         "can_view_staff_activity": ("/activity", "/staff-activity"),
         "can_view_user_page": ("/users", "/users/manage"),
         "can_manage_settings": ("/settings",),
+        "can_view_master_data": ("/master-data",),
+        "can_manage_master_data": ("/master-data/manage",),
+        "can_view_roles": ("/roles",),
+        "can_manage_roles": ("/roles/manage",),
+        "can_manage_permissions": ("/permission-matrix",),
     },
     "taskosphere": {
         "can_view_dashboard": ("/dashboard",),
@@ -198,184 +208,111 @@ FEATURE_PREFIXES = {
         "can_view_action_center": ("/action-center",),
         "can_view_client_visits": ("/visits",),
         "can_view_client_portal": ("/client-portal-manager",),
-        "can_reset_client_passwords": (
-            "/client-portal-manager/password",
-            "/client-portal-manager/reset",
-        ),
-        "can_view_staff_activity": (
-            "/activity",
-            "/staff-activity",
-        ),
-        "can_view_reports": (
-            "/reports/efficiency",
-            "/reports/performance-rankings",
-        ),
-        "can_download_reports": (
-            "/reports/export",
-        ),
-        "can_view_audit_logs": (
-            "/audit-logs",
-        ),
+        "can_reset_client_passwords": ("/client-portal-manager/password", "/client-portal-manager/reset"),
+        "can_view_staff_activity": ("/activity", "/staff-activity"),
+        "can_view_reports": ("/reports/efficiency", "/reports/performance-rankings"),
+        "can_download_reports": ("/reports/export",),
+        "can_view_audit_logs": ("/task-audit", "/audit-logs"),
     },
     "finix": {
-        "can_view_accounting_reports": (
-            "/finix-dashboard",
-            "/reports/profit-loss",
-            "/reports/balance-sheet",
-            "/reports/trial-balance",
-            "/reports/validation-engine",
-            "/reports/finix-dashboard",
+        "can_view_finix_dashboard": ("/finix-dashboard",),
+        "can_view_sale": ("/invoicing", "/sales", "/invoices"),
+        "can_view_purchase": ("/purchase", "/purchase-invoices"),
+        "can_view_bank": ("/bank-accounts", "/bank-reconciliation"),
+        "can_view_chart_of_accounts": ("/chart-of-accounts",),
+        "can_manage_chart_of_accounts": ("/chart-of-accounts/manage",),
+        "can_view_journal_entries": ("/journal-entries",),
+        "can_post_journal_entries": ("/journal-entries/post",),
+        "can_view_zero_touch_entries": ("/zero-touch-entry",),
+        "can_view_accounting_reports": ("/accounting-reports",),
+        "can_view_extended_accounts_reports": (
+            "/day-book", "/cash-bank-book", "/cash-flow", "/outstanding-report",
+            "/depreciation", "/tds-tcs", "/financial-ratios", "/comparative-report",
+            "/yearly-report", "/opening-balances", "/accounting-audit-trail",
+            "/bulk-import", "/due-dates", "/import-invoices",
+            "/reports/day-book", "/reports/journal-register", "/reports/cash-bank-book",
+            "/reports/cash-flow", "/reports/outstanding", "/reports/financial-ratios",
+            "/reports/comparative", "/reports/yearly",
         ),
-        "can_view_sale": (
-            "/invoicing",
-            "/sales",
-            "/invoices",
+        "can_view_gst_portal_sync": ("/gst-portal-sync",),
+        "can_view_accounting_integrity": ("/accounting-integrity",),
+        # Report-data endpoints are shared by Finix Dashboard and Accounting Reports.
+        # _permission_flag allows either explicitly selected page to read the data;
+        # the frontend still controls which page is visible in navigation.
+        "can_read_finix_report_data": (
+            "/reports/profit-loss", "/reports/balance-sheet", "/reports/trial-balance",
+            "/reports/validation-engine", "/reports/finix-dashboard", "/reports/mis-compliance",
+            "/reports/parties", "/reports/party-ledger", "/reports/ledger-by-code",
+            "/reports/journal-register",
         ),
-        "can_view_purchase": (
-            "/purchase",
-            "/purchase-invoices",
-        ),
-        "can_view_bank": (
-            "/bank-accounts",
-        ),
-        "can_view_chart_of_accounts": (
-            "/chart-of-accounts",
-        ),
-        "can_manage_chart_of_accounts": (
-            "/chart-of-accounts/manage",
-        ),
-        "can_view_journal_entries": (
-            "/journal-entries",
-        ),
-        "can_post_journal_entries": (
-            "/journal-entries/post",
-            "/zero-touch-entry",
-        ),
-        "can_match_bank": (
-            "/bank-reconciliation",
-        ),
+        # Compatibility/action flags used by older endpoints, not license checkboxes.
+        "can_match_bank": ("/bank-reconciliation",),
+        "can_view_import_invoices": ("/import-invoices",),
+        "can_view_bulk_import": ("/bulk-import",),
+        "can_view_due_dates": ("/due-dates",),
+        "can_view_depreciation": ("/depreciation",),
+        "can_view_tds_tcs": ("/tds-tcs",),
+        "can_view_financial_ratios": ("/financial-ratios",),
+        "can_view_comparative_report": ("/comparative-report",),
+        "can_view_yearly_report": ("/yearly-report",),
+        "can_view_opening_balances": ("/opening-balances",),
+        "can_view_accounting_audit_trail": ("/accounting-audit-trail",),
         "can_view_finix_ai": ("/finix", "/v2/exports/ledger"),
     },
     "compliance": {
-        "can_view_compliance": (
-            "/compliance-dashboard",
-            "/compliance",
-        ),
-        "can_manage_compliance": (
-            "/compliance/manage",
-        ),
-        "can_view_gst_reconciliation": (
-            "/gst-reconciliation",
-        ),
-        "can_view_trademark_sphere": (
-            "/trademark-sphere",
-        ),
-        "can_view_mis_report": (
-            "/mis-report",
-        ),
-        "can_manage_mis_report": (
-            "/mis-report/manage",
-        ),
-        "can_view_salary_slips": (
-            "/salary-slips",
-        ),
-        "can_manage_salary_slips": (
-            "/salary-slips/manage",
-        ),
-        "can_view_roc_sphere": (
-            "/roc-sphere",
-        ),
-        "can_manage_roc_sphere": (
-            "/roc-sphere/manage",
-        ),
+        "can_view_compliance_dashboard": ("/compliance-dashboard",),
+        "can_view_compliance": ("/compliance",),
+        "can_manage_compliance": ("/compliance/manage",),
+        "can_view_gst_reconciliation": ("/gst-reconciliation", "/gst-sphere"),
+        "can_view_trademark_sphere": ("/trademark-sphere",),
+        "can_view_roc_sphere": ("/roc-sphere",),
+        "can_view_mis_report": ("/mis-report",),
+        "can_manage_mis_report": ("/mis-report/manage",),
+        "can_view_salary_slips": ("/salary-slips",),
+        "can_manage_salary_slips": ("/salary-slips/manage",),
     },
     "records": {
-        "can_view_all_dsc": (
-            "/dsc",
-        ),
-        "can_view_documents": (
-            "/documents",
-        ),
-        "can_view_passwords": (
-            "/passwords",
-        ),
-        "can_edit_passwords": (
-            "/passwords/manage",
-        ),
-        "can_view_clients": (
-            "/client-approvals",
-        ),
-        "can_edit_clients": (
-            "/clients/manage",
-        ),
-        "can_approve_clients": (
-            "/clients/approve",
-            "/client-approvals/approve",
-        ),
-        "can_approve_whatsapp_wishes": (
-            "/automation/whatsapp",
-        ),
-        "can_approve_email_wishes": (
-            "/automation/email",
-        ),
-        "can_access_whatsapp_hub": (
-            "/whatsapp-hub",
-        ),
-        "can_view_automation_approvals": (
-            "/automation/approvals",
-        ),
+        "can_view_records_dashboard": ("/records-dashboard",),
+        "can_view_all_dsc": ("/dsc",),
+        "can_view_documents": ("/documents",),
+        "can_view_passwords": ("/passwords",),
+        "can_edit_passwords": ("/passwords/manage",),
+        "can_view_all_clients": ("/clients",),
+        "can_edit_clients": ("/clients/manage",),
+        "can_view_client_approvals": ("/client-approvals",),
+        "can_approve_clients": ("/clients/approve", "/client-approvals/approve"),
+        "can_approve_whatsapp_wishes": ("/automation/whatsapp",),
+        "can_approve_email_wishes": ("/automation/email",),
+        "can_access_whatsapp_hub": ("/whatsapp-hub",),
+        "can_view_automation_approvals": ("/automation/approvals",),
+        # Legacy flag retained only so old saved grants continue to be enforced.
+        "can_view_clients": (),
     },
     "proposals": {
-        "can_view_all_leads": (
-            "/leads",
-        ),
-        "can_create_quotations": (
-            "/quotations",
-        ),
-        "can_view_client_discussion": (
-            "/client-discussion",
-        ),
-        "can_manage_client_discussion": (
-            "/client-discussion/manage",
-        ),
+        "can_view_proposals_dashboard": ("/client-proposals-dashboard",),
+        "can_view_all_leads": ("/leads",),
+        "can_view_quotations": ("/quotations",),
+        "can_create_quotations": ("/quotations/create",),
+        "can_view_client_discussion": ("/client-discussion",),
+        "can_manage_client_discussion": ("/client-discussion/manage",),
     },
     "aiweave": {
-        "can_view_aiweave": ("/ai", "/aiweave", "/ai-reader"),
+        "can_view_aiweave": ("/ai", "/aiweave", "/ai-reader", "/v2/copilot"),
     },
     "people_matrix": {
-        "can_view_people_matrix": (
-            "/people-matrix",
-        ),
-        "can_view_leave": (
-            "/leave",
-        ),
-        "can_manage_leave": (
-            "/leave/manage",
-        ),
-        "can_view_payroll": (
-            "/payroll",
-        ),
-        "can_manage_payroll": (
-            "/payroll/manage",
-        ),
-        "can_view_hr": (
-            "/hr",
-        ),
-        "can_manage_hr": (
-            "/hr/manage",
-        ),
-        "can_view_recruitment": (
-            "/recruitment",
-        ),
-        "can_manage_recruitment": (
-            "/recruitment/manage",
-        ),
-        "can_view_performance": (
-            "/performance",
-        ),
-        "can_manage_performance": (
-            "/performance/manage",
-        ),
+        "can_view_people_matrix_dashboard": ("/people-matrix",),
+        "can_view_leave": ("/leave",),
+        "can_manage_leave": ("/leave/manage",),
+        "can_view_payroll": ("/payroll",),
+        "can_manage_payroll": ("/payroll/manage",),
+        "can_view_hr": ("/hr",),
+        "can_manage_hr": ("/hr/manage",),
+        "can_view_recruitment": ("/recruitment",),
+        "can_manage_recruitment": ("/recruitment/manage",),
+        "can_view_performance": ("/performance",),
+        "can_manage_performance": ("/performance/manage",),
+        # Legacy flag retained only for old records while Users is a core admin page.
+        "can_view_people_matrix": (),
     },
 }
 
@@ -396,11 +333,12 @@ def module_for_path(path: str, method: str = "GET") -> Optional[str]:
     if _matches(normalized, CORE_PREFIXES) or _matches(normalized, CORE_REPORT_PREFIXES):
         return "core"
 
-    if method == "GET":
-        # Client master data remains Records for non-admin operational access.
-        # Tenant-admin access is handled explicitly by the commercial guard.
-        if normalized in ("/clients", "/clients/search"):
-            return "records"
+    # Read-only client master data is a shared lookup used by licensed pages
+    # across Finix, Compliance, LeadSense, Records and other workspaces. The
+    # standalone Clients page is still gated by its frontend route/page flag;
+    # contextual reads are validated separately by the tenant-page access helper.
+    if method.upper() == "GET" and _matches(normalized, ("/clients",)):
+        return None
 
     for module, prefixes in MODULE_PREFIXES.items():
         if _matches(normalized, prefixes):
@@ -422,15 +360,13 @@ def feature_for_path(
     if normalized == "/users" or normalized.startswith("/users/"):
         return "core", "can_view_user_page"
 
-    # Client APIs belong to the Records module. The Clients endpoints enforce
-    # their own action-level permissions, so the commercial guard only needs
-    # to establish that the Records module itself is licensed.
+    # GET client lookups are shared contextual data. The endpoint performs
+    # role/visibility filtering; standalone page navigation remains Records-gated.
+    if method.upper() == "GET" and _matches(normalized, ("/clients",)):
+        return None
+
     if normalized == "/clients" or normalized.startswith("/clients/"):
         return "records", "can_access_records"
-
-    if method == "GET":
-        if normalized in ("/clients", "/clients/search"):
-            return None
 
     for module, features in FEATURE_PREFIXES.items():
         for flag, prefixes in features.items():
