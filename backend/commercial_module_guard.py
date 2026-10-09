@@ -744,6 +744,38 @@ def _permission_flag(
     )
 
 
+def _shared_client_read_allowed(user: User, license_doc: dict) -> bool:
+    """Permit shared client lookups only within a licensed, selected module/page.
+
+    Client master data is reused as contextual data by Finix, Compliance,
+    LeadSense and other workspaces. The standalone Records > Clients page is
+    still independently gated by its route/page flag. Tenant scoping and
+    user-specific client visibility remain enforced by the client endpoints.
+    """
+    permissions = getattr(user, "permissions", None)
+    if hasattr(permissions, "model_dump"):
+        permissions = permissions.model_dump()
+    if not isinstance(permissions, dict):
+        permissions = {}
+
+    for module_id, module_def in MODULE_HIERARCHY.items():
+        if module_id == "admin" or not _licensed_module(module_id, license_doc):
+            continue
+        selected_pages = _selected_license_features(license_doc, module_id)
+        if not selected_pages:
+            continue
+        if _is_admin_role(user):
+            return True
+        module_flag = module_def.get("flag")
+        if module_flag and permissions.get(module_flag) is False:
+            continue
+        for page in module_def.get("pages", []) or []:
+            flag = str(page.get("flag") or "").strip()
+            if flag and flag in selected_pages and permissions.get(flag) is True:
+                return True
+    return False
+
+
 async def get_current_user_with_commercial_guard(
     request: Request,
     credentials=Depends(_dependencies.security),
@@ -830,6 +862,17 @@ async def get_current_user_with_commercial_guard(
     normalized_request_path = str(request.url.path or "").split("?", 1)[0]
     if normalized_request_path.startswith("/api"):
         normalized_request_path = normalized_request_path[4:] or "/"
+
+    # Shared client master data may be read as contextual data while using any
+    # explicitly selected licensed page. The clients endpoint still performs
+    # tenant and per-user visibility filtering; writes are never covered here.
+    if (
+        str(request.method or "GET").upper() == "GET"
+        and _matches(normalized_request_path, ("/clients",))
+        and _shared_client_read_allowed(user, commercial)
+    ):
+        return user
+
     COMMERCIAL_ADMIN_SHARED_DATA_PREFIXES = (
         "/users",
         "/clients",
