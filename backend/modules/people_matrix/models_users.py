@@ -118,6 +118,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_view_quotations": True,
           "can_access_compliance": True,
           "can_access_records": True,
+          "can_view_clients_page": True,
           "can_access_proposals": True,
           "can_access_people_matrix": True,
           "can_view_client_portal": True,
@@ -225,6 +226,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_view_quotations": True,
           "can_access_compliance": True,
           "can_access_records": True,
+          "can_view_clients_page": True,
           "can_access_proposals": True,
           "can_access_people_matrix": True,
           "can_view_client_portal": False,   # ADMIN_GRANTED_ONLY
@@ -322,6 +324,7 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           "can_view_quotations": False,
           "can_access_compliance": False,
           "can_access_records": False,
+          "can_view_clients_page": False,
           "can_access_proposals": False,
           "can_access_people_matrix": False,
           "can_view_client_portal": False,   # ADMIN_GRANTED_ONLY
@@ -643,6 +646,7 @@ class UserPermissions(BaseModel):
     can_view_records_dashboard: bool = False
     can_view_proposals_dashboard: bool = False
     can_view_people_matrix_dashboard: bool = False
+    can_view_clients_page: bool = False
     can_view_client_approvals: bool = False
     can_view_quotations: bool = False
     can_access_finix: bool = False
