@@ -299,7 +299,7 @@ export const AuthProvider = ({ children }) => {
       }
       catch (error) {
         if (cancelled || generation !== authGenerationRef.current || window.__TASKO_LOGOUT_IN_PROGRESS__) return;
-        if (error.message === "Network Error") setUser(normalizeTenantContext(JSON.parse(storedUser)));
+        if (error.message === "Network Error" || (window.oneNexaDesktop?.isDesktop && (!error.response || error.response.status >= 500))) setUser(normalizeTenantContext(JSON.parse(storedUser)));
         else if (error.response && [401, 403].includes(error.response.status)) {
           const ownedUserId = JSON.parse(storedUser || "{}")?.id || "";
           clearStorage(token, ownedUserId);
