@@ -27,6 +27,18 @@ The shell expects the local API to be available at `http://127.0.0.1:7432`. The 
 
 These helpers are not yet wired into the ERP's business write paths or exposed as sync APIs. The outbox currently reports sync disabled intentionally. Do not run it against production customer data as a substitute for a backup.
 
+## Local-first pilot API (2026-10-09)
+
+The first local record-storage slice is now present on `feature/master-console`:
+
+- `backend/local_first_records.py` stores pilot `client` and `task` records in SQLite, scoped by the authenticated company.
+- A record write and its outbox entry are committed in the same SQLite transaction.
+- Deletes use local tombstones and queue a delete operation rather than erasing history immediately.
+- `backend/local_first_router.py` exposes authenticated status, list, create/update, and delete endpoints under `/api/desktop/local-first`.
+- GitHub Actions compiles these modules and runs local-first unit tests on pushes and pull requests to `feature/master-console`.
+
+Important limitations remain: the existing ERP Clients and Tasks screens/APIs are still MongoDB-backed and do not automatically use these pilot endpoints. The sync queue has no cloud transport yet, so pending changes stay on the device. This is a backend pilot foundation, not a complete offline release. Use a development database and non-production test data.
+
 ## Next implementation gates
 
 1. Run the unit tests and desktop development launch on a clean development PC.
