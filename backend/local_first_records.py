@@ -127,6 +127,7 @@ def list_local_records(
     company_id: str,
     entity_type: str,
     limit: int = 100,
+    created_by: str | None = None,
 ) -> list[dict[str, Any]]:
     """List only non-deleted records belonging to the authenticated company."""
     normalized_company, normalized_type = _validate_scope(company_id, entity_type)
@@ -135,16 +136,17 @@ def list_local_records(
     store.initialize_local_store()
     with store._connection() as connection:
         _ensure_records_table(connection)
-        rows = connection.execute(
-            """
-            SELECT record_json, created_at_utc, updated_at_utc
-            FROM local_records
-            WHERE company_id = ? AND entity_type = ? AND deleted_at_utc IS NULL
-            ORDER BY updated_at_utc DESC, entity_id ASC
-            LIMIT ?
-            """,
-            (normalized_company, normalized_type, limit),
-        ).fetchall()
+        query = (
+            "SELECT record_json, created_at_utc, updated_at_utc FROM local_records "
+            "WHERE company_id = ? AND entity_type = ? AND deleted_at_utc IS NULL"
+        )
+        parameters: list[Any] = [normalized_company, normalized_type]
+        if created_by is not None:
+            query += " AND json_extract(record_json, '$.created_by') = ?"
+            parameters.append(str(created_by))
+        query += " ORDER BY updated_at_utc DESC, entity_id ASC LIMIT ?"
+        parameters.append(limit)
+        rows = connection.execute(query, parameters).fetchall()
     return [
         {
             "record": json.loads(row["record_json"]),
@@ -153,6 +155,33 @@ def list_local_records(
         }
         for row in rows
     ]
+
+
+def get_local_record(*, company_id: str, entity_type: str, entity_id: str) -> dict[str, Any] | None:
+    """Fetch a single active local record within the supplied company scope."""
+    normalized_company, normalized_type = _validate_scope(company_id, entity_type)
+    normalized_id = str(entity_id or "").strip()
+    if not normalized_id:
+        raise ValueError("entity_id is required")
+    store.initialize_local_store()
+    with store._connection() as connection:
+        _ensure_records_table(connection)
+        row = connection.execute(
+            """
+            SELECT record_json, created_at_utc, updated_at_utc
+            FROM local_records
+            WHERE company_id = ? AND entity_type = ? AND entity_id = ?
+              AND deleted_at_utc IS NULL
+            """,
+            (normalized_company, normalized_type, normalized_id),
+        ).fetchone()
+    if not row:
+        return None
+    return {
+        "record": json.loads(row["record_json"]),
+        "created_at_utc": row["created_at_utc"],
+        "updated_at_utc": row["updated_at_utc"],
+    }
 
 
 def delete_local_record(*, company_id: str, entity_type: str, entity_id: str) -> bool:
