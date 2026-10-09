@@ -328,7 +328,7 @@ try {
 api.interceptors.request.use(
   async (config) => {
     // If no remote API backend URL is provided:
-    if (!CONFIGURED_API_URL) {
+    if (!CONFIGURED_API_URL && !IS_ONENEXA_DESKTOP) {
       if (import.meta.env.PROD) {
         // Production must never fake success when backend configuration is missing
         config.adapter = async (cfg) => {
