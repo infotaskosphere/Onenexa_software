@@ -72,6 +72,10 @@ jobs:
       - name: Build React frontend
         run: npm run build:frontend
 
+      - name: Create Windows icon from the existing OneNexa logo
+        run: |
+          python -c "from pathlib import Path; from PIL import Image; Path('build').mkdir(parents=True, exist_ok=True); image = Image.open('frontend/public/onenexa-logo.png').convert('RGBA'); image.save('build/onenexa.ico', format='ICO', sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)]); print('Created build/onenexa.ico from the existing OneNexa logo')"
+
       - name: Build Windows installer
         run: npx electron-builder --win nsis --publish never
 
