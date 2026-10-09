@@ -1,0 +1,30 @@
+name: OneNexa Local-First Tests
+
+on:
+  push:
+    branches:
+      - feature/master-console
+  pull_request:
+    branches:
+      - feature/master-console
+
+jobs:
+  local-first-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compile local-first modules
+        run: >-
+          python -m compileall -q
+          backend/local_first_store.py
+          backend/local_first_records.py
+          backend/local_first_router.py
+          tests/test_local_first_store.py
+          tests/test_local_first_records.py
+      - name: Run local-first tests
+        run: python -m unittest discover -s tests -p "test_local_first*.py" -v
