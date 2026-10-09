@@ -316,7 +316,15 @@ export const AuthProvider = ({ children }) => {
         if (cancelled || generation !== authGenerationRef.current || window.__TASKO_LOGOUT_IN_PROGRESS__) return;
         if (error.message === "Network Error" || (window.oneNexaDesktop?.isDesktop && (!error.response || error.response.status >= 500))) setUser(normalizeTenantContext(JSON.parse(storedUser)));
         else if (error.response && [401, 403].includes(error.response.status)) {
-          const ownedUserId = JSON.parse(storedUser || "{}")?.id || "";
+          const ownedUser = JSON.parse(storedUser || "{}");
+          const ownedUserId = ownedUser?.id || "";
+          if (window.oneNexaDesktop?.isDesktop) {
+            try {
+              localStorage.removeItem("onenexa_local_session:" + String(ownedUser?.company_id || "") + ":" + String(ownedUserId));
+              const cachedDesktopUser = JSON.parse(localStorage.getItem("onenexa_desktop_cached_user") || "null");
+              if (String(cachedDesktopUser?.id || "") === String(ownedUserId)) localStorage.removeItem("onenexa_desktop_cached_user");
+            } catch {}
+          }
           clearStorage(token, ownedUserId);
           setUser(null);
         }
