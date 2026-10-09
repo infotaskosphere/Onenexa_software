@@ -866,9 +866,15 @@ async def get_current_user_with_commercial_guard(
     if (
         str(request.method or "GET").upper() == "GET"
         and _matches(normalized_request_path, ("/clients",))
-        and _shared_client_read_allowed(user, commercial)
     ):
-        return user
+        if _shared_client_read_allowed(user, commercial):
+            return user
+        raise _deny(
+            request,
+            user,
+            "Client data is available only through an explicitly permitted licensed page.",
+            commercial,
+        )
 
     COMMERCIAL_ADMIN_SHARED_DATA_PREFIXES = (
         "/users",
