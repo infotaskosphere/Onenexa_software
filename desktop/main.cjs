@@ -138,6 +138,24 @@ async function createWindow() {
 
   mainWindow.once("ready-to-show", () => mainWindow.show());
 
+  // Record renderer failures so a blank packaged window is diagnosable.
+  mainWindow.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    const message = "RENDERER LOAD FAILURE: code=" + errorCode + ", description=" + errorDescription + ", url=" + validatedURL + ", mainFrame=" + isMainFrame + "\\n";
+    backendLogStream?.write(message);
+    console.error(message);
+  });
+  mainWindow.webContents.on("render-process-gone", (_event, details) => {
+    const message = "RENDERER PROCESS GONE: " + JSON.stringify(details) + "\\n";
+    backendLogStream?.write(message);
+    console.error(message);
+  });
+  mainWindow.webContents.on("console-message", (_event, details) => {
+    if (details.level >= 2) {
+      const message = "RENDERER CONSOLE ERROR: " + details.message + " (" + details.sourceId + ":" + details.lineNumber + ")\\n";
+      backendLogStream?.write(message);
+    }
+  });
+
   // Do not permit arbitrary navigation or pop-up windows in the privileged shell.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith("https://")) shell.openExternal(url);
