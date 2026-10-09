@@ -732,10 +732,44 @@ async def verify_activity_access(current_user,activity_user_id):
     if can_view_activity(current_user,activity_user_id):return True
     raise HTTPException(status_code=403,detail="You are not allowed to view this activity")
 MODULE_ACTION_MAP={"tasks.view":"can_view_tasks","tasks.create":"can_edit_tasks","tasks.edit":"can_edit_tasks","tasks.delete":"can_delete_tasks","clients.view":"can_view_clients","clients.create":"can_edit_clients","clients.edit":"can_edit_clients","clients.delete":"can_delete_data","leads.view":"can_view_all_leads","leads.create":"can_view_all_leads","leads.edit":"can_view_all_leads","leads.delete":"can_manage_users","quotations.view":"can_create_quotations","quotations.create":"can_create_quotations","quotations.edit":"can_create_quotations","quotations.delete":"can_create_quotations","invoicing.view":"can_manage_invoices","invoicing.create":"can_manage_invoices","invoicing.edit":"can_manage_invoices","invoicing.delete":"can_manage_invoices","password_vault.view":"can_view_passwords","password_vault.create":"can_edit_passwords","password_vault.edit":"can_edit_passwords","password_vault.delete":"can_edit_passwords","password_reset.view":"can_reset_client_passwords","password_reset.create":"can_reset_client_passwords","password_reset.edit":"can_reset_client_passwords","password_reset.export":"can_reset_client_passwords","dsc_register.view":"can_view_all_dsc","dsc_register.create":"can_edit_dsc","dsc_register.edit":"can_edit_dsc","dsc_register.delete":"can_edit_dsc","document_register.view":"can_view_documents","document_register.create":"can_edit_documents","document_register.edit":"can_edit_documents","document_register.delete":"can_edit_documents","users.view":"can_view_user_page","users.create":"can_manage_users","users.edit":"can_edit_users","users.delete":"can_manage_users","task_audit_log.view":"can_view_audit_logs","email_accounts.view":"can_connect_email","email_accounts.create":"can_connect_email","email_accounts.edit":"can_connect_email","email_accounts.delete":"can_connect_email","general_settings.view":"can_manage_settings","general_settings.update":"can_manage_settings","attendance.view":"can_view_attendance","attendance.create":"can_view_attendance","reports.view":"can_view_reports","reports.download":"can_download_reports","compliance.view":"can_view_compliance","compliance.create":"can_manage_compliance","compliance.edit":"can_manage_compliance","compliance.delete":"can_manage_compliance","salary_slips.view":"can_view_salary_slips","salary_slips.create":"can_manage_salary_slips","salary_slips.edit":"can_manage_salary_slips","salary_slips.delete":"can_manage_salary_slips","roc_sphere.view":"can_view_roc_sphere","roc_sphere.create":"can_manage_roc_sphere","roc_sphere.edit":"can_manage_roc_sphere","roc_sphere.delete":"can_manage_roc_sphere"}
+def _has_commercial_context_page_access(user):
+    """Whether a commercial user can use shared client data through a licensed page."""
+    if not user or is_platform_owner(user):
+        return False
+    commercial = bool(
+        getattr(user, "license_id", None)
+        or getattr(user, "commercial_customer_id", None)
+        or getattr(user, "licensed_modules", None)
+    )
+    if not commercial:
+        return False
+    try:
+        from backend.modules.people_matrix.permissions.catalog import MODULE_HIERARCHY
+    except Exception:
+        return False
+    is_admin = str(getattr(getattr(user, "role", None), "value", getattr(user, "role", ""))).lower() == "admin"
+    for module_id, module_def in MODULE_HIERARCHY.items():
+        if module_id == "admin":
+            continue
+        for page in module_def.get("pages", []) or []:
+            flag = str(page.get("flag") or "").strip()
+            if not flag or not _commercial_permission_allows(user, flag):
+                continue
+            if is_admin or _get_perm(user, flag, False):
+                return True
+    return False
+
+
 def check_module_permission(module,action):
     key=f"{module}.{action}";flag=MODULE_ACTION_MAP.get(key)
     async def checker(current_user=Depends(get_current_user)):
         if flag is None:raise HTTPException(status_code=403,detail=f"No permission mapping found for {module}.{action}")
+        # A client's master record can be needed inside a licensed Finix,
+        # Compliance or LeadSense workflow. For read-only client lookups, allow
+        # access when the tenant/user has at least one selected licensed page;
+        # the endpoint still enforces tenant and per-user client visibility.
+        if module == "clients" and action == "view" and _has_commercial_context_page_access(current_user):
+            return current_user
         if not _commercial_permission_allows(current_user, flag):
             raise HTTPException(status_code=403,detail=f"Commercial license does not include: {module}.{action}")
         if current_user.role=="admin":return current_user
@@ -750,6 +784,8 @@ def assert_record_visibility(user,record,team_ids=None):
     if not check_record_visibility(user,record,team_ids):raise HTTPException(status_code=403,detail="Access denied: record not visible to your account")
 def assert_module_permission(user,module,action):
     if user.role=="admin":return
+    if module == "clients" and action == "view" and _has_commercial_context_page_access(user):
+        return
     flag=MODULE_ACTION_MAP.get(f"{module}.{action}")
     if flag is None:raise HTTPException(status_code=403,detail=f"No permission mapping found for {module}.{action}")
     if not _get_perm(user,flag,False):raise HTTPException(status_code=403,detail=f"Permission required: {module}.{action} (flag: {flag})")
