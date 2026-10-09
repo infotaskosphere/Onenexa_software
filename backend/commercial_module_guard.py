@@ -230,7 +230,7 @@ FEATURE_PREFIXES = {
             "/depreciation", "/tds-tcs", "/financial-ratios", "/comparative-report",
             "/yearly-report", "/opening-balances", "/accounting-audit-trail",
             "/bulk-import", "/due-dates", "/import-invoices",
-            "/reports/day-book", "/reports/journal-register", "/reports/cash-bank-book",
+            "/reports/day-book", "/reports/cash-bank-book",
             "/reports/cash-flow", "/reports/outstanding", "/reports/financial-ratios",
             "/reports/comparative", "/reports/yearly",
         ),
