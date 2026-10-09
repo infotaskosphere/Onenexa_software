@@ -109,6 +109,13 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           # ── Main permission module hierarchy — admin has every module on ──
           "can_access_taskosphere": True,
           "can_access_finix": True,
+          "can_view_finix_dashboard": True,
+          "can_view_compliance_dashboard": True,
+          "can_view_records_dashboard": True,
+          "can_view_proposals_dashboard": True,
+          "can_view_people_matrix_dashboard": True,
+          "can_view_client_approvals": True,
+          "can_view_quotations": True,
           "can_access_compliance": True,
           "can_access_records": True,
           "can_access_proposals": True,
@@ -209,6 +216,13 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           # ── Main permission module hierarchy — In commercial accounts, capped to license
           "can_access_taskosphere": True,
           "can_access_finix": True,
+          "can_view_finix_dashboard": True,
+          "can_view_compliance_dashboard": True,
+          "can_view_records_dashboard": True,
+          "can_view_proposals_dashboard": True,
+          "can_view_people_matrix_dashboard": True,
+          "can_view_client_approvals": False,
+          "can_view_quotations": True,
           "can_access_compliance": True,
           "can_access_records": True,
           "can_access_proposals": True,
@@ -299,6 +313,13 @@ DEFAULT_ROLE_PERMISSIONS: Dict[str, Dict[str, Any]] = {
           # other five are ADMIN_GRANTED_ONLY via the Permission Governance portal.
           "can_access_taskosphere": True,
           "can_access_finix": False,
+          "can_view_finix_dashboard": False,
+          "can_view_compliance_dashboard": True,
+          "can_view_records_dashboard": False,
+          "can_view_proposals_dashboard": False,
+          "can_view_people_matrix_dashboard": False,
+          "can_view_client_approvals": False,
+          "can_view_quotations": False,
           "can_access_compliance": False,
           "can_access_records": False,
           "can_access_proposals": False,
@@ -617,6 +638,13 @@ class UserPermissions(BaseModel):
     # Action Center, Client Visits, Client Portal Manager),
     # exactly like Finix/Compliance/Records/Proposals/People Matrix already do.
     can_access_taskosphere: bool = True
+    can_view_finix_dashboard: bool = False
+    can_view_compliance_dashboard: bool = False
+    can_view_records_dashboard: bool = False
+    can_view_proposals_dashboard: bool = False
+    can_view_people_matrix_dashboard: bool = False
+    can_view_client_approvals: bool = False
+    can_view_quotations: bool = False
     can_access_finix: bool = False
     can_access_compliance: bool = False
     can_access_records: bool = False
