@@ -153,6 +153,18 @@ def normalize_license_selected_features(
         ]
         hidden_legacy_flags = LEGACY_HIDDEN_LICENSE_FLAGS.get(module_id, set())
         accepted_flags = set(all_flags) | set(hidden_legacy_flags)
+        try:
+            catalog_version = int(license_doc.get("page_catalog_version") or 1)
+        except (TypeError, ValueError):
+            catalog_version = 1
+        # Only old licenses need combined-page aliases. Current catalog v2
+        # selections must stay independent even where an old flag used to
+        # represent a dashboard and an operational page together.
+        aliases_for_module = (
+            LEGACY_PAGE_SELECTION_ALIASES.get(module_id, {})
+            if catalog_version < 2
+            else {}
+        )
 
         values = raw.get(module_id)
         if values is None:
@@ -184,7 +196,6 @@ def normalize_license_selected_features(
             feature_prices = license_doc.get("feature_prices") or {}
             snapshot = feature_prices.get(module_id, {}) if isinstance(feature_prices, dict) else {}
             snapshot_flags = [str(flag).strip() for flag in snapshot.keys()] if isinstance(snapshot, dict) else []
-            aliases_for_module = LEGACY_PAGE_SELECTION_ALIASES.get(module_id, {})
             valid_snapshot_flags = [
                 flag for flag in snapshot_flags
                 if flag in accepted_flags or flag in aliases_for_module
@@ -212,7 +223,6 @@ def normalize_license_selected_features(
             continue
 
         selected = []
-        aliases_for_module = LEGACY_PAGE_SELECTION_ALIASES.get(module_id, {})
         for raw_flag in values:
             flag = str(raw_flag).strip()
             if flag in accepted_flags and flag not in selected:
