@@ -10,11 +10,49 @@
     "build": "npm run build --workspace=frontend",
     "build:frontend": "npm run build --workspace=frontend",
     "lint": "npm run build:frontend",
-    "desktop:dev": "concurrently -k \"npm run dev --workspace=frontend\" \"wait-on http://127.0.0.1:3000 && electron desktop/main.cjs\""
+    "desktop:dev": "concurrently -k \"npm run dev --workspace=frontend\" \"wait-on http://127.0.0.1:3000 && electron desktop/main.cjs\"",
+    "desktop:pack": "npm run build:frontend && electron-builder --win nsis"
   },
   "devDependencies": {
     "concurrently": "^9.2.1",
     "electron": "^37.2.6",
+    "electron-builder": "^26.0.12",
     "wait-on": "^8.0.4"
+  },
+  "build": {
+    "appId": "com.prodigist.onenexa",
+    "productName": "OneNexa",
+    "asar": true,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "desktop/**/*",
+      "frontend/dist/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "build/backend-dist/onenexa-backend.exe",
+        "to": "backend/onenexa-backend.exe"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "OneNexa"
+    }
   }
 }
