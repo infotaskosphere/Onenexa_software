@@ -2,6 +2,7 @@
   "name": "taskosphere-commercial",
   "version": "1.0.0",
   "private": true,
+  "main": "desktop/main.cjs",
   "workspaces": [
     "frontend"
   ],
