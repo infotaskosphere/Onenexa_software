@@ -32,7 +32,9 @@ _owner_session_compat.install_server_session_patch(server_module)
 
 # Licensing is a normal FastAPI router; there is no second Node server.
 # Avoid duplicate registration if server.py also registers it.
-if not any(route.path == "/api/licensing/state" for route in app.routes):
+# Newer FastAPI versions may expose included-router wrapper objects in app.routes.
+# Use getattr so startup does not crash when a route wrapper has no .path attribute.
+if not any(getattr(route, "path", None) == "/api/licensing/state" for route in app.routes):
     app.include_router(licensing_router, prefix="/api")
 
 
