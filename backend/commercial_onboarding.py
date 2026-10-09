@@ -470,6 +470,10 @@ async def generate_custom_license(payload: Dict[str, Any], current_user: User = 
     issued_at = datetime.fromisoformat(license_doc["issued_at"].replace("Z", "+00:00"))
     expires_at = _add_months(issued_at, months)
     license_doc.update({
+        # Freeze the feature-selection schema on every new license. Legacy
+        # aliases are applied only to older records so current page toggles
+        # (dashboard vs. page) remain fully independent.
+        "page_catalog_version": 2,
         "package_id": "custom-modules",
         "package_code": "TSO-CUSTOM",
         "package_name": "Custom Module License",
@@ -487,7 +491,7 @@ async def generate_custom_license(payload: Dict[str, Any], current_user: User = 
     })
     await db.commercial_licenses.update_one(
         {"id": license_doc["id"]},
-        {"$set": {k: license_doc[k] for k in ("package_id", "package_code", "package_name", "modules", "selected_features", "feature_prices", "module_prices", "monthly_module_price", "calculated_amount", "validity_months", "amount_charged", "expires_at", "sales_currency", "notes")}},
+        {"$set": {k: license_doc[k] for k in ("page_catalog_version", "package_id", "package_code", "package_name", "modules", "selected_features", "feature_prices", "module_prices", "monthly_module_price", "calculated_amount", "validity_months", "amount_charged", "expires_at", "sales_currency", "notes")}},
     )
 
     customer = await db.commercial_license_customers.find_one({"id": license_doc["customer_id"]}, {"_id": 0})
