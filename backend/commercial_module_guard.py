@@ -589,104 +589,28 @@ def _selected_license_features(
     license_doc: dict,
     module: str,
 ) -> set[str]:
-    """Return the exact page flags selected in the active commercial license.
-
-    The license document is the commercial source of truth. Accept canonical
-    module ids plus legacy aliases so a historical license cannot drift from the
-    permission matrix merely because its module key was stored differently.
-    """
-    # MODULE ISOLATION RULE (same for every module): a module that is not on the
-    # license grants nothing, no matter what stale keys remain in
-    # selected_features (e.g. a "taskosphere" entry left behind after the
-    # license was switched to Finix). A licensed module with no explicit page
-    # list (missing OR empty) grants every page of THAT module only.
-    all_module_flags = set(
-        FEATURE_PREFIXES.get(module, {}).keys()
-    )
-
+    """Resolve selected page flags through the shared backward-compatible normalizer."""
+    all_module_flags = set(FEATURE_PREFIXES.get(module, {}).keys())
     if not _licensed_module(module, license_doc):
         return set()
 
     raw = license_doc.get("selected_features")
-
     if not isinstance(raw, dict):
-        # Current custom/page-selective licenses must fail closed when their
-        # explicit feature map is missing. Legacy module-only licenses retain
-        # their historical whole-module compatibility behavior.
-        if str(license_doc.get("package_id") or "").strip().lower() in {"custom", "custom-modules", "page-selective", "selective"}:
+        if str(license_doc.get("package_id") or "").strip().lower() in {
+            "custom", "custom-modules", "page-selective", "selective",
+        }:
             return set()
         return all_module_flags
 
-    values = raw.get(module)
-
-    if values is None:
-        aliases = {
-            "taskosphere": {
-                "taskosphere",
-                "tasks",
-            },
-            "finix": {
-                "finix",
-                "invoicing",
-                "accounting",
-            },
-            "compliance": {
-                "compliance",
-            },
-            "records": {
-                "records",
-            },
-            "proposals": {
-                "proposals",
-                "client_proposals",
-                "client-proposals",
-                "leadsense",
-            },
-            "people_matrix": {
-                "people_matrix",
-                "people-matrix",
-                "hrms",
-                "peoplematrix",
-            },
-            "aiweave": {
-                "aiweave",
-                "ai-weave",
-            },
-        }.get(
-            module,
-            {module},
-        )
-
-        for raw_key, candidate in raw.items():
-            key = str(raw_key).strip().lower().replace("-", "_")
-
-            if key in {
-                str(alias).replace("-", "_")
-                for alias in aliases
-            }:
-                values = candidate
-                break
-
-    # Fail closed when the Platform Owner did not explicitly select pages for
-    # this module. A purchased module alone is never a page grant.
-    if values is None or (
-        isinstance(values, (list, tuple, set))
-        and len(values) == 0
-    ):
-        return set()
-
+    normalized = normalize_license_selected_features(license_doc)
+    values = normalized.get(module)
     if not isinstance(values, (list, tuple, set)):
         return set()
-
-    selected = {
+    return {
         str(flag).strip()
         for flag in values
         if str(flag).strip() in all_module_flags
     }
-
-    # Do not derive dashboard/report access from another selected page.
-    # Each catalog page must be explicitly selected by the Platform Owner.
-    return selected
 
 
 def _permission_flag(
@@ -702,6 +626,25 @@ def _permission_flag(
     # like an internal admin account. The narrower "selected_features" page
     # list is a restriction that only applies to non-admin licensee users.
     is_admin = _is_admin_role(user)
+
+    if module == "finix" and flag == "can_read_finix_report_data":
+        selected_pages = _selected_license_features(license_doc, "finix")
+        data_pages = {"can_view_finix_dashboard", "can_view_accounting_reports"}
+        if not selected_pages.intersection(data_pages):
+            return False
+        if is_admin:
+            return True
+        permissions = getattr(user, "permissions", None)
+        if hasattr(permissions, "model_dump"):
+            permissions = permissions.model_dump()
+        if not isinstance(permissions, dict):
+            return False
+        if permissions.get("can_access_finix") is False:
+            return False
+        return any(
+            page in selected_pages and permissions.get(page) is True
+            for page in data_pages
+        )
 
     if module is not None:
         # AIWeave follows the same Platform Owner page-selection rule as
@@ -747,11 +690,11 @@ def _permission_flag(
 
         dashboard_flags = {
             "taskosphere": "can_view_dashboard",
-            "finix": "can_view_accounting_reports",
-            "compliance": "can_view_compliance",
-            "records": "can_view_documents",
-            "proposals": "can_view_all_leads",
-            "people_matrix": "can_view_user_page",
+            "finix": "can_view_finix_dashboard",
+            "compliance": "can_view_compliance_dashboard",
+            "records": "can_view_records_dashboard",
+            "proposals": "can_view_proposals_dashboard",
+            "people_matrix": "can_view_people_matrix_dashboard",
         }
         if flag == dashboard_flags.get(module) and permissions.get(flag) is not False:
             return True
@@ -778,11 +721,11 @@ def _permission_flag(
 
     dashboard_flags = {
         "taskosphere": "can_view_dashboard",
-        "finix": "can_view_accounting_reports",
-        "compliance": "can_view_compliance",
-        "records": "can_view_documents",
-        "proposals": "can_view_all_leads",
-        "people_matrix": "can_view_user_page",
+        "finix": "can_view_finix_dashboard",
+        "compliance": "can_view_compliance_dashboard",
+        "records": "can_view_records_dashboard",
+        "proposals": "can_view_proposals_dashboard",
+        "people_matrix": "can_view_people_matrix_dashboard",
     }
     for m_id, d_flag in dashboard_flags.items():
         if flag == d_flag:
