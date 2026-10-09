@@ -68,9 +68,17 @@ CORE_PREFIXES = (
     "/master",
     "/companies",
     "/settings",
+    "/activity",
+    "/staff-activity",
+    "/task-audit",
+    "/audit-logs",
 )
 
-CORE_REPORT_PREFIXES = ()
+CORE_REPORT_PREFIXES = (
+    "/reports/efficiency",
+    "/reports/performance-rankings",
+    "/reports/export",
+)
 
 COMMERCIAL_BLOCKED_PREFIXES = (
     "/v2/search",
@@ -191,6 +199,7 @@ FEATURE_PREFIXES = {
         "can_view_reports": ("/reports/efficiency", "/reports/performance-rankings"),
         "can_download_reports": ("/reports/export",),
         "can_view_staff_activity": ("/activity", "/staff-activity"),
+        "can_view_audit_logs": ("/task-audit", "/audit-logs"),
         "can_view_user_page": ("/users", "/users/manage"),
         "can_manage_settings": ("/settings",),
         "can_view_master_data": ("/master-data",),
@@ -333,13 +342,6 @@ def module_for_path(path: str, method: str = "GET") -> Optional[str]:
     if _matches(normalized, CORE_PREFIXES) or _matches(normalized, CORE_REPORT_PREFIXES):
         return "core"
 
-    # Read-only client master data is a shared lookup used by licensed pages
-    # across Finix, Compliance, LeadSense, Records and other workspaces. The
-    # standalone Clients page is still gated by its frontend route/page flag;
-    # contextual reads are validated separately by the tenant-page access helper.
-    if method.upper() == "GET" and _matches(normalized, ("/clients",)):
-        return None
-
     for module, prefixes in MODULE_PREFIXES.items():
         if _matches(normalized, prefixes):
             return module
@@ -359,11 +361,6 @@ def feature_for_path(
     # All User Directory APIs belong to non-billable CORE administration.
     if normalized == "/users" or normalized.startswith("/users/"):
         return "core", "can_view_user_page"
-
-    # GET client lookups are shared contextual data. The endpoint performs
-    # role/visibility filtering; standalone page navigation remains Records-gated.
-    if method.upper() == "GET" and _matches(normalized, ("/clients",)):
-        return None
 
     if normalized == "/clients" or normalized.startswith("/clients/"):
         return "records", "can_access_records"
@@ -895,8 +892,16 @@ async def get_current_user_with_commercial_guard(
 
     COMMERCIAL_ADMIN_SHARED_DATA_PREFIXES = (
         "/users",
-        "/clients",
-        "/reports",
+        "/companies",
+        "/master",
+        "/settings",
+        "/activity",
+        "/staff-activity",
+        "/task-audit",
+        "/audit-logs",
+        "/reports/efficiency",
+        "/reports/performance-rankings",
+        "/reports/export",
     )
     if _is_admin_role(user) and any(
         normalized_request_path == prefix
@@ -928,7 +933,7 @@ async def get_current_user_with_commercial_guard(
         _is_admin_role(user)
         and _matches(
             normalized_without_api,
-            ("/users", "/clients", "/companies", "/master", "/settings"),
+            ("/users", "/companies", "/master", "/settings", "/activity", "/staff-activity", "/task-audit", "/audit-logs", *CORE_REPORT_PREFIXES),
         )
     )
 
