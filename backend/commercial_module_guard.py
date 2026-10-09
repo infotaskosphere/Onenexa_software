@@ -257,6 +257,13 @@ FEATURE_PREFIXES = {
             "/reports/validation-engine", "/reports/finix-dashboard", "/reports/mis-compliance",
             "/reports/parties", "/reports/party-ledger", "/reports/ledger-by-code",
             "/reports/journal-register",
+            # Finix Dashboard AI widgets (health score, statutory summary,
+            # anomalies, cash-flow forecast) are read-only dashboard data. They
+            # previously fell under the broad "/finix" prefix -> can_view_finix_ai,
+            # a derived compatibility flag that is never a license-selectable
+            # page, so every licensee was denied with a 403.
+            "/finix/ai/health-score", "/finix/ai/statutory-summary",
+            "/finix/ai/anomalies", "/finix/ai/cashflow-forecast",
         ),
         # Compatibility/action flags used by older endpoints, not license checkboxes.
         "can_match_bank": ("/bank-reconciliation",),
