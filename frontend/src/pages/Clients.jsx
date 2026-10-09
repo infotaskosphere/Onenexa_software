@@ -6488,7 +6488,6 @@ export default function Clients() {
             </div>
           </div>
           <div className="flex flex-nowrap items-center gap-2">
-            {typeof window !== "undefined" && window.oneNexaDesktop?.isDesktop && <Button variant="outline" onClick={() => navigate("/clients-local")} className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 !rounded-none gap-2 backdrop-blur-sm whitespace-nowrap" style={{ borderRadius: 0 }}>Offline Pilot</Button>}
             <Button variant="outline" onClick={downloadTemplate} className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 !rounded-none gap-2 backdrop-blur-sm whitespace-nowrap" style={{ borderRadius: 0 }}><FileText className="h-4 w-4" /> CSV Template</Button>
             {canEditClients && <Button variant="outline" onClick={() => fileInputRef.current?.click()} disabled={importLoading} className="h-9 px-4 text-sm bg-white/10 border-white/25 text-white hover:bg-white/20 !rounded-none backdrop-blur-sm whitespace-nowrap" style={{ borderRadius: 0 }}>{importLoading ? 'Importing…' : 'Import Excel / CSV'}</Button>}
 

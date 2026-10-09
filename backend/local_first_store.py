@@ -199,6 +199,11 @@ def enqueue_change(
                 _utc_now(),
             ),
         )
+    try:
+        from backend import local_first_worker
+        local_first_worker.trigger_immediate_background_sync()
+    except Exception:
+        pass
     return stable_operation_id
 
 

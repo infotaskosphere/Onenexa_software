@@ -111,6 +111,11 @@ def save_local_record(
             """,
             (operation_id, normalized_company, normalized_type, normalized_id, operation, record_json, timestamp),
         )
+    try:
+        from backend import local_first_worker
+        local_first_worker.trigger_immediate_background_sync()
+    except Exception:
+        pass
     return {
         "id": normalized_id,
         "company_id": normalized_company,
@@ -222,4 +227,9 @@ def delete_local_record(*, company_id: str, entity_type: str, entity_id: str) ->
             """,
             (operation_id, normalized_company, normalized_type, normalized_id, timestamp),
         )
+    try:
+        from backend import local_first_worker
+        local_first_worker.trigger_immediate_background_sync()
+    except Exception:
+        pass
     return True

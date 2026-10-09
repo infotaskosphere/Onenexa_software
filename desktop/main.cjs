@@ -78,7 +78,7 @@ function launchDevelopmentBackend() {
     env: {
       ...process.env,
       PORT: "7432",
-      HOST: "127.0.0.1",
+      HOST: process.env.HOST || "0.0.0.0",
       ENV_MODE: process.env.ENV_MODE || "development",
       ONENEXA_LOCAL_FIRST_ENABLED: "1",
     },
@@ -106,8 +106,7 @@ async function launchPackagedBackend() {
     env: {
       ...process.env,
       PORT: "7432",
-      HOST: "127.0.0.1",
-      ENV_MODE: process.env.ENV_MODE || "development",
+      HOST: process.env.HOST || "0.0.0.0",
       ONENEXA_LOCAL_FIRST_ENABLED: "1",
       ONENEXA_DATA_DIR: path.join(app.getPath("userData"), "data"),
     },

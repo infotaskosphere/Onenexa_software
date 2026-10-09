@@ -267,7 +267,10 @@ async def run_client_sync_cycle(
                 store.record_sync_error([p["id"] for p in pending], str(exc))
 
         # Step 2: Pull remote updates
-        current_cursor = store.get_sync_cursor(f"company_{company_id}") or "0"
+        import hashlib
+        target_hash = hashlib.sha256(target_url.encode()).hexdigest()[:10]
+        cursor_key = f"cursor_{target_hash}_{company_id}"
+        current_cursor = store.get_sync_cursor(cursor_key) or store.get_sync_cursor(f"company_{company_id}") or "0"
         try:
             pull_res = await http_client.get(
                 f"{target_url}/api/desktop/local-first/sync/pull",
@@ -291,7 +294,7 @@ async def run_client_sync_cycle(
                             )
                     pulled_count = len(remote_changes)
 
-                store.save_sync_cursor(f"company_{company_id}", str(new_cursor))
+                store.save_sync_cursor(cursor_key, str(new_cursor))
         except Exception as exc:
             logger.warning("Sync pull failed: %s", exc)
 
@@ -302,3 +305,96 @@ async def run_client_sync_cycle(
         "pulled": pulled_count,
         "timestamp": _now(),
     }
+
+
+import socket
+
+
+def get_local_ip_addresses() -> list[str]:
+    """Discover available local LAN IP addresses for office device pairing."""
+    ips = set()
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        primary = s.getsockname()[0]
+        if primary and not primary.startswith("127."):
+            ips.add(primary)
+        s.close()
+    except Exception:
+        pass
+    try:
+        hostname = socket.gethostname()
+        for info in socket.getaddrinfo(hostname, None):
+            ip = info[4][0]
+            if ip and not ip.startswith("127.") and ":" not in ip:
+                ips.add(ip)
+    except Exception:
+        pass
+    return sorted(list(ips)) or ["127.0.0.1"]
+
+
+def get_hub_info(company_id: str) -> dict[str, Any]:
+    """Provide local office discovery details for this PC."""
+    device_id = store.get_device_id()
+    hostname = socket.gethostname()
+    ip_list = get_local_ip_addresses()
+    primary_ip = ip_list[0] if ip_list else "127.0.0.1"
+    port = int(os.getenv("PORT", "7432"))
+    node_role = os.getenv("ONENEXA_NODE_ROLE", "admin").lower()
+
+    clean_hex = device_id.replace("-", "")[:6].upper()
+    pairing_code = f"NX-{clean_hex}"
+
+    sync_target = (
+        os.getenv("ONENEXA_SYNC_TARGET", "").strip()
+        or os.getenv("ONENEXA_CLOUD_TARGET", "").strip()
+    )
+
+    return {
+        "device_id": device_id,
+        "hostname": hostname,
+        "primary_ip": primary_ip,
+        "all_ips": ip_list,
+        "port": port,
+        "pairing_code": pairing_code,
+        "node_role": node_role,
+        "hub_url": f"http://{primary_ip}:{port}",
+        "cloud_target": sync_target or "None configured",
+        "company_id": company_id,
+    }
+
+
+def list_connected_nodes(company_id: str) -> list[dict[str, Any]]:
+    """List staff workstations that have synchronized with this Admin Hub."""
+    store.initialize_local_store()
+    nodes = []
+    with store._connection() as connection:
+        _ensure_sync_changelog_table(connection)
+        rows = connection.execute(
+            """
+            SELECT device_id,
+                   COUNT(*) as total_changes,
+                   MAX(server_received_at_utc) as last_seen_at_utc
+            FROM sync_changelog
+            WHERE company_id = ?
+            GROUP BY device_id
+            ORDER BY last_seen_at_utc DESC
+            """,
+            (company_id,)
+        ).fetchall()
+        for r in rows:
+            nodes.append({
+                "device_id": r["device_id"],
+                "total_changes": int(r["total_changes"] or 0),
+                "last_seen_at_utc": r["last_seen_at_utc"],
+            })
+    return nodes
+
+
+def get_database_snapshot_bytes() -> bytes:
+    """Return raw binary content of the local SQLite database for USB / offline backup."""
+    db_path = store.get_database_path()
+    if not db_path.exists():
+        raise FileNotFoundError("Local database does not exist yet")
+    return db_path.read_bytes()
+

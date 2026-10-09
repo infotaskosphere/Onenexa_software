@@ -51,13 +51,10 @@ export default function LocalFirstClients() {
         }
       );
       if (res.data?.status === "success") {
-        toast.success(`Sync Complete: Pushed ${res.data.pushed}, Pulled ${res.data.pulled}`);
         await loadLocalClients();
-      } else {
-        toast.info(res.data?.message || "Sync finished");
       }
-    } catch (err) {
-      toast.error("Sync failed: " + (err.response?.data?.detail || err.message));
+    } catch {
+      // Silent sync fallback
     } finally {
       setSyncing(false);
     }

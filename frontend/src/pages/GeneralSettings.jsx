@@ -12,13 +12,14 @@ import {
   Save, Loader2, CheckCircle2, Mail, Shield,
   Settings, Clock, Hash, Star, Trophy, TrendingUp,
   CheckSquare, Timer, Users as UsersIcon, Link2,
-  HardDrive, Plug, ChevronRight,
+  HardDrive, Plug, ChevronRight, Server,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import DriveIntegrations from "@/components/DriveIntegrations";
 import AssignedClientsPanel from "@/components/AssignedClientsPanel";
+import OfficeSyncHubManager from "@/components/OfficeSyncHubManager";
 
 const COLORS = {
   deepBlue:     "#0D3B66",
@@ -61,8 +62,9 @@ function MiniBar({ value, color, isDark }) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const INT_SECTIONS = [
-  { id: 'drives',  label: 'Cloud Drives', icon: HardDrive,  desc: 'Google Drive, OneDrive, Dropbox & more' },
-  { id: 'email',   label: 'Email',        icon: Mail,       desc: 'IMAP email account connections' },
+  { id: 'sync',    label: 'Office Hub & Sync', icon: Server,    desc: 'Multi-PC office network pairing & backups' },
+  { id: 'drives',  label: 'Cloud Drives',      icon: HardDrive, desc: 'Google Drive, OneDrive, Dropbox & more' },
+  { id: 'email',   label: 'Email',             icon: Mail,      desc: 'IMAP email account connections' },
 ];
 
 function IntegrationSidebar({ active, onChange, isDark }) {
@@ -508,6 +510,7 @@ export default function GeneralSettings() {
         <div className="flex flex-col sm:flex-row gap-4">
           <IntegrationSidebar active={intSection} onChange={setIntSection} isDark={isDark} />
           <div className="flex-1 min-w-0">
+            {intSection === "sync" && <OfficeSyncHubManager isDark={isDark} />}
             {intSection === "drives" && <DriveIntegrations isDark={isDark} />}
             {intSection === "email" && <EmailIntegrationsPlaceholder isDark={isDark} />}
           </div>

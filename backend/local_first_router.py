@@ -223,3 +223,41 @@ async def sync_trigger(
     )
     return result
 
+
+from fastapi.responses import Response
+from datetime import datetime, timezone
+
+
+@router.get("/hub/info")
+async def get_hub_info_endpoint(current_user=Depends(get_local_first_principal)):
+    """Retrieve network IP, pairing PIN, and node role for this workstation or Admin Hub."""
+    _ensure_local_first_enabled()
+    company_id = _authenticated_company_id(current_user)
+    return local_first_sync.get_hub_info(company_id)
+
+
+@router.get("/hub/nodes")
+async def get_connected_nodes_endpoint(current_user=Depends(get_local_first_principal)):
+    """List staff workstations synchronized with this Admin Hub."""
+    _ensure_local_first_enabled()
+    company_id = _authenticated_company_id(current_user)
+    return {"nodes": local_first_sync.list_connected_nodes(company_id)}
+
+
+@router.get("/database/snapshot")
+async def download_database_snapshot(current_user=Depends(get_local_first_principal)):
+    """Export raw SQLite database for offline disaster-recovery or USB backup."""
+    _ensure_local_first_enabled()
+    _require_local_permission(current_user, "delete")
+    try:
+        data = local_first_sync.get_database_snapshot_bytes()
+        filename = f"onenexa-backup-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.db"
+        return Response(
+            content=data,
+            media_type="application/x-sqlite3",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
