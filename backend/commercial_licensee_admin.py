@@ -303,8 +303,15 @@ def get_all_admin_permissions(license_doc: Optional[Dict[str, Any]] = None) -> D
             selected = set(selected_features.get(module_id) or [])
         else:
             selected = set()
-        # No module has a special bypass. AIWeave follows the same explicit
-        # Platform Owner module/page selection rule as every other module.
+        # AIWeave's license is only the maximum ceiling. Even a tenant
+        # administrator must receive explicit user-level module AND page
+        # grants; do not turn license selection into a permission grant.
+        if module_id == "aiweave":
+            if module_flag:
+                permissions[module_flag] = False
+            permissions["can_view_aiweave"] = False
+            continue
+
         for page in module_def.get("pages", []) or []:
             flag = page.get("flag")
             if flag:
