@@ -325,6 +325,11 @@ async def ensure_platform_owner_identity(db, user: Optional[dict] = None) -> str
 
 
 async def enrich_user_identity(db, user: dict) -> dict:
+    # Identity repair must be able to resolve a user's license/company link
+    # before the tenant-scoped DB wrapper has a trustworthy company_id. Query
+    # the raw database only in this identity resolver; normal operational
+    # requests continue to use the tenant-scoped database wrapper.
+    db = getattr(db, "_raw_db", db)
     data = dict(user or {})
 
     # Reserved Platform Owner email identities take precedence over stale
