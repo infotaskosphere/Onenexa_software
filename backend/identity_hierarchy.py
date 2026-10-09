@@ -396,6 +396,99 @@ async def enrich_user_identity(db, user: dict) -> dict:
 
     if is_commercial_identity_record(data):
         customer_id = _clean(data.get("commercial_customer_id"))
+        license_id = _clean(data.get("license_id"))
+        active_license = None
+        if license_id:
+            try:
+                active_license = await db.commercial_licenses.find_one(
+                    {"id": license_id},
+                    {"_id": 0, "id": 1, "customer_id": 1, "licensee_uid": 1, "license_uid": 1},
+                )
+            except Exception:
+                logger.exception("Could not resolve license link while enriching tenant identity.")
+
+        # The linked license's customer_id is authoritative for a commercial
+        # login. Older rows have been observed with company_id still pointing at
+        # the Platform Owner workspace, causing cross-company 403s and failed
+        # background reconciliation even though the license itself is valid.
+        if active_license and _clean(active_license.get("customer_id")):
+            linked_customer_id = _clean(active_license.get("customer_id"))
+            if customer_id and customer_id != linked_customer_id:
+                logger.warning(
+                    "Repairing mismatched tenant customer link for user=%s license=%s old_customer=%s linked_customer=%s",
+                    _clean(data.get("email")),
+                    license_id,
+                    customer_id,
+                    linked_customer_id,
+                )
+            customer_id = linked_customer_id
+            data["commercial_customer_id"] = customer_id
+            data["license_id"] = _clean(active_license.get("id")) or license_id
+            if active_license.get("licensee_uid"):
+                data["licensee_uid"] = _clean(active_license.get("licensee_uid"))
+            if active_license.get("license_uid"):
+                data["license_uid"] = _clean(active_license.get("license_uid"))
+
+        current_company_id = _clean(data.get("company_id"))
+        company_needs_repair = (
+            not current_company_id
+            or current_company_id.lower().startswith("platform-owner-")
+        )
+        canonical_company = None
+        if customer_id and company_needs_repair:
+            try:
+                canonical_company = await db.companies.find_one(
+                    {
+                        "commercial_customer_id": customer_id,
+                        "$or": [
+                            {"source": "commercial-license"},
+                            {"identity_type": "licensee_company"},
+                            {"licensee_uid": {"$exists": True}},
+                        ],
+                    },
+                    {"_id": 0, "id": 1, "name": 1, "commercial_customer_id": 1, "licensee_uid": 1},
+                )
+                if not canonical_company:
+                    candidate = await db.companies.find_one(
+                        {"id": customer_id},
+                        {"_id": 0, "id": 1, "name": 1, "commercial_customer_id": 1, "source": 1, "identity_type": 1},
+                    )
+                    if candidate and (
+                        str(candidate.get("source") or "") == "commercial-license"
+                        or str(candidate.get("identity_type") or "") == "licensee_company"
+                        or str(candidate.get("commercial_customer_id") or "") == customer_id
+                    ):
+                        canonical_company = candidate
+            except Exception:
+                logger.exception("Could not resolve canonical commercial company for user=%s", _clean(data.get("email")))
+
+        if canonical_company and _clean(canonical_company.get("id")):
+            repaired_company_id = _clean(canonical_company.get("id"))
+            if repaired_company_id != current_company_id:
+                data["company_id"] = repaired_company_id
+                if canonical_company.get("name"):
+                    data["company_name"] = canonical_company.get("name")
+                logger.warning(
+                    "Repaired commercial company link for user=%s old_company_id=%s new_company_id=%s customer_id=%s",
+                    _clean(data.get("email")),
+                    current_company_id,
+                    repaired_company_id,
+                    customer_id,
+                )
+                user_id = _clean(data.get("id"))
+                if user_id:
+                    await db.users.update_one(
+                        {"id": user_id},
+                        {
+                            "$set": {
+                                "company_id": repaired_company_id,
+                                "company_name": data.get("company_name"),
+                                "commercial_customer_id": customer_id,
+                                "license_id": data.get("license_id") or license_id,
+                            }
+                        },
+                    )
+
         licensee_uid = _clean(data.get("licensee_uid"))
         if not licensee_uid and customer_id:
             licensee_uid = await ensure_licensee_uid(db, customer_id)
