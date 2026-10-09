@@ -70,6 +70,10 @@ GLOBAL_OR_SYSTEM_COLLECTIONS = {
     "whatsapp_sse_tokens",
     "license_activations",
     "licenses",
+    # Global identity control-plane collections, not tenant business data.
+    "identity_email_links",
+    "identity_migrations",
+    "identity_sequences",
 }
 
 IGNORED_MEMBERS = {
