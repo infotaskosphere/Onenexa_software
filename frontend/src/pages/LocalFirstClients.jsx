@@ -88,6 +88,7 @@ export default function LocalFirstClients() {
         const token = response.data?.offline_token;
         if (!token) throw new Error("The local session was not returned by the backend");
         localStorage.setItem(key, token);
+        localStorage.setItem("onenexa_desktop_cached_user", JSON.stringify(user));
         if (!cancelled) setLocalToken(token);
       } catch {
         // A previously issued device token allows the pilot workspace to open
