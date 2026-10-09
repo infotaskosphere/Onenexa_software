@@ -42,6 +42,11 @@ jobs:
           python -m pip install -r requirements.txt
           python -m pip install pyinstaller
 
+      - name: Verify password hashing dependencies before packaging
+        run: |
+          python -c "from passlib.context import CryptContext; import passlib.handlers.bcrypt; import bcrypt; print('passlib bcrypt handler import OK; bcrypt', bcrypt.__version__)"
+          python -c "from passlib.context import CryptContext; CryptContext(schemes=['bcrypt'], deprecated='auto'); print('bcrypt CryptContext initialization OK')"
+
       - name: Package FastAPI backend for Windows
         run: >-
           python -m PyInstaller
@@ -55,6 +60,10 @@ jobs:
           --paths .
           --collect-submodules backend
           --collect-data backend
+          --collect-all passlib
+          --collect-all bcrypt
+          --hidden-import passlib.handlers.bcrypt
+          --hidden-import bcrypt
           backend/run.py
 
       - name: Install frontend and Electron dependencies
