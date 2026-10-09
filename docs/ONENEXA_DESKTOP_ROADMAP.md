@@ -37,7 +37,7 @@ The first desktop UI slice is now present on `feature/master-console`:
 - `backend/local_first_router.py` exposes local status, list, create/update and delete endpoints under `/api/desktop/local-first`. The pilot API is disabled by default on hosted servers and is enabled by the Electron development launcher for its local backend only.
 - `frontend/src/pages/LocalFirstClients.jsx` provides a separate pilot workspace, linked by the **Offline Pilot** button in the desktop Clients page. It does not silently replace the production Clients data.
 - The desktop frontend directs API requests to `127.0.0.1:7432`, even if the frontend bundle has a hosted API URL configured. Cached desktop identity can restore the UI offline when a local session is available.
-- GitHub Actions compiles the local-first modules and runs their unit tests on pushes and pull requests to `feature/master-console`.
+- GitHub Actions compiles the local-first modules, runs their unit tests, and builds the frontend on pushes and pull requests to `feature/master-console`. The workflow is configured; a successful run has not yet been confirmed in this session.
 
 Important limitations remain: the existing CRM Clients list and its related features remain cloud/MongoDB-backed. The local pilot's records are separate and are not synchronized to cloud, invoices, documents, or other workstations. The 72-hour local session is a pilot authorization window, not a final offline license policy. Use non-production test data until the local workflow and recovery tests pass.
 
