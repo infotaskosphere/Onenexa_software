@@ -318,6 +318,7 @@ export const AuthProvider = ({ children }) => {
     const token = sessionStorage.getItem("token") || localStorage.getItem("token");
     const sessionToken = sessionStorage.getItem("session_token") || localStorage.getItem("session_token");
     const ownedUserId = String(user?.id || "").trim();
+    try { localStorage.removeItem("onenexa_local_session:" + String(user?.company_id || "") + ":" + ownedUserId); } catch {}
     authGenerationRef.current += 1;
     window.__TASKO_LOGOUT_IN_PROGRESS__ = true;
     window.__STOP_ACTIVITY__ = true;
