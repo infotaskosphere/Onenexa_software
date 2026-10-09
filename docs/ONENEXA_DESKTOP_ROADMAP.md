@@ -4,9 +4,9 @@ This branch starts the Windows desktop packaging work for OneNexa. It is intenti
 
 ## Current phase and limitations
 
-This is a desktop-shell foundation, not yet the complete offline-first product. The existing FastAPI backend obtains its data layer from MongoDB via `MONGO_URL` / `MONGODB_URI`. A local Electron window alone does not make the application offline-capable.
+This is the first development foundation, not yet the complete offline-first product. The existing ERP request handlers still read and write through the MongoDB-backed data layer (`MONGO_URL` / `MONGODB_URI`). The local SQLite outbox added in `backend/local_first_store.py` is durable infrastructure only: existing ERP writes are not yet routed through it, and no cloud-sync worker or conflict-resolution workflow is connected. Do not describe the current branch as offline-ready or distribute it to customers.
 
-Before commercial release, follow the implementation checklist in `docs/ONENEXA_DESKTOP_ROADMAP.md`, including local persistence, authenticated peer-to-peer synchronization, conflict resolution, and testing with the main office computer and internet switched off.
+The target is local-first operation: each workstation persists supported changes on its own disk, queues outbound changes, and synchronizes them to an authorized office/platform endpoint when connectivity returns. A separate office sync service may be required for multiple employees to share records while the internet is unavailable. This must be implemented with tenant isolation, authentication, idempotency, conflict handling, deletion propagation, document transfer, and tested recovery.
 
 ## Development
 
@@ -14,10 +14,24 @@ Before commercial release, follow the implementation checklist in `docs/ONENEXA_
 2. Install project dependencies with `npm install` at the repository root.
 3. Build the React frontend: `npm run build:frontend`.
 4. Configure a **development-only** local backend/database in your environment. Do not use production customer credentials or data.
-5. Launch the desktop shell using `npm run desktop:dev`.
+5. Launch the development desktop shell using `npm run desktop:dev`. This starts Vite and Electron; the existing Python backend and a real persistent ERP database must be configured separately.
 
 The shell expects the local API to be available at `http://127.0.0.1:7432`. The current backend does not yet package or provision a local MongoDB server automatically. Do not distribute this build to customers as an offline-capable release.
 
-## Packaging
+## Implemented foundation
 
-After installing dependencies and building the frontend, run `npm run desktop:package` on Windows to generate an Electron installer for the shell. The installer is not a complete customer-ready offline bundle until the backend runtime and local database provisioning steps are implemented and validated.
+- Electron development launcher: `npm run desktop:dev`.
+- Per-user local SQLite database path, overridable with `ONENEXA_DATA_DIR`.
+- Durable outbound change queue with tenant/company scope, idempotency keys, retry metadata, acknowledgement marking, sync cursors, and queue status helpers.
+- Unit tests for local-store creation, company scoping, idempotency, retry status, acknowledgements, cursors, and input validation (`python -m unittest tests.test_local_first_store`).
+
+These helpers are not yet wired into the ERP's business write paths or exposed as sync APIs. The outbox currently reports sync disabled intentionally. Do not run it against production customer data as a substitute for a backup.
+
+## Next implementation gates
+
+1. Run the unit tests and desktop development launch on a clean development PC.
+2. Add authenticated local-store initialization and connect selected business write paths transactionally to the local store.
+3. Add an allowlisted, tenant-scoped sync protocol with idempotent server acknowledgements and explicit conflict rules.
+4. Synchronize remote changes back to the workstation and propagate deletions safely.
+5. Add document/blob synchronization and secure credential storage.
+6. Package the Python runtime and local database provisioning; test install, upgrade, rollback, backup/restore, and offline recovery before building a customer installer.
