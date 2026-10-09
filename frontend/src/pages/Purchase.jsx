@@ -3,7 +3,7 @@ import { format, parseISO } from 'date-fns';
 import { toast } from 'sonner';
 import {
   UploadCloud, Search, RefreshCw, Building2, FileText, IndianRupee,
-  CheckCircle2, AlertTriangle, ShoppingBag, X, Database, Edit, Trash2, Wallet, Ban, FileSpreadsheet
+  CheckCircle2, AlertTriangle, ShoppingBag, X, Database, Edit, Trash2, Wallet, Ban, FileSpreadsheet, Plus
 } from 'lucide-react';
 import GifLoader, { MiniLoader } from '@/components/ui/GifLoader.jsx';
 import { Button } from '@/components/ui/button';
@@ -51,6 +51,21 @@ function Purchase() {
   const [selectedClientId, setSelectedClientId] = useState('auto');
   const [selectedCompanyId, setSelectedCompanyId] = useState('none');
   const [file, setFile] = useState(null);
+
+  // Plain-language manual purchase entry.
+  const [manualOpen, setManualOpen] = useState(false);
+  const [savingManual, setSavingManual] = useState(false);
+  const [manualForm, setManualForm] = useState({
+    supplier_name: '',
+    invoice_no: '',
+    invoice_date: format(new Date(), 'yyyy-MM-dd'),
+    grand_total: '',
+    gst_rate: '0',
+    company_id: 'none',
+    client_id: 'none',
+    supplier_gstin: '',
+    notes: '',
+  });
 
   // GSTR-2B bulk-import state
   const [gstr2bFile, setGstr2bFile] = useState(null);
@@ -100,6 +115,25 @@ function Purchase() {
 
   useEffect(() => { fetchAll(); }, []);
 
+  useEffect(() => {
+    if (companies.length === 1) {
+      setManualForm((current) => current.company_id === 'none'
+        ? { ...current, company_id: companies[0].id }
+        : current);
+    }
+  }, [companies]);
+
+  const manualTotals = useMemo(() => {
+    const grandTotal = Math.max(0, Number(manualForm.grand_total) || 0);
+    const gstRate = Math.max(0, Number(manualForm.gst_rate) || 0);
+    const taxableAmount = gstRate > 0 ? grandTotal / (1 + gstRate / 100) : grandTotal;
+    return {
+      grand_total: Math.round(grandTotal * 100) / 100,
+      taxable_amount: Math.round(taxableAmount * 100) / 100,
+      total_gst: Math.round((grandTotal - taxableAmount) * 100) / 100,
+    };
+  }, [manualForm.grand_total, manualForm.gst_rate]);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return purchaseInvoices;
@@ -143,6 +177,65 @@ function Purchase() {
       toast.error(err.response?.data?.detail || 'Failed to read invoice');
     } finally {
       setUploading(false);
+    }
+  };
+
+  const handleManualSave = async () => {
+    if (savingManual) return;
+    const supplierName = String(manualForm.supplier_name || '').trim();
+    const total = Number(manualForm.grand_total);
+    const companyId = manualForm.company_id !== 'none'
+      ? manualForm.company_id
+      : (companies.length === 1 ? companies[0].id : '');
+    const companyExists = companies.some((company) => String(company.id) === String(companyId));
+
+    if (!supplierName) { toast.error('Enter the supplier or shop name.'); return; }
+    if (!manualForm.invoice_date) { toast.error('Choose the bill date.'); return; }
+    if (!Number.isFinite(total) || total <= 0) { toast.error('Enter the total amount printed on the bill.'); return; }
+    if (!companyId || !companyExists) {
+      toast.error('Choose which company’s books this purchase belongs to.');
+      return;
+    }
+
+    const client = clients.find((item) => item.id === manualForm.client_id);
+    const payload = {
+      company_id: companyId,
+      client_id: client?.id || null,
+      client_name: client?.company_name || '',
+      supplier_name: supplierName,
+      supplier_gstin: String(manualForm.supplier_gstin || '').trim().toUpperCase(),
+      invoice_no: String(manualForm.invoice_no || '').trim(),
+      invoice_date: manualForm.invoice_date,
+      taxable_amount: manualTotals.taxable_amount,
+      total_gst: manualTotals.total_gst,
+      grand_total: manualTotals.grand_total,
+      currency: 'INR',
+      notes: String(manualForm.notes || '').trim(),
+    };
+
+    setSavingManual(true);
+    try {
+      const { data } = await api.post('/purchase-invoices', payload);
+      toast.success(data?.purchase_invoice?.invoice_no
+        ? 'Purchase bill saved and added to the accounts.'
+        : 'Purchase bill saved and added to the accounts.');
+      setManualForm({
+        supplier_name: '',
+        invoice_no: '',
+        invoice_date: format(new Date(), 'yyyy-MM-dd'),
+        grand_total: '',
+        gst_rate: '0',
+        company_id: companyId,
+        client_id: 'none',
+        supplier_gstin: '',
+        notes: '',
+      });
+      setManualOpen(false);
+      await fetchAll();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Could not save this purchase bill.');
+    } finally {
+      setSavingManual(false);
     }
   };
 
@@ -320,9 +413,14 @@ function Purchase() {
                 </p>
               </div>
             </div>
-            <Button onClick={fetchAll} variant="outline" className="bg-white/10 border-white/25 text-white hover:bg-white/20">
-              <RefreshCw className="h-4 w-4 mr-2" /> Refresh
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={() => setManualOpen(true)} className="bg-white text-blue-900 hover:bg-blue-50">
+                <Plus className="h-4 w-4 mr-2" /> Add manually
+              </Button>
+              <Button onClick={fetchAll} variant="outline" className="bg-white/10 border-white/25 text-white hover:bg-white/20">
+                <RefreshCw className="h-4 w-4 mr-2" /> Refresh
+              </Button>
+            </div>
           </div>
         </div>
 
@@ -587,6 +685,104 @@ function Purchase() {
           </div>
         </div>
       </div>
+
+      <Dialog open={manualOpen} onOpenChange={(open) => { if (!savingManual) setManualOpen(open); }}>
+        <DialogContent className={`sm:max-w-2xl max-h-[90vh] overflow-y-auto ${isDark ? 'bg-slate-900 text-slate-100 border-slate-800' : 'bg-white text-slate-900'}`}>
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold flex items-center gap-2">
+              <Plus className="h-5 w-5 text-emerald-500" /> Add a purchase bill
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className={`rounded-xl p-3 text-sm ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-blue-50 text-blue-900'}`}>
+            Enter the details printed on your supplier’s bill. The total remains the amount you enter; the GST split is calculated automatically from the rate you choose.
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-2">
+            <div>
+              <label className="text-sm font-semibold">Supplier or shop name <span className="text-red-500">*</span></label>
+              <Input value={manualForm.supplier_name} onChange={(e) => setManualForm({ ...manualForm, supplier_name: e.target.value })} className="mt-1 rounded-xl" placeholder="e.g. ABC Traders" />
+            </div>
+            <div>
+              <label className="text-sm font-semibold">Bill / invoice number <span className="text-slate-400 font-normal">(optional)</span></label>
+              <Input value={manualForm.invoice_no} onChange={(e) => setManualForm({ ...manualForm, invoice_no: e.target.value })} className="mt-1 rounded-xl" placeholder="e.g. BILL-104" />
+            </div>
+            <div>
+              <label className="text-sm font-semibold">Bill date <span className="text-red-500">*</span></label>
+              <Input type="date" value={manualForm.invoice_date} onChange={(e) => setManualForm({ ...manualForm, invoice_date: e.target.value })} className="mt-1 rounded-xl" />
+            </div>
+            <div>
+              <label className="text-sm font-semibold">Which company’s books? <span className="text-red-500">*</span></label>
+              <Select value={manualForm.company_id} onValueChange={(value) => setManualForm({ ...manualForm, company_id: value })}>
+                <SelectTrigger className={`mt-1 rounded-xl ${isDark ? 'bg-slate-900 border-slate-700 text-slate-100' : 'bg-slate-50'}`}>
+                  <SelectValue placeholder="Choose a company" />
+                </SelectTrigger>
+                <SelectContent>
+                  {companies.map((company) => <SelectItem key={company.id} value={company.id}>{company.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              {companies.length === 0 && <p className="mt-1 text-xs text-amber-600">No company book was found. Add your company under Company Settings before recording a bill.</p>}
+            </div>
+            <div>
+              <label className="text-sm font-semibold">Total bill amount (₹) <span className="text-red-500">*</span></label>
+              <Input type="number" min="0.01" step="0.01" value={manualForm.grand_total} onChange={(e) => setManualForm({ ...manualForm, grand_total: e.target.value })} className="mt-1 rounded-xl" placeholder="e.g. 1180.00" />
+              <p className="mt-1 text-xs text-slate-400">Enter the final amount you have to pay, including GST if shown.</p>
+            </div>
+            <div>
+              <label className="text-sm font-semibold">GST rate shown on the bill</label>
+              <Select value={manualForm.gst_rate} onValueChange={(value) => setManualForm({ ...manualForm, gst_rate: value })}>
+                <SelectTrigger className={`mt-1 rounded-xl ${isDark ? 'bg-slate-900 border-slate-700 text-slate-100' : 'bg-slate-50'}`}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="0">No GST / not sure (0%)</SelectItem>
+                  <SelectItem value="5">5%</SelectItem>
+                  <SelectItem value="12">12%</SelectItem>
+                  <SelectItem value="18">18%</SelectItem>
+                  <SelectItem value="28">28%</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="mt-1 text-xs text-slate-400">Choose the total GST rate printed on the bill. If you are unsure, keep “No GST / not sure”.</p>
+            </div>
+            <div>
+              <label className="text-sm font-semibold">Client this bill relates to <span className="text-slate-400 font-normal">(optional)</span></label>
+              <Select value={manualForm.client_id} onValueChange={(value) => setManualForm({ ...manualForm, client_id: value })}>
+                <SelectTrigger className={`mt-1 rounded-xl ${isDark ? 'bg-slate-900 border-slate-700 text-slate-100' : 'bg-slate-50'}`}>
+                  <SelectValue placeholder="No client linked" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No client linked</SelectItem>
+                  {clients.map((client) => <SelectItem key={client.id} value={client.id}>{client.company_name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="text-sm font-semibold">Supplier GSTIN <span className="text-slate-400 font-normal">(optional)</span></label>
+              <Input value={manualForm.supplier_gstin} onChange={(e) => setManualForm({ ...manualForm, supplier_gstin: e.target.value.toUpperCase() })} className="mt-1 rounded-xl" placeholder="15-character GSTIN, if shown" maxLength={15} />
+            </div>
+            <div className="sm:col-span-2">
+              <label className="text-sm font-semibold">What did you buy? <span className="text-slate-400 font-normal">(optional)</span></label>
+              <Input value={manualForm.notes} onChange={(e) => setManualForm({ ...manualForm, notes: e.target.value })} className="mt-1 rounded-xl" placeholder="e.g. office chairs, printer paper, computer repair" />
+            </div>
+          </div>
+
+          <div className={`rounded-xl border p-4 ${isDark ? 'border-slate-700 bg-slate-800/70' : 'border-slate-200 bg-slate-50'}`}>
+            <p className="text-sm font-bold mb-3">Amount summary</p>
+            <div className="grid grid-cols-3 gap-3 text-sm">
+              <div><p className="text-xs text-slate-400">Before GST</p><p className="font-semibold mt-1">{fmtC(manualTotals.taxable_amount)}</p></div>
+              <div><p className="text-xs text-slate-400">GST part</p><p className="font-semibold mt-1">{fmtC(manualTotals.total_gst)}</p></div>
+              <div><p className="text-xs text-slate-400">Bill total</p><p className="font-bold mt-1 text-emerald-600">{fmtC(manualTotals.grand_total)}</p></div>
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" onClick={() => setManualOpen(false)} disabled={savingManual} className="rounded-xl">Cancel</Button>
+            <Button onClick={handleManualSave} disabled={savingManual || companies.length === 0} className="rounded-xl text-white" style={{ background: COLORS.emeraldGreen }}>
+              {savingManual ? <MiniLoader height={18} /> : 'Save purchase bill'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={editingInvoice !== null} onOpenChange={(open) => { if (!open) setEditingInvoice(null); }}>
         <DialogContent className={`sm:max-w-2xl max-h-[90vh] overflow-y-auto ${isDark ? 'bg-slate-900 text-slate-100 border-slate-800' : 'bg-white text-slate-900'}`}>
