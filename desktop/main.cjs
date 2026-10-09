@@ -118,6 +118,7 @@ async function createWindow() {
     minHeight: 700,
     show: false,
     title: APP_NAME,
+    icon: path.join(process.resourcesPath, "app-icon.ico"),
     backgroundColor: "#f6f8fb",
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
