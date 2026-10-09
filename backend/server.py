@@ -20,6 +20,7 @@ from datetime import datetime, date, timezone, timedelta, time as dtime
 from collections import Counter
 
 from backend.quickcompany_trademark_router import router as qc_trademark_router
+from backend.local_first_router import router as local_first_router  # OneNexa desktop local-first pilot API
 from backend.whatsapp_hub import router as whatsapp_hub_router
 from backend.compliance import router as compliance_router, create_compliance_indexes
 from backend.roc_sphere import router as roc_sphere_router  # ROC Sphere: Companies Act document automation
@@ -294,6 +295,7 @@ register_application_runtime(globals())
 # router definitions but are never attached to the live FastAPI application,
 # causing 404 responses in the Admin / Portal Owner dashboard.
 app.include_router(api_router)
+app.include_router(local_first_router, prefix="/api")
 
 from backend.website_config import router as website_config_router
 from backend.hr_core import ALL_HR_CORE_ROUTERS
