@@ -32,3 +32,17 @@ jobs:
           tests/test_local_first_auth.py
       - name: Run local-first tests
         run: python -m unittest discover -s tests -p "test_local_first*.py" -v
+
+  frontend-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install frontend and desktop dependencies
+        run: npm install --no-audit --no-fund
+      - name: Build frontend
+        run: npm run build:frontend
