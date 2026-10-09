@@ -63,6 +63,32 @@ function launchDevelopmentBackend() {
   });
 }
 
+// Packaged builds use the bundled backend executable instead of requiring Python
+// to be installed separately on the user's PC.
+function launchPackagedBackend() {
+  if (isDev || process.env.ONENEXA_SKIP_BACKEND === "1") return;
+  const executable = path.join(process.resourcesPath, "backend", "onenexa-backend.exe");
+  backendProcess = spawn(executable, [], {
+    cwd: app.getPath("userData"),
+    env: {
+      ...process.env,
+      PORT: "7432",
+      HOST: "127.0.0.1",
+      ENV_MODE: process.env.ENV_MODE || "development",
+      ONENEXA_LOCAL_FIRST_ENABLED: "1",
+      ONENEXA_DATA_DIR: path.join(app.getPath("userData"), "data"),
+    },
+    stdio: "ignore",
+    windowsHide: true,
+  });
+  backendProcess.once("error", (error) => {
+    dialog.showErrorBox(
+      "OneNexa local backend could not start",
+      "The packaged backend could not be launched. Please reinstall OneNexa and try again.\n\n" + error.message
+    );
+  });
+}
+
 async function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1440,
@@ -108,8 +134,9 @@ async function createWindow() {
 app.whenReady().then(async () => {
   app.setName(APP_NAME);
   launchDevelopmentBackend();
+  launchPackagedBackend();
 
-  const ready = await waitForPort(API_HEALTH_URL, isDev ? 12000 : 1500);
+  const ready = await waitForPort(API_HEALTH_URL, isDev ? 12000 : 15000);
   if (!ready) {
     await dialog.showMessageBox({
       type: "warning",
@@ -117,7 +144,7 @@ app.whenReady().then(async () => {
       message: "The OneNexa desktop shell is starting, but its local API is not reachable.",
       detail: isDev
         ? "Check your development Python environment and local database. This development shell does not provision MongoDB or implement offline synchronization."
-        : "This package is a desktop-shell foundation. A customer-ready bundle still needs the packaged backend, local database provisioning, offline queue and peer-sync components.",
+        : "Check the packaged backend startup and database configuration. The current local-first pilot does not yet synchronize data with the cloud or other PCs.",
       buttons: ["Continue", "Exit"],
       defaultId: 0,
     }).then(({ response }) => {
