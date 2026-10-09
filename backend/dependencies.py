@@ -1,4 +1,5 @@
 import os
+import json
 import logging
 import hashlib
 import secrets as _secrets
@@ -32,52 +33,176 @@ class MockCursor:
     async def __anext__(self):
         if self._index>=len(self._data):raise StopAsyncIteration
         v=self._data[self._index];self._index+=1;return v
+def _get_sqlite_storage():
+    from backend import local_first_store
+    local_first_store.initialize_local_store()
+    conn = local_first_store._connect()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS local_collection_documents (
+            collection_name TEXT NOT NULL,
+            doc_id TEXT NOT NULL,
+            data_json TEXT NOT NULL,
+            updated_at_utc TEXT NOT NULL,
+            PRIMARY KEY (collection_name, doc_id)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_col_name ON local_collection_documents (collection_name)")
+    return conn
+
 class MockCollection:
-    def __init__(self,name):self.name=name;self._store={}
-    async def find_one(self,q=None,*a,**k):
+    def __init__(self, name):
+        self.name = name
+        self._store = {}
+        self._load_from_disk()
+
+    def _load_from_disk(self):
+        try:
+            with _get_sqlite_storage() as conn:
+                rows = conn.execute(
+                    "SELECT doc_id, data_json FROM local_collection_documents WHERE collection_name = ?",
+                    (self.name,)
+                ).fetchall()
+                for row in rows:
+                    try:
+                        self._store[str(row["doc_id"])] = json.loads(row["data_json"])
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    def _persist_doc(self, doc_id: str, data: dict):
+        try:
+            with _get_sqlite_storage() as conn:
+                data_json = json.dumps(data, ensure_ascii=False, default=str)
+                conn.execute(
+                    """
+                    INSERT INTO local_collection_documents (collection_name, doc_id, data_json, updated_at_utc)
+                    VALUES (?, ?, ?, datetime('now'))
+                    ON CONFLICT(collection_name, doc_id) DO UPDATE SET
+                        data_json=excluded.data_json,
+                        updated_at_utc=datetime('now')
+                    """,
+                    (self.name, str(doc_id), data_json)
+                )
+                company_id = str(data.get("company_id") or "").strip()
+                if company_id and self.name not in ("audit_logs", "sessions"):
+                    from backend import local_first_store
+                    local_first_store.enqueue_change(
+                        company_id=company_id,
+                        entity_type=self.name,
+                        entity_id=str(doc_id),
+                        operation="update",
+                        payload=data,
+                    )
+        except Exception:
+            pass
+
+    def _delete_doc(self, doc_id: str, company_id: str = ""):
+        try:
+            with _get_sqlite_storage() as conn:
+                conn.execute(
+                    "DELETE FROM local_collection_documents WHERE collection_name = ? AND doc_id = ?",
+                    (self.name, str(doc_id))
+                )
+                if company_id and self.name not in ("audit_logs", "sessions"):
+                    from backend import local_first_store
+                    local_first_store.enqueue_change(
+                        company_id=company_id,
+                        entity_type=self.name,
+                        entity_id=str(doc_id),
+                        operation="delete",
+                    )
+        except Exception:
+            pass
+
+    async def find_one(self, q=None, *a, **k):
         for d in self._store.values():
-            if self._matches(d,q or {}):return d.copy()
+            if self._matches(d, q or {}): return d.copy()
         return None
-    def find(self,q=None,*a,**k):return MockCursor([d.copy() for d in self._store.values() if self._matches(d,q or {})])
-    async def insert_one(self,d):
-        d=d.copy();d.setdefault("_id",str(uuid.uuid4()));self._store[str(d["_id"])]=d
-        class R:pass
-        r=R();r.inserted_id=d["_id"];return r
-    async def insert_many(self,docs):
-        ids=[]
+
+    def find(self, q=None, *a, **k):
+        return MockCursor([d.copy() for d in self._store.values() if self._matches(d, q or {})])
+
+    async def insert_one(self, d):
+        d = d.copy()
+        d.setdefault("_id", str(uuid.uuid4()))
+        self._store[str(d["_id"])] = d
+        self._persist_doc(d["_id"], d)
+        class R: pass
+        r = R()
+        r.inserted_id = d["_id"]
+        return r
+
+    async def insert_many(self, docs):
+        ids = []
         for d in docs:
-            d=d.copy();d.setdefault("_id",str(uuid.uuid4()));self._store[str(d["_id"])]=d;ids.append(d["_id"])
-        class R:pass
-        r=R();r.inserted_ids=ids;return r
-    async def update_one(self,q,u,upsert=False,*a,**k):
-        d=await self.find_one(q)
+            d = d.copy()
+            d.setdefault("_id", str(uuid.uuid4()))
+            self._store[str(d["_id"])] = d
+            self._persist_doc(d["_id"], d)
+            ids.append(d["_id"])
+        class R: pass
+        r = R()
+        r.inserted_ids = ids
+        return r
+
+    async def update_one(self, q, u, upsert=False, *a, **k):
+        d = await self.find_one(q)
         if not d:
             if upsert:
-                nd=q.copy();nd.update(u.get("$set",{}));await self.insert_one(nd)
-                class R:pass
-                r=R();r.matched_count=0;r.modified_count=1;r.upserted_id=nd["_id"];return r
-            class R:pass
-            r=R();r.matched_count=0;r.modified_count=0;r.upserted_id=None;return r
-        for op,vals in u.items():
-            if op=="$set":d.update(vals)
-            elif op=="$unset":
-                for key in vals:d.pop(key,None)
-            elif op=="$push":
-                for key,val in vals.items():d.setdefault(key,[]).append(val)
-        self._store[str(d["_id"])]=d
-        class R:pass
-        r=R();r.matched_count=1;r.modified_count=1;r.upserted_id=None;return r
-    async def delete_one(self,q,*a,**k):
-        d=await self.find_one(q)
-        if d:self._store.pop(str(d["_id"]),None)
-        class R:pass
-        r=R();r.deleted_count=1 if d else 0;return r
-    async def delete_many(self,q,*a,**k):
-        keys=[key for key,d in self._store.items() if self._matches(d,q)]
-        for key in keys:self._store.pop(key,None)
-        class R:pass
-        r=R();r.deleted_count=len(keys);return r
-    async def count_documents(self,q,*a,**k):return sum(1 for d in self._store.values() if self._matches(d,q))
+                nd = q.copy()
+                nd.update(u.get("$set", {}))
+                await self.insert_one(nd)
+                class R: pass
+                r = R()
+                r.matched_count = 0
+                r.modified_count = 1
+                r.upserted_id = nd["_id"]
+                return r
+            class R: pass
+            r = R()
+            r.matched_count = 0
+            r.modified_count = 0
+            r.upserted_id = None
+            return r
+        for op, vals in u.items():
+            if op == "$set": d.update(vals)
+            elif op == "$unset":
+                for key in vals: d.pop(key, None)
+            elif op == "$push":
+                for key, val in vals.items(): d.setdefault(key, []).append(val)
+        self._store[str(d["_id"])] = d
+        self._persist_doc(d["_id"], d)
+        class R: pass
+        r = R()
+        r.matched_count = 1
+        r.modified_count = 1
+        r.upserted_id = None
+        return r
+
+    async def delete_one(self, q, *a, **k):
+        d = await self.find_one(q)
+        if d:
+            self._store.pop(str(d["_id"]), None)
+            self._delete_doc(d["_id"], d.get("company_id", ""))
+        class R: pass
+        r = R()
+        r.deleted_count = 1 if d else 0
+        return r
+
+    async def delete_many(self, q, *a, **k):
+        keys = [key for key, d in self._store.items() if self._matches(d, q)]
+        for key in keys:
+            doc = self._store.pop(key, None)
+            if doc:
+                self._delete_doc(key, doc.get("company_id", ""))
+        class R: pass
+        r = R()
+        r.deleted_count = len(keys)
+        return r
+
+    async def count_documents(self, q, *a, **k):
+        return sum(1 for d in self._store.values() if self._matches(d, q))
     def _matches(self,d,q):
         for key,val in q.items():
             if key=="$or":

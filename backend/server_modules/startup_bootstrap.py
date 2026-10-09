@@ -149,3 +149,10 @@ async def start_bootstrap_tasks(*, db, logger_instance=None):
     except Exception as e_saas_import:
         logger.error(f"Failed to import SaaS Platform Engine: {e_saas_import}")
 
+    # ── LOCAL-FIRST DESKTOP SYNC WORKER ──
+    try:
+        from backend.local_first_worker import start_sync_worker
+        start_sync_worker(interval_seconds=30)
+    except Exception as e_sync:
+        _logger.debug("Local-first sync worker bootstrap skipped: %s", e_sync)
+
