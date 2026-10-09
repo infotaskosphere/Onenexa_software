@@ -1698,7 +1698,19 @@ async def _platform_owner_operational_companies(current_user: User) -> List[Dict
         ).sort("name", 1).to_list(500)
 
     rows = await raw.companies.find({}, {"_id": 0}).sort("name", 1).to_list(5000)
-    return rows[:500]
+    identity_sets = await _licensee_identity_sets(
+        _norm_id(getattr(current_user, "id", ""))
+    )
+    filtered = [
+        company for company in rows
+        if not _is_licensee_company_record(
+            company,
+            identity_sets["licensee_user_ids"],
+            identity_sets["license_ids"],
+            identity_sets["legacy_company_ids"],
+        )
+    ]
+    return filtered[:500]
 
 
 def _is_tenant_user(user: User) -> bool:
