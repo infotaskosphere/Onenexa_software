@@ -9,6 +9,12 @@
     "dev": "npm run dev --workspace=frontend",
     "build": "npm run build --workspace=frontend",
     "build:frontend": "npm run build --workspace=frontend",
-    "lint": "npm run build:frontend"
+    "lint": "npm run build:frontend",
+    "desktop:dev": "concurrently -k \"npm run dev --workspace=frontend\" \"wait-on http://127.0.0.1:3000 && electron desktop/main.cjs\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "electron": "^37.2.6",
+    "wait-on": "^8.0.4"
   }
 }
