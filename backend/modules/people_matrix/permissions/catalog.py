@@ -143,7 +143,7 @@ LEGACY_PAGE_SELECTION_ALIASES = {
     },
     "records": {
         "can_view_documents": ["can_view_records_dashboard"],
-        "can_view_clients": ["can_view_client_approvals"],
+        "can_view_clients": ["can_view_all_clients"],
         "can_approve_clients": ["can_view_client_approvals"],
         "can_edit_clients": ["can_view_all_clients"],
         "can_edit_passwords": ["can_view_passwords"],
