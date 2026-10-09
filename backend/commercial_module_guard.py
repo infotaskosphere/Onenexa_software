@@ -860,6 +860,23 @@ async def get_current_user_with_commercial_guard(
     if normalized_request_path.startswith("/api"):
         normalized_request_path = normalized_request_path[4:] or "/"
 
+    # Activity telemetry is an internal part of an enabled Taskosphere
+    # workspace, not a separately purchasable page. Permit the signed-in user
+    # to submit their own activity interval only when Taskosphere has at least
+    # one explicitly selected page; viewing staff activity remains separately gated.
+    if (
+        str(request.method or "GET").upper() == "POST"
+        and normalized_request_path == "/activity/log"
+    ):
+        if _licensed_module("taskosphere", commercial) and _selected_license_features(commercial, "taskosphere"):
+            return user
+        raise _deny(
+            request,
+            user,
+            "Taskosphere activity tracking is not enabled for this license.",
+            commercial,
+        )
+
     # Shared client master data may be read as contextual data while using any
     # explicitly selected licensed page. The clients endpoint still performs
     # tenant and per-user visibility filtering; writes are never covered here.
