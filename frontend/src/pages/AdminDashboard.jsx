@@ -16,17 +16,15 @@ const list = (data) => {
 };
 const count = (data) => typeof data?.total === 'number' ? data.total : typeof data?.count === 'number' ? data.count : list(data).length;
 
-function useAdminFacts({ includeTaskosphere = false } = {}) {
+function useAdminFacts() {
   return useQuery({
-    queryKey: ['adminDashboardFacts', Boolean(includeTaskosphere)],
+    queryKey: ['adminDashboardFacts'],
     queryFn: async () => {
       const results = await Promise.allSettled([
         api.get('/users', { _silent: true }),
         api.get('/companies/list', { _silent: true }),
         api.get('/role-admin/roles', { _silent: true }),
-        includeTaskosphere
-          ? api.get('/audit-logs', { _silent: true })
-          : Promise.resolve({ data: null }),
+        api.get('/audit-logs', { _silent: true }),
         api.get('/auth/me', { _silent: true }),
       ]);
       const [u, c, r, a, me] = results;
@@ -44,7 +42,7 @@ function useAdminFacts({ includeTaskosphere = false } = {}) {
       return {
         users, companies, roles, user, pendingUsers, activeUsers, customRoles, licensedModules,
         companiesCount: c.status === 'fulfilled' ? count(c.value.data) : null,
-        auditCount: includeTaskosphere && a.status === 'fulfilled' ? count(a.value.data) : null,
+        auditCount: a.status === 'fulfilled' ? count(a.value.data) : null,
       };
     },
     staleTime: 30000,
@@ -64,7 +62,7 @@ export default function AdminDashboard() {
   const { user: authUser, isPlatformOwner } = useAuth();
   const canAccessTaskosphere = Boolean(isPlatformOwner) || hasModuleAccess(authUser, 'taskosphere');
   const canAccessRecords = Boolean(isPlatformOwner) || hasModuleAccess(authUser, 'records');
-  const { data, isLoading, isError, refetch } = useAdminFacts({ includeTaskosphere: canAccessTaskosphere });
+  const { data, isLoading, isError, refetch } = useAdminFacts();
   const user = data?.user || authUser;
   const companyName = user?.company_name || 'Current tenant';
   const scopeLabel = user?.company_id ? `${companyName} · license admin` : 'Platform administration';
@@ -106,8 +104,10 @@ export default function AdminDashboard() {
         {isLoading ? <p className="text-sm text-slate-400">Loading…</p> : data?.licensedModules?.length ? <div className="flex flex-wrap gap-2">{data.licensedModules.map(module => <span key={module} className="rounded-full px-3 py-1.5 text-xs font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">{module}</span>)}</div> : <p className="text-sm text-slate-400">No licensed operational modules are reported for this account.</p>}
       </div>
       <div className={`min-w-0 rounded-2xl border p-4 sm:p-5 ${isDark ? 'bg-slate-800/60 border-slate-700/80' : 'bg-white border-slate-100 shadow-sm'}`}>
-        <div className="flex items-center gap-3 mb-3"><FileClock className="h-5 w-5 text-amber-500 shrink-0" /><div className="min-w-0"><h2 className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>Audit activity</h2><p className={`text-xs mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{canAccessTaskosphere ? 'Count returned by the audit-log service for this tenant.' : 'Available when Taskosphere is enabled for this workspace.'}</p></div></div>
-        {canAccessTaskosphere ? <><p className={`text-3xl font-extrabold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{isLoading ? '…' : data?.auditCount ?? '—'}</p>{isError && <p className="text-[11px] text-amber-600 mt-1">Some dashboard endpoints could not be read. Unavailable values are shown as — rather than guessed.</p>}<button onClick={() => refetch()} className="mt-3 text-xs font-bold text-blue-600 hover:underline">Refresh facts</button></> : <p className="text-sm text-slate-400">Not included in the current license.</p>}
+        <div className="flex items-center gap-3 mb-3"><FileClock className="h-5 w-5 text-amber-500 shrink-0" /><div className="min-w-0"><h2 className={`text-sm font-bold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>Audit activity</h2><p className={`text-xs mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Count returned by the admin audit-log service for this tenant.</p></div></div>
+        <p className={`text-3xl font-extrabold ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>{isLoading ? '…' : data?.auditCount ?? '—'}</p>
+        {isError && <p className="text-[11px] text-amber-600 mt-1">Some dashboard endpoints could not be read. Unavailable values are shown as — rather than guessed.</p>}
+        <button onClick={() => refetch()} className="mt-3 text-xs font-bold text-blue-600 hover:underline">Refresh facts</button>
       </div>
     </div>
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">{links.map(link => <LinkCard key={link.path} {...link} isDark={isDark} />)}</div>
