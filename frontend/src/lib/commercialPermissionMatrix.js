@@ -109,7 +109,6 @@ export function isPlatformOwner(user) {
 
   const id = String(user.id || "").trim();
   const companyId = String(user.company_id || user.company?.id || "").trim().toLowerCase();
-  const ownerEmails = getPlatformOwnerEmails();
   return ownerEmails.has(email) || id === "usr-admin-01" || id === "saas-bootstrap-admin" || companyId === "platform-owner-48fe785fdd75127f" || companyId.startsWith("platform-owner-");
 }
 
