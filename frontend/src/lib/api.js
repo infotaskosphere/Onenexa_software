@@ -692,6 +692,9 @@ api.interceptors.response.use(
         "";
       const failedToken = String(authHeader).replace(/^Bearer\\s+/i, "").trim() || null;
 
+      // An expired device-local token must not invalidate the separate cloud login.
+      if (failedToken?.startsWith("onenexa-local.")) return Promise.reject(error);
+
       clearToken(failedToken);
       sessionStorage.removeItem("user");
 
