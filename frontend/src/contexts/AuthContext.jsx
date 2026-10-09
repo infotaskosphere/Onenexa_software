@@ -281,6 +281,21 @@ export const AuthProvider = ({ children }) => {
     const restoreSession = async () => {
       const { token, storedUser } = getStoredAuth();
       const generation = authGenerationRef.current;
+      if (window.oneNexaDesktop?.isDesktop && (!token || !storedUser)) {
+        try {
+          const cachedDesktopUser = JSON.parse(localStorage.getItem("onenexa_desktop_cached_user") || "null");
+          const cachedCompanyId = String(cachedDesktopUser?.company_id || "");
+          const cachedUserId = String(cachedDesktopUser?.id || "");
+          const cachedLocalToken = cachedDesktopUser && cachedCompanyId && cachedUserId
+            ? localStorage.getItem("onenexa_local_session:" + cachedCompanyId + ":" + cachedUserId)
+            : null;
+          if (cachedDesktopUser && cachedLocalToken) {
+            setUser(normalizeTenantContext(cachedDesktopUser));
+            setLoading(false);
+            return;
+          }
+        } catch {}
+      }
       if (!token || !storedUser) { setLoading(false); return; }
       const navType = window.performance?.getEntriesByType?.('navigation')?.[0]?.type ?? (window.performance?.navigation?.type === 1 ? 'reload' : 'navigate');
       const isReload = navType === 'reload'; const tabClosedAt = localStorage.getItem('taskosphere_tab_closed');
@@ -318,7 +333,7 @@ export const AuthProvider = ({ children }) => {
     const token = sessionStorage.getItem("token") || localStorage.getItem("token");
     const sessionToken = sessionStorage.getItem("session_token") || localStorage.getItem("session_token");
     const ownedUserId = String(user?.id || "").trim();
-    try { localStorage.removeItem("onenexa_local_session:" + String(user?.company_id || "") + ":" + ownedUserId); } catch {}
+    try { localStorage.removeItem("onenexa_local_session:" + String(user?.company_id || "") + ":" + ownedUserId); const cachedDesktopUser = JSON.parse(localStorage.getItem("onenexa_desktop_cached_user") || "null"); if (String(cachedDesktopUser?.id || "") === ownedUserId) localStorage.removeItem("onenexa_desktop_cached_user"); } catch {}
     authGenerationRef.current += 1;
     window.__TASKO_LOGOUT_IN_PROGRESS__ = true;
     window.__STOP_ACTIVITY__ = true;
