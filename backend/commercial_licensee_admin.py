@@ -177,13 +177,20 @@ def normalize_license_selected_features(
                     values = candidate
                     break
 
-        # Page-selective commercial licenses are fail-closed. A missing module
-        # entry or an explicitly empty page list means the Platform Owner did
-        # not grant any page in that module.
+        # Legacy module-only licenses (before catalog version 2) had no
+        # independent page model. If they lack a concrete module page list,
+        # retain their historical whole-module access rather than silently
+        # breaking customers. New catalog v2 licenses and custom/selective
+        # packages always fail closed when a module's page list is missing or
+        # empty.
+        package_id = str(license_doc.get("package_id") or "").strip().lower()
+        page_selective = catalog_version >= 2 or package_id in {
+            "custom", "custom-modules", "page-selective", "selective",
+        }
         if values is None or (
             isinstance(values, (list, tuple, set)) and len(values) == 0
         ):
-            normalized[module_id] = []
+            normalized[module_id] = [] if page_selective else list(all_flags)
             continue
 
         # Some older licenses retained only the selected-page count. Prefer the
