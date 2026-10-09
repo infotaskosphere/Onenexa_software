@@ -36,6 +36,10 @@
       {
         "from": "build/backend-dist/onenexa-backend.exe",
         "to": "backend/onenexa-backend.exe"
+      },
+      {
+        "from": "build/onenexa.ico",
+        "to": "app-icon.ico"
       }
     ],
     "win": {
@@ -46,14 +50,17 @@
             "x64"
           ]
         }
-      ]
+      ],
+      "icon": "build/onenexa.ico"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "OneNexa"
+      "shortcutName": "OneNexa",
+      "installerIcon": "build/onenexa.ico",
+      "uninstallerIcon": "build/onenexa.ico"
     }
   }
 }
