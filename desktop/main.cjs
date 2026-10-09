@@ -50,6 +50,7 @@ function launchDevelopmentBackend() {
       PORT: "7432",
       HOST: "127.0.0.1",
       ENV_MODE: process.env.ENV_MODE || "development",
+      ONENEXA_LOCAL_FIRST_ENABLED: "1",
     },
     stdio: "ignore",
     windowsHide: true,
