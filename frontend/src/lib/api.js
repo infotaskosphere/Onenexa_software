@@ -32,7 +32,14 @@ const PRODUCTION_FALLBACK =
 
 let BASE_URL;
 
-if (CONFIGURED_API_URL) {
+const IS_ONENEXA_DESKTOP =
+  typeof window !== "undefined" && window.oneNexaDesktop?.isDesktop === true;
+
+if (IS_ONENEXA_DESKTOP) {
+  // The Electron shell must always use its own local backend, even if the
+  // frontend bundle was built with a hosted VITE_API_URL.
+  BASE_URL = "http://127.0.0.1:7432";
+} else if (CONFIGURED_API_URL) {
   BASE_URL = CONFIGURED_API_URL;
 } else if (_isLocalHost) {
   BASE_URL = LOCAL_API_URL;
