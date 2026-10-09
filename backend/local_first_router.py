@@ -5,6 +5,7 @@ replace the existing MongoDB-backed ERP APIs, and outbound cloud sync remains
 disabled until a separately authenticated sync protocol is implemented.
 """
 
+import os
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -22,6 +23,12 @@ class LocalRecordRequest(BaseModel):
     record: dict[str, Any]
 
 
+def _ensure_local_first_enabled() -> None:
+    """Keep pilot local-disk APIs disabled on hosted deployments by default."""
+    if os.getenv("ONENEXA_LOCAL_FIRST_ENABLED", "").strip() != "1":
+        raise HTTPException(status_code=404, detail="Local-first desktop API is not enabled on this server")
+
+
 def _authenticated_company_id(current_user: Any) -> str:
     company_id = str(getattr(current_user, "company_id", "") or "").strip()
     if not company_id:
@@ -31,6 +38,7 @@ def _authenticated_company_id(current_user: Any) -> str:
 
 @router.get("/status")
 async def get_local_first_status(current_user=Depends(get_current_user)):
+    _ensure_local_first_enabled()
     company_id = _authenticated_company_id(current_user)
     status_data = local_first_store.get_sync_status(company_id)
     # Do not expose local filesystem paths to browser clients.
@@ -44,6 +52,7 @@ async def get_local_first_records(
     limit: int = Query(default=100, ge=1, le=500),
     current_user=Depends(get_current_user),
 ):
+    _ensure_local_first_enabled()
     company_id = _authenticated_company_id(current_user)
     try:
         items = local_first_records.list_local_records(
@@ -60,6 +69,7 @@ async def save_local_first_record(
     request: LocalRecordRequest,
     current_user=Depends(get_current_user),
 ):
+    _ensure_local_first_enabled()
     company_id = _authenticated_company_id(current_user)
     try:
         saved = local_first_records.save_local_record(
@@ -79,6 +89,7 @@ async def delete_local_first_record(
     entity_id: str,
     current_user=Depends(get_current_user),
 ):
+    _ensure_local_first_enabled()
     company_id = _authenticated_company_id(current_user)
     try:
         deleted = local_first_records.delete_local_record(
