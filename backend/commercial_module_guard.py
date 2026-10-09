@@ -645,7 +645,17 @@ def _permission_flag(
         # every other commercial module.
         if module == "aiweave":
             selected_pages = _selected_license_features(license_doc, module)
-            return "can_view_aiweave" in selected_pages
+            if "can_view_aiweave" not in selected_pages:
+                return False
+            permissions = getattr(user, "permissions", None)
+            if hasattr(permissions, "model_dump"):
+                permissions = permissions.model_dump()
+            if not isinstance(permissions, dict):
+                return False
+            return (
+                permissions.get("can_access_aiweave") is True
+                and permissions.get("can_view_aiweave") is True
+            )
 
         # Every commercial role, including the licensee administrator, is
         # capped by the Platform Owner's explicit page selection.
@@ -826,16 +836,14 @@ async def get_current_user_with_commercial_guard(
         permissions = getattr(user, "permissions", None)
         if permissions is not None:
             selected_ai = _selected_license_features(commercial, "aiweave")
-            object.__setattr__(
-                permissions,
-                "can_access_aiweave",
-                bool(selected_ai),
-            )
-            object.__setattr__(
-                permissions,
-                "can_view_aiweave",
-                "can_view_aiweave" in selected_ai,
-            )
+            allowed_ai_access = bool(selected_ai) and pre_hydration_ai_access
+            allowed_ai_view = "can_view_aiweave" in selected_ai and pre_hydration_ai_view
+            if isinstance(permissions, dict):
+                permissions["can_access_aiweave"] = allowed_ai_access
+                permissions["can_view_aiweave"] = allowed_ai_view
+            else:
+                object.__setattr__(permissions, "can_access_aiweave", allowed_ai_access)
+                object.__setattr__(permissions, "can_view_aiweave", allowed_ai_view)
 
     # Commercial tenant users inherit the licensed tenant administrator's
     # effective module/page access. This also repairs legacy users created
