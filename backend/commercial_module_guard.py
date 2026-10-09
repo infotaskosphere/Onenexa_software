@@ -522,10 +522,7 @@ def _hydrate_tenant_user(user: User, license_doc: dict) -> User:
         or []
     )
 
-    data["selected_features"] = (
-        license_doc.get("selected_features")
-        or {}
-    )
+    data["selected_features"] = normalize_license_selected_features(license_doc)
 
     if not _is_admin_role(user):
         return User.model_validate(data)
