@@ -315,7 +315,7 @@ def get_all_admin_permissions(license_doc: Optional[Dict[str, Any]] = None) -> D
             permissions["can_manage_salary_slips"] = bool(module_allowed and "can_view_salary_slips" in selected)
             permissions["can_manage_roc_sphere"] = bool(module_allowed and "can_view_roc_sphere" in selected)
         elif module_id == "records":
-            permissions["can_view_clients"] = bool(module_allowed and "can_view_client_approvals" in selected)
+            permissions["can_view_clients"] = bool(module_allowed and "can_view_all_clients" in selected)
             permissions["can_edit_clients"] = bool(module_allowed and "can_view_all_clients" in selected)
             permissions["can_approve_clients"] = bool(module_allowed and "can_view_client_approvals" in selected)
             permissions["can_edit_passwords"] = bool(module_allowed and "can_view_passwords" in selected)
