@@ -54,6 +54,6 @@ if __name__ == "__main__":
     asyncio.run(_prepare_licensing())
     uvicorn.run(
         app,
-        host="0.0.0.0",
+        host=os.getenv("HOST", "0.0.0.0"),
         port=int(os.getenv("PORT", "10000")),
     )
