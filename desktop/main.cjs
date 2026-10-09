@@ -5,6 +5,22 @@ const { spawn } = require("node:child_process");
 const net = require("node:net");
 
 const APP_NAME = "OneNexa";
+
+// Set the branded name before Electron resolves the per-user data directory.
+app.setName(APP_NAME);
+
+// A second launch must never start another backend on the same local API port.
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
+}
 const API_ORIGIN = process.env.ONENEXA_API_ORIGIN || "http://127.0.0.1:7432";
 const API_HEALTH_URL = new URL("/health", API_ORIGIN).toString();
 const isDev = !app.isPackaged;
@@ -154,6 +170,7 @@ async function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  if (!hasSingleInstanceLock) return;
   app.setName(APP_NAME);
   launchDevelopmentBackend();
   launchPackagedBackend();
