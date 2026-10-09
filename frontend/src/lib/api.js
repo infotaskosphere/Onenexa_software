@@ -413,7 +413,7 @@ api.interceptors.request.use(
 
     const token = getToken();
 
-    if (token) {
+    if (token && !config.headers?.Authorization && !config.headers?.authorization) {
       config.headers = config.headers || {};
       config.headers.Authorization = `Bearer ${token}`;
     }
