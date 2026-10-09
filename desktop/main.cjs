@@ -1,5 +1,6 @@
 const { app, BrowserWindow, dialog, shell } = require("electron");
 const path = require("node:path");
+const fs = require("node:fs");
 const { spawn } = require("node:child_process");
 const net = require("node:net");
 
@@ -9,6 +10,33 @@ const API_HEALTH_URL = new URL("/health", API_ORIGIN).toString();
 const isDev = !app.isPackaged;
 let mainWindow = null;
 let backendProcess = null;
+let backendLogStream = null;
+
+function openBackendLog() {
+  try {
+    const logDirectory = path.join(app.getPath("userData"), "logs");
+    fs.mkdirSync(logDirectory, { recursive: true });
+    backendLogStream = fs.createWriteStream(path.join(logDirectory, "backend.log"), { flags: "a" });
+    backendLogStream.write("\n\n--- OneNexa backend start " + new Date().toISOString() + " ---\n");
+  } catch (error) {
+    console.error("Unable to open OneNexa backend log:", error);
+  }
+}
+
+function attachBackendDiagnostics(child) {
+  if (child.stdout) child.stdout.on("data", (data) => backendLogStream?.write(data));
+  if (child.stderr) child.stderr.on("data", (data) => backendLogStream?.write(data));
+  child.once("error", (error) => {
+    backendLogStream?.write("\nSPAWN ERROR: " + (error.stack || error.message) + "\n");
+    dialog.showErrorBox(
+      "OneNexa local backend could not start",
+      "The backend executable could not be launched. A diagnostic log is saved in OneNexa's user data folder under logs\\backend.log.\n\n" + error.message
+    );
+  });
+  child.once("exit", (code, signal) => {
+    backendLogStream?.write("\nBACKEND EXIT: code=" + code + ", signal=" + signal + "\n");
+  });
+}
 
 function waitForPort(url, timeoutMs = 12000) {
   const parsed = new URL(url);
@@ -52,22 +80,20 @@ function launchDevelopmentBackend() {
       ENV_MODE: process.env.ENV_MODE || "development",
       ONENEXA_LOCAL_FIRST_ENABLED: "1",
     },
-    stdio: "ignore",
+    stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
   });
-  backendProcess.once("error", (error) => {
-    dialog.showErrorBox(
-      "OneNexa local backend could not start",
-      "The development backend could not be launched. Install the project's Python dependencies and configure a development database.\n\n" + error.message
-    );
-  });
+  attachBackendDiagnostics(backendProcess);
 }
 
 // Packaged builds use the bundled backend executable instead of requiring Python
 // to be installed separately on the user's PC.
 function launchPackagedBackend() {
   if (isDev || process.env.ONENEXA_SKIP_BACKEND === "1") return;
+  openBackendLog();
   const executable = path.join(process.resourcesPath, "backend", "onenexa-backend.exe");
+  backendLogStream?.write("Executable: " + executable + "\n");
+  backendLogStream?.write("User data: " + app.getPath("userData") + "\n");
   backendProcess = spawn(executable, [], {
     cwd: app.getPath("userData"),
     env: {
@@ -78,15 +104,10 @@ function launchPackagedBackend() {
       ONENEXA_LOCAL_FIRST_ENABLED: "1",
       ONENEXA_DATA_DIR: path.join(app.getPath("userData"), "data"),
     },
-    stdio: "ignore",
+    stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
   });
-  backendProcess.once("error", (error) => {
-    dialog.showErrorBox(
-      "OneNexa local backend could not start",
-      "The packaged backend could not be launched. Please reinstall OneNexa and try again.\n\n" + error.message
-    );
-  });
+  attachBackendDiagnostics(backendProcess);
 }
 
 async function createWindow() {
@@ -138,13 +159,14 @@ app.whenReady().then(async () => {
 
   const ready = await waitForPort(API_HEALTH_URL, isDev ? 12000 : 15000);
   if (!ready) {
+    const logPath = path.join(app.getPath("userData"), "logs", "backend.log");
     await dialog.showMessageBox({
       type: "warning",
       title: "OneNexa backend is not available",
       message: "The OneNexa desktop shell is starting, but its local API is not reachable.",
       detail: isDev
-        ? "Check your development Python environment and local database. This development shell does not provision MongoDB or implement offline synchronization."
-        : "Check the packaged backend startup and database configuration. The current local-first pilot does not yet synchronize data with the cloud or other PCs.",
+        ? "Check your development Python environment and local database."
+        : "Diagnostic log: " + logPath + "\n\nThe backend may be missing configuration or may have stopped during startup. Share this log so the exact cause can be fixed.",
       buttons: ["Continue", "Exit"],
       defaultId: 0,
     }).then(({ response }) => {
@@ -163,4 +185,5 @@ app.on("before-quit", () => {
   if (backendProcess && !backendProcess.killed) {
     backendProcess.kill();
   }
+  backendLogStream?.end();
 });
