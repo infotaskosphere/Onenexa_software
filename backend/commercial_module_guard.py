@@ -20,6 +20,10 @@ from backend.commercial_licensee_admin import (
     normalize_license_selected_features,
 )
 from backend.modules.people_matrix.permissions.catalog import MODULE_HIERARCHY
+from backend.commercial_shared_master_data import (
+    admin_master_data_kind,
+    shared_master_data_kind,
+)
 
 _BASE_GET_CURRENT_USER = _dependencies.get_current_user
 logger = logging.getLogger("commercial_module_guard")
@@ -749,12 +753,14 @@ def _permission_flag(
 
 
 def _shared_client_read_allowed(user: User, license_doc: dict) -> bool:
-    """Permit shared client lookups only within a licensed, selected module/page.
+    """Permit shared master-data use only within a licensed, selected module/page.
 
-    Client master data is reused as contextual data by Finix, Compliance,
-    LeadSense and other workspaces. The standalone Records > Clients page is
-    still independently gated by its route/page flag. Tenant scoping and
-    user-specific client visibility remain enforced by the client endpoints.
+    Company, Client and User master data is reused as contextual data by Finix,
+    Compliance, LeadSense, HRMS and other workspaces. It must keep working when
+    the licensee did not buy the Records module. The standalone Records pages
+    (Clients page, Documents, DSC, Passwords...) are still independently gated
+    by their own route/page flags. Tenant scoping and user-specific visibility
+    remain enforced by the endpoints themselves.
     """
     permissions = getattr(user, "permissions", None)
     if hasattr(permissions, "model_dump"):
@@ -778,6 +784,10 @@ def _shared_client_read_allowed(user: User, license_doc: dict) -> bool:
             if flag and flag in selected_pages and permissions.get(flag) is True:
                 return True
     return False
+
+
+# Same rule, clearer name for the generalised master-data policy.
+_shared_master_data_allowed = _shared_client_read_allowed
 
 
 async def get_current_user_with_commercial_guard(
@@ -882,21 +892,35 @@ async def get_current_user_with_commercial_guard(
             commercial,
         )
 
-    # Shared client master data may be read as contextual data while using any
-    # explicitly selected licensed page. The clients endpoint still performs
-    # tenant and per-user visibility filtering; writes are never covered here.
-    if (
-        str(request.method or "GET").upper() == "GET"
-        and _matches(normalized_request_path, ("/clients",))
-    ):
-        if _shared_client_read_allowed(user, commercial):
-            return user
+    # Shared master data (Company / Clients / Users) is NOT part of the Records
+    # module. It is created in Admin > Master Data and consumed by every module,
+    # so it stays usable whenever the user can use at least one explicitly
+    # selected licensed page - even if Records was never purchased.
+    #   * any such user : read shared data, quick-add a client, use the document
+    #                     auto-fill parsers (new clients stay "pending" for
+    #                     non-approvers - enforced by the client handler).
+    #   * tenant admin  : also full client management for Admin > Master Data
+    #                     (update, delete, bulk import, approve / reject).
+    # Records-only features (Documents, DSC, Passwords, Client Approvals page,
+    # merge, Drive link, birthday wishes, activity timeline...) are not listed in
+    # backend/commercial_shared_master_data.py and therefore stay Records-gated.
+    request_method = str(request.method or "GET").upper()
+    shared_kind = (
+        admin_master_data_kind(request_method, normalized_request_path)
+        if _is_admin_role(user)
+        else shared_master_data_kind(request_method, normalized_request_path)
+    )
+    if shared_kind and _shared_master_data_allowed(user, commercial):
+        return user
+    if shared_kind == "clients" and request_method == "GET":
         raise _deny(
             request,
             user,
             "Client data is available only through an explicitly permitted licensed page.",
             commercial,
         )
+    # Anything else falls through to the normal module / page checks below, so
+    # an explicit Records grant keeps working exactly as before.
 
     COMMERCIAL_ADMIN_SHARED_DATA_PREFIXES = (
         "/users",
@@ -1040,7 +1064,7 @@ async def get_current_user_with_commercial_guard(
     return user
 
 
-GUARD_RULES_VERSION = "2026-10-08.explicit-license-page-governance"
+GUARD_RULES_VERSION = "2026-10-09.shared-master-data"
 
 
 def install() -> None:
