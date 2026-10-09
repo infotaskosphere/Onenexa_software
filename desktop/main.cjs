@@ -222,7 +222,15 @@ app.on("window-all-closed", () => {
 
 app.on("before-quit", () => {
   if (backendProcess && !backendProcess.killed) {
-    backendProcess.kill();
+    if (process.platform === "win32" && backendProcess.pid) {
+      try {
+        spawn("taskkill", ["/pid", String(backendProcess.pid), "/f", "/t"], { windowsHide: true });
+      } catch (_) {
+        backendProcess.kill();
+      }
+    } else {
+      backendProcess.kill();
+    }
   }
   backendLogStream?.end();
 });

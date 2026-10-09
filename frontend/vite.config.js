@@ -7,8 +7,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   // Electron loads the built app from file:// inside app.asar. Use relative
-  // asset URLs only for the packaged desktop build; keep web deployment URLs rooted.
-  base: process.env.ONENEXA_DESKTOP_BUILD === '1' ? './' : '/',
+  // asset URLs for packaged desktop builds; keep web deployment URLs rooted.
+  base: (process.env.ONENEXA_DESKTOP_BUILD === '1' || process.env.npm_lifecycle_event?.includes('desktop')) ? './' : '/',
   root: path.resolve(__dirname, './'),
   publicDir: path.resolve(__dirname, './public'),
   plugins: [react()],

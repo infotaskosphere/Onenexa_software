@@ -1,5 +1,5 @@
 import React, { Suspense, memo, useEffect } from "react";
-import { BrowserRouter, useLocation } from "react-router-dom";
+import { BrowserRouter, HashRouter, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { Toaster } from "@/components/ui/sonner";
@@ -135,6 +135,11 @@ function WebsiteSurfaceScope() {
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 5 * 60 * 1000, gcTime: 10 * 60 * 1000, retry: 1, refetchOnWindowFocus: false, refetchOnReconnect: false } } });
 
+const isDesktopRuntime =
+  typeof window !== "undefined" &&
+  (window.oneNexaDesktop?.isDesktop === true || window.location?.protocol === "file:");
+
 export default function App() {
-  return <QueryClientProvider client={queryClient}><AuthProvider><BrowserRouter><WebsiteSurfaceScope /><BusinessPageDesignScope /><MinimizedFormsProvider><BulkWASenderProvider><ROCDumpUploadProvider><DocumentUploadProvider><BottomLoadingBar /><RoutePrefetcher /><ReminderPopupManager /><BulkWASenderWidget /><MinimizedFormsDock /><ROCDumpUploadDock /><Suspense fallback={<GifLoader />}><AppRoutes /></Suspense><Toaster position="top-right" richColors /></DocumentUploadProvider></ROCDumpUploadProvider></BulkWASenderProvider></MinimizedFormsProvider></BrowserRouter></AuthProvider></QueryClientProvider>;
+  const Router = isDesktopRuntime ? HashRouter : BrowserRouter;
+  return <QueryClientProvider client={queryClient}><AuthProvider><Router><WebsiteSurfaceScope /><BusinessPageDesignScope /><MinimizedFormsProvider><BulkWASenderProvider><ROCDumpUploadProvider><DocumentUploadProvider><BottomLoadingBar /><RoutePrefetcher /><ReminderPopupManager /><BulkWASenderWidget /><MinimizedFormsDock /><ROCDumpUploadDock /><Suspense fallback={<GifLoader />}><AppRoutes /></Suspense><Toaster position="top-right" richColors /></DocumentUploadProvider></ROCDumpUploadProvider></BulkWASenderProvider></MinimizedFormsProvider></Router></AuthProvider></QueryClientProvider>;
 }

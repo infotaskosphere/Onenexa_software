@@ -59,8 +59,12 @@ try:
 except ImportError:
     try:
         import subprocess, sys
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "fpdf2", "--break-system-packages"])
-        from fpdf import FPDF
+        if not getattr(sys, "frozen", False):
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "fpdf2", "--break-system-packages"])
+            from fpdf import FPDF
+        else:
+            class FPDF:
+                pass
     except Exception:
         class FPDF:
             pass
@@ -70,8 +74,11 @@ try:
 except ImportError:
     try:
         import subprocess, sys
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "openpyxl", "--break-system-packages"])
-        import openpyxl
+        if not getattr(sys, "frozen", False):
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "openpyxl", "--break-system-packages"])
+            import openpyxl
+        else:
+            openpyxl = None
     except Exception:
         openpyxl = None
 

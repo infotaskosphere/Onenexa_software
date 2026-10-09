@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from backend.dependencies import get_current_user
 from backend import local_first_store
 from backend import local_first_records
+from backend import local_first_sync
 from backend.local_first_auth import get_local_first_principal, issue_local_session, LocalFirstPrincipal
 
 router = APIRouter(prefix="/desktop/local-first", tags=["OneNexa Desktop Local-First"])
@@ -24,6 +25,16 @@ class LocalRecordRequest(BaseModel):
     record: dict[str, Any]
 
 
+class SyncPushRequest(BaseModel):
+    device_id: str
+    company_id: str
+    changes: list[dict[str, Any]]
+
+
+class SyncTriggerRequest(BaseModel):
+    sync_target_url: str | None = None
+
+
 def _ensure_local_first_enabled() -> None:
     """Keep pilot local-disk APIs disabled on hosted deployments by default."""
     if os.getenv("ONENEXA_LOCAL_FIRST_ENABLED", "").strip() != "1":
@@ -31,21 +42,24 @@ def _ensure_local_first_enabled() -> None:
 
 
 def _ensure_pilot_entity(entity_type: str) -> None:
-    if str(entity_type or "").strip().lower() != "client":
-        raise HTTPException(status_code=400, detail="The current offline pilot supports client records only")
+    norm = str(entity_type or "").strip().lower()
+    if norm not in local_first_records._ALLOWED_ENTITY_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported local entity type. Allowed: {', '.join(sorted(local_first_records._ALLOWED_ENTITY_TYPES))}"
+        )
 
 
 def _require_local_permission(principal: LocalFirstPrincipal, action: str) -> None:
     role = str(principal.role or "").lower()
     permissions = principal.permissions or {}
     if action == "view":
-        # Non-privileged users may view only their own pilot client records.
         return
-    if action == "edit" and (role in {"admin", "manager"} or permissions.get("can_edit_clients") is True):
+    if action == "edit" and (role in {"admin", "manager"} or permissions.get("can_edit_clients") is True or permissions.get("can_edit_tasks") is True):
         return
     if action == "delete" and (role == "admin" or permissions.get("can_delete_data") is True):
         return
-    raise HTTPException(status_code=403, detail=f"Permission denied for local client {action}")
+    raise HTTPException(status_code=403, detail=f"Permission denied for local {action}")
 
 
 @router.post("/session")
@@ -149,3 +163,63 @@ async def delete_local_first_record(
     if not deleted:
         raise HTTPException(status_code=404, detail="Local record not found")
     return {"deleted": True, "id": entity_id, "entity_type": entity_type}
+
+
+@router.post("/sync/push")
+async def sync_push(
+    body: SyncPushRequest,
+    current_user=Depends(get_local_first_principal),
+):
+    """Admin PC or Cloud endpoint: receive batch of changes from a workstation."""
+    _ensure_local_first_enabled()
+    company_id = _authenticated_company_id(current_user)
+    if body.company_id != company_id:
+        raise HTTPException(status_code=403, detail="Cross-tenant synchronization rejected")
+    ack_ids = local_first_sync.process_inbound_push(
+        company_id=company_id,
+        device_id=body.device_id,
+        changes=body.changes,
+    )
+    return {"status": "ok", "acknowledged_ids": ack_ids}
+
+
+@router.get("/sync/pull")
+async def sync_pull(
+    since_cursor: int = Query(default=0),
+    limit: int = Query(default=100, ge=1, le=500),
+    exclude_device_id: str | None = Query(default=None),
+    current_user=Depends(get_local_first_principal),
+):
+    """Workstation endpoint: pull updates committed by other PCs since the last cursor."""
+    _ensure_local_first_enabled()
+    company_id = _authenticated_company_id(current_user)
+    return local_first_sync.process_inbound_pull(
+        company_id=company_id,
+        since_cursor=since_cursor,
+        limit=limit,
+        exclude_device_id=exclude_device_id,
+    )
+
+
+@router.post("/sync/trigger")
+async def sync_trigger(
+    body: SyncTriggerRequest,
+    current_user=Depends(get_local_first_principal),
+):
+    """Trigger a local synchronization cycle against the designated Hub or Cloud target."""
+    _ensure_local_first_enabled()
+    company_id = _authenticated_company_id(current_user)
+    target_url = body.sync_target_url or os.getenv("ONENEXA_SYNC_TARGET", "").strip() or os.getenv("ONENEXA_CLOUD_TARGET", "").strip()
+    if not target_url:
+        return {
+            "status": "skipped",
+            "message": "No sync target configured. Set ONENEXA_SYNC_TARGET to your Admin PC or Cloud server IP.",
+        }
+    token = getattr(current_user, "offline_token", None) or "local-token"
+    result = await local_first_sync.run_client_sync_cycle(
+        sync_target_url=target_url,
+        company_id=company_id,
+        token=token,
+    )
+    return result
+

@@ -36,6 +36,32 @@ export default function LocalFirstClients() {
   const [editingId, setEditingId] = useState("");
   const [form, setForm] = useState(EMPTY_FORM);
   const [syncStatus, setSyncStatus] = useState(null);
+  const [syncing, setSyncing] = useState(false);
+
+  const handleTriggerSync = async () => {
+    if (!localToken) return;
+    setSyncing(true);
+    try {
+      const res = await api.post(
+        "/desktop/local-first/sync/trigger",
+        {},
+        {
+          headers: { Authorization: "Bearer " + localToken },
+          timeout: 15000,
+        }
+      );
+      if (res.data?.status === "success") {
+        toast.success(`Sync Complete: Pushed ${res.data.pushed}, Pulled ${res.data.pulled}`);
+        await loadLocalClients();
+      } else {
+        toast.info(res.data?.message || "Sync finished");
+      }
+    } catch (err) {
+      toast.error("Sync failed: " + (err.response?.data?.detail || err.message));
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const headers = useMemo(
     () => localToken ? { Authorization: "Bearer " + localToken } : {},
@@ -222,10 +248,21 @@ export default function LocalFirstClients() {
             <ArrowLeft className="h-4 w-4" /> Online Clients
           </button>
         </div>
-        <div className="mt-4 flex flex-wrap gap-2 text-xs">
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1.5"><WifiOff className="h-3.5 w-3.5" /> Local-first pilot</span>
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1.5"><Cloud className="h-3.5 w-3.5" /> Cloud sync not connected</span>
-          {syncStatus && <span className="rounded-full bg-white/15 px-3 py-1.5">{syncStatus.pending || 0} queued change(s)</span>}
+        <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1.5"><WifiOff className="h-3.5 w-3.5" /> Local-first SQLite</span>
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1.5">
+            <Cloud className="h-3.5 w-3.5" /> {syncStatus?.sync_enabled ? `Sync Enabled (${syncStatus.sync_target})` : "Standalone Node"}
+          </span>
+          {syncStatus && <span className="rounded-full bg-white/15 px-3 py-1.5">{syncStatus.pending || 0} queued outbox change(s)</span>}
+          <button
+            type="button"
+            disabled={syncing}
+            onClick={handleTriggerSync}
+            className="inline-flex items-center gap-1.5 rounded-full bg-white text-blue-900 px-3 py-1.5 font-bold hover:bg-blue-50 transition-colors shadow-sm disabled:opacity-50"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${syncing ? "animate-spin" : ""}`} />
+            {syncing ? "Syncing with Hub…" : "Sync with Admin / Cloud"}
+          </button>
         </div>
       </div>
 

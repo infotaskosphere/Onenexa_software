@@ -304,7 +304,7 @@ def get_sync_cursor(scope: str) -> str | None:
 
 
 def get_sync_status(company_id: str | None = None) -> dict[str, Any]:
-    """Return queue counts for a future desktop sync-status indicator."""
+    """Return queue counts for the desktop sync-status indicator."""
     initialize_local_store()
     query = "SELECT COUNT(*) AS pending, MIN(created_at_utc) AS oldest_pending, "
     query += "SUM(CASE WHEN attempts > 0 THEN 1 ELSE 0 END) AS retrying "
@@ -318,12 +318,14 @@ def get_sync_status(company_id: str | None = None) -> dict[str, Any]:
         parameters.append(normalized_company)
     with _connection() as connection:
         row = connection.execute(query, parameters).fetchone()
+    sync_target = os.getenv("ONENEXA_SYNC_TARGET", "").strip() or os.getenv("ONENEXA_CLOUD_TARGET", "").strip()
     return {
         "device_id": get_device_id(),
         "pending": int(row["pending"] or 0),
         "retrying": int(row["retrying"] or 0),
         "oldest_pending_at_utc": row["oldest_pending"],
         "local_store_path": str(get_database_path()),
-        "sync_enabled": False,
-        "note": "Sync transport is not connected yet; pending changes remain on this device.",
+        "sync_enabled": bool(sync_target or os.getenv("ONENEXA_LOCAL_FIRST_ENABLED") == "1"),
+        "sync_target": sync_target or "local_hub",
+        "note": "Sync transport is active." if (sync_target or os.getenv("ONENEXA_LOCAL_FIRST_ENABLED") == "1") else "Standalone local node.",
     }

@@ -15,7 +15,7 @@ from typing import Any
 
 from backend import local_first_store as store
 
-_ALLOWED_ENTITY_TYPES = {"client", "task"}
+_ALLOWED_ENTITY_TYPES = {"client", "task", "invoice", "reminder", "accounting_entry", "todo"}
 
 
 def _now() -> str:
@@ -28,7 +28,7 @@ def _validate_scope(company_id: str, entity_type: str) -> tuple[str, str]:
     if not normalized_company:
         raise ValueError("company_id is required")
     if normalized_type not in _ALLOWED_ENTITY_TYPES:
-        raise ValueError("entity_type must be one of: client, task")
+        raise ValueError(f"entity_type must be one of: {', '.join(sorted(_ALLOWED_ENTITY_TYPES))}")
     return normalized_company, normalized_type
 
 

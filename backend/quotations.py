@@ -35,9 +35,17 @@ except ImportError:
     import subprocess
     import sys
 
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "fpdf2"])
-    from fpdf import FPDF
-    from fpdf.enums import Align, XPos, YPos
+    if not getattr(sys, "frozen", False):
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "fpdf2"])
+            from fpdf import FPDF
+            from fpdf.enums import Align, XPos, YPos
+        except Exception:
+            class FPDF: pass
+            Align = XPos = YPos = None
+    else:
+        class FPDF: pass
+        Align = XPos = YPos = None
 
 logger = logging.getLogger(__name__)
 
